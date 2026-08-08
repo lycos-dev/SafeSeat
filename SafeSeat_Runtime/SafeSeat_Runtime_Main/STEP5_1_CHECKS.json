@@ -1,0 +1,14 @@
+{
+  "SafeSeat_Runtime_Main.ino_unchanged": true,
+  "Config.h_unchanged": true,
+  "C1001.cpp_unchanged": true,
+  "C1001.h_unchanged": true,
+  "MLX.cpp_unchanged": true,
+  "MLX.h_unchanged": true,
+  "FSR.cpp_unchanged": true,
+  "FSR.h_unchanged": true,
+  "MPU.cpp_unchanged": true,
+  "MPU.h_unchanged": true,
+  "Fusion.cpp_unchanged": true,
+  "Fusion_h_nonempty": true
+}
