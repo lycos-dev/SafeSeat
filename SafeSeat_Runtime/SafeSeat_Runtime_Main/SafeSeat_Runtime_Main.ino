@@ -7,6 +7,7 @@
 #include "MLX.h"
 #include "FSR.h"
 #include "MPU.h"
+#include "Fusion.h"
 
 
 // ============================================================
@@ -17,6 +18,7 @@ C1001Sensor c1001;
 MLXSensor mlx;
 FSRSensor fsr;
 MPUSensor mpu;
+FusionEngine fusion;
 
 
 // ============================================================
@@ -96,6 +98,40 @@ const char* readyText(
     return ready
         ? "READY"
         : "FAILED / UNAVAILABLE";
+}
+
+
+FusionSensorHealth mapSensorHealth(
+    bool available,
+    bool connected,
+    bool valid,
+    bool warmingUp
+)
+{
+    if (
+        !available
+        ||
+        !connected
+    )
+    {
+        return FusionSensorHealth::UNAVAILABLE;
+    }
+
+    if (
+        warmingUp
+    )
+    {
+        return FusionSensorHealth::WARMING_UP;
+    }
+
+    if (
+        !valid
+    )
+    {
+        return FusionSensorHealth::DEGRADED;
+    }
+
+    return FusionSensorHealth::VALID;
 }
 
 
@@ -410,6 +446,8 @@ void setup()
 
 
     printInitializationSummary();
+
+    fusion.begin();
 }
 
 
@@ -468,6 +506,78 @@ void loop()
     }
 
 
+    const C1001Reading &c =
+        c1001.getReading();
+
+    const MLXReading &t =
+        mlx.getReading();
+
+    const FSRReading &f =
+        fsr.getReading();
+
+    const MPUReading &m =
+        mpu.getReading();
+
+
+    FusionInput fusionInput;
+    fusionInput.timestampMillis =
+        millis();
+
+    fusionInput.c1001.health =
+        mapSensorHealth(
+            c1001Initialized,
+            c.connected,
+            c.trustedVitalsAvailable,
+            c.status
+            ==
+            C1001Status::WARMING_UP
+        );
+
+    fusionInput.c1001.reading =
+        c;
+
+    fusionInput.mlx.health =
+        mapSensorHealth(
+            mlxInitialized,
+            t.connected,
+            t.valid,
+            t.status
+            ==
+            MLXStatus::INITIALIZING
+        );
+
+    fusionInput.mlx.reading =
+        t;
+
+    fusionInput.fsr.health =
+        mapSensorHealth(
+            fsrInitialized,
+            f.connected,
+            f.valid,
+            f.status
+            ==
+            FSRStatus::CALIBRATING
+        );
+
+    fusionInput.fsr.reading =
+        f;
+
+    fusionInput.mpu.health =
+        mapSensorHealth(
+            mpuInitialized,
+            m.connected,
+            m.valid,
+            false
+        );
+
+    fusionInput.mpu.reading =
+        m;
+
+    fusion.update(
+        fusionInput
+    );
+
+
     // ========================================================
     // SERIAL DASHBOARD
     // ========================================================
@@ -490,18 +600,8 @@ void loop()
         now;
 
 
-    const C1001Reading &c =
-        c1001.getReading();
-
-    const MLXReading &t =
-        mlx.getReading();
-
-    const FSRReading &f =
-        fsr.getReading();
-
-    const MPUReading &m =
-        mpu.getReading();
-
+    const FusionReading &fusionReading =
+        fusion.getReading();
 
     Serial.println();
     Serial.println(
@@ -1047,6 +1147,97 @@ void loop()
 
 
     // ========================================================
+    // FUSION
+    // ========================================================
+
+    Serial.println();
+    Serial.println(
+        "------------- FUSION ------------------"
+    );
+
+    Serial.print(
+        "Valid          : "
+    );
+    Serial.println(
+        fusionReading.valid
+            ? "YES"
+            : "NO"
+    );
+
+    Serial.print(
+        "Occupancy      : "
+    );
+    Serial.println(
+        fusion.getOccupancyText(
+            fusionReading.occupancy
+        )
+    );
+
+    Serial.print(
+        "Motion         : "
+    );
+    Serial.println(
+        fusion.getMotionText(
+            fusionReading.motion
+        )
+    );
+
+    Serial.print(
+        "Vitals         : "
+    );
+    Serial.println(
+        fusion.getVitalsText(
+            fusionReading.vitals
+        )
+    );
+
+    Serial.print(
+        "Pressure       : "
+    );
+    Serial.println(
+        fusion.getPressureText(
+            fusionReading.pressure
+        )
+    );
+
+    Serial.print(
+        "Temperature    : "
+    );
+    Serial.println(
+        fusion.getTemperatureText(
+            fusionReading.temperature
+        )
+    );
+
+    Serial.print(
+        "Respiration    : "
+    );
+    Serial.println(
+        fusion.getRespirationText(
+            fusionReading.respiration
+        )
+    );
+
+    Serial.print(
+        "Level          : "
+    );
+    Serial.println(
+        fusion.getLevelText(
+            fusionReading.level
+        )
+    );
+
+    Serial.print(
+        "Confidence     : "
+    );
+    Serial.print(
+        fusionReading.confidence,
+        2
+    );
+    Serial.println();
+
+
+    // ========================================================
     // UPCOMING SYSTEM LAYERS
     // ========================================================
 
@@ -1064,7 +1255,7 @@ void loop()
     );
 
     Serial.println(
-        "Fusion         : files intentionally untouched"
+        "Fusion         : active decision engine"
     );
 
     Serial.println(

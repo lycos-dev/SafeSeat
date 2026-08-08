@@ -511,5 +511,23 @@ public:
 
 
 private:
+    static constexpr unsigned long
+        WARNING_PERSIST_MS = 4000UL;
+
+    static constexpr unsigned long
+        EMERGENCY_PERSIST_MS = 2500UL;
+
+    static constexpr unsigned long
+        CLEAR_STABLE_MS = 3000UL;
+
     FusionReading reading;
+
+    unsigned long warningCandidateStartMillis = 0UL;
+
+    unsigned long emergencyCandidateStartMillis = 0UL;
+
+    unsigned long clearStateStartMillis = 0UL;
+
+    FusionLevel previousLevel =
+        FusionLevel::WATCH;
 };
