@@ -98,6 +98,23 @@ float computeIQR(
     const float *sorted,
     uint16_t n
 );
+
+float computeMeanAbsDiff(
+    const float *x,
+    uint16_t n
+);
+
+float computeStdDiff(
+    const float *x,
+    uint16_t n
+);
+
+float computeZeroCrossingRate(
+    const float *x,
+    uint16_t n,
+    float mean
+);
+
 };
 
 #endif

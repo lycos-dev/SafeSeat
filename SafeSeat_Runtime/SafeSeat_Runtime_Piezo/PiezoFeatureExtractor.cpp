@@ -235,6 +235,26 @@ features.energy =
                   PIEZO_WINDOW_SAMPLES);
 }
 
+features.meanAbsDiff =
+    computeMeanAbsDiff(
+        signal,
+        PIEZO_WINDOW_SAMPLES
+    );
+    
+features.stdDiff =
+    computeStdDiff(
+        signal,
+        PIEZO_WINDOW_SAMPLES
+    );
+
+
+features.zeroCrossingRate =
+    computeZeroCrossingRate(
+        signal,
+        PIEZO_WINDOW_SAMPLES,
+        features.mean
+    );
+
 float PiezoFeatureExtractor::computeMean(
     const float *x,
     uint16_t n)
@@ -487,4 +507,279 @@ float PiezoFeatureExtractor::computeIQR(
         -
         q25
     );
+
+// ============================================================
+// MEAN ABSOLUTE FIRST DIFFERENCE
+//
+// Python:
+//
+// diff = np.diff(signal)
+// np.mean(np.abs(diff))
+// ============================================================
+
+float PiezoFeatureExtractor::computeMeanAbsDiff(
+    const float *x,
+    uint16_t n)
+{
+    if (
+        x == nullptr
+        ||
+        n <= 1
+    )
+    {
+        return 0.0f;
+    }
+
+
+    float sum =
+        0.0f;
+
+
+    uint16_t diffCount =
+        n - 1;
+
+
+    for (
+        uint16_t i = 1;
+        i < n;
+        i++
+    )
+    {
+        float difference =
+            x[i]
+            -
+            x[i - 1];
+
+
+        sum +=
+            fabsf(
+                difference
+            );
+    }
+
+
+    return (
+        sum
+        /
+        static_cast<float>(
+            diffCount
+        )
+    );
+}
+
+
+
+// ============================================================
+// STANDARD DEVIATION OF FIRST DIFFERENCE
+//
+// Python:
+//
+// diff = np.diff(signal)
+// np.std(diff)
+//
+// NumPy default:
+// ddof = 0
+// ============================================================
+
+float PiezoFeatureExtractor::computeStdDiff(
+    const float *x,
+    uint16_t n)
+{
+    if (
+        x == nullptr
+        ||
+        n <= 1
+    )
+    {
+        return 0.0f;
+    }
+
+
+    uint16_t diffCount =
+        n - 1;
+
+
+    // --------------------------------------------------------
+    // Mean of differences
+    // --------------------------------------------------------
+
+    float diffMean =
+        0.0f;
+
+
+    for (
+        uint16_t i = 1;
+        i < n;
+        i++
+    )
+    {
+        diffMean +=
+            (
+                x[i]
+                -
+                x[i - 1]
+            );
+    }
+
+
+    diffMean /=
+        static_cast<float>(
+            diffCount
+        );
+
+
+    // --------------------------------------------------------
+    // Population variance
+    // --------------------------------------------------------
+
+    float variance =
+        0.0f;
+
+
+    for (
+        uint16_t i = 1;
+        i < n;
+        i++
+    )
+    {
+        float difference =
+            x[i]
+            -
+            x[i - 1];
+
+
+        float deviation =
+            difference
+            -
+            diffMean;
+
+
+        variance +=
+            deviation
+            *
+            deviation;
+    }
+
+
+    variance /=
+        static_cast<float>(
+            diffCount
+        );
+
+
+    return sqrtf(
+        variance
+    );
+}
+
+
+
+// ============================================================
+// ZERO CROSSING RATE
+//
+// Python:
+//
+// centered = signal - np.mean(signal)
+// signs = np.sign(centered)
+//
+// crossings = np.sum(
+//     signs[:-1] * signs[1:] < 0
+// )
+//
+// ZCR = crossings / (N - 1)
+//
+// IMPORTANT:
+// Exact zeros do NOT count as crossings because:
+//     sign(0) = 0
+//
+// and:
+//
+//     0 * +/-1
+//
+// is never < 0.
+// ============================================================
+
+float PiezoFeatureExtractor::computeZeroCrossingRate(
+    const float *x,
+    uint16_t n,
+    float mean)
+{
+    if (
+        x == nullptr
+        ||
+        n <= 1
+    )
+    {
+        return 0.0f;
+    }
+
+
+    uint16_t crossings =
+        0;
+
+
+    for (
+        uint16_t i = 0;
+        i < n - 1;
+        i++
+    )
+    {
+        float current =
+            x[i]
+            -
+            mean;
+
+
+        float next =
+            x[i + 1]
+            -
+            mean;
+
+
+        bool currentPositive =
+            current > 0.0f;
+
+
+        bool currentNegative =
+            current < 0.0f;
+
+
+        bool nextPositive =
+            next > 0.0f;
+
+
+        bool nextNegative =
+            next < 0.0f;
+
+
+        if (
+            (
+                currentPositive
+                &&
+                nextNegative
+            )
+            ||
+            (
+                currentNegative
+                &&
+                nextPositive
+            )
+        )
+        {
+            crossings++;
+        }
+    }
+
+
+    return (
+        static_cast<float>(
+            crossings
+        )
+        /
+        static_cast<float>(
+            n - 1
+        )
+    );
+}
+
 }
