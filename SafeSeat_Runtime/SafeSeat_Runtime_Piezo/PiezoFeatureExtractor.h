@@ -83,6 +83,21 @@ float computeRMS(const float *x,
 float computeEnergy(const float *x,
                     uint16_t n);
 
+                    float computePercentile(
+    const float *sorted,
+    uint16_t n,
+    float percentile
+);
+
+float computeMedian(
+    const float *sorted,
+    uint16_t n
+);
+
+float computeIQR(
+    const float *sorted,
+    uint16_t n
+);
 };
 
 #endif
