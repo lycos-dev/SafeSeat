@@ -1,0 +1,63 @@
+{
+    "sensor": "PIEZO",
+    "source_dataset": "WESAD Respiban",
+    "training_condition": {
+        "wesad_label": 1,
+        "name": "baseline"
+    },
+    "training_subjects": [
+        "S2",
+        "S3",
+        "S4",
+        "S5",
+        "S6",
+        "S7",
+        "S9",
+        "S10",
+        "S11",
+        "S13",
+        "S15",
+        "S16"
+    ],
+    "held_out_subjects": [
+        "S8",
+        "S14",
+        "S17"
+    ],
+    "baseline_training_windows": 2744,
+    "feature_count": 16,
+    "feature_columns": [
+        "mean",
+        "std",
+        "min",
+        "max",
+        "range",
+        "median",
+        "iqr",
+        "rms",
+        "energy",
+        "mean_abs_diff",
+        "std_diff",
+        "zero_crossing_rate",
+        "dominant_frequency_hz",
+        "estimated_respiration_bpm",
+        "spectral_entropy",
+        "autocorrelation_peak"
+    ],
+    "isolation_forest": {
+        "n_estimators": 300,
+        "contamination": 0.05,
+        "max_samples": "auto",
+        "random_state": 42,
+        "n_jobs": -1
+    },
+    "one_class_svm": {
+        "kernel": "rbf",
+        "nu": 0.05,
+        "gamma": "scale"
+    },
+    "prediction_encoding": {
+        "0": "normal",
+        "1": "anomaly"
+    }
+}
