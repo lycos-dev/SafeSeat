@@ -1,0 +1,11 @@
+{
+  "fusion_unchanged": true,
+  "c1001_unchanged": true,
+  "mlx_unchanged": true,
+  "c1001_task_present": true,
+  "main_no_direct_c1001_update": true,
+  "fsr_860sps_both": true,
+  "ratio_guard": true,
+  "fsr_cooperative": true,
+  "mpu_reset": true
+}

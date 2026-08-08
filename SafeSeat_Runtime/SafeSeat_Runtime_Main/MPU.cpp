@@ -681,6 +681,31 @@ void MPUSensor::update()
 
 
 // ============================================================
+// RESET SAMPLING DIAGNOSTICS
+//
+// MPU begin() happens before the intentionally blocking FSR
+// empty-seat calibration. Without a reset, the reported MPU
+// sample rate incorrectly includes several seconds during
+// which runtime acquisition has not even started yet.
+// ============================================================
+
+void MPUSensor::resetSamplingDiagnostics()
+{
+    reading.sampleCount =
+        0;
+
+    reading.actualSamplingRateHz =
+        0.0f;
+
+    acquisitionStartMicros =
+        micros();
+
+    lastSampleMicros =
+        acquisitionStartMicros;
+}
+
+
+// ============================================================
 // GETTERS
 // ============================================================
 

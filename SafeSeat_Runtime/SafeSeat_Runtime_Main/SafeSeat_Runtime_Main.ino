@@ -34,6 +34,51 @@ bool mpuInitialized = false;
 
 
 // ============================================================
+// C1001 BACKGROUND TASK
+//
+// DFRobot C1001 library queries are comparatively slow and
+// were starving the I2C acquisition loop.
+//
+// ESP32 Arduino loop() normally runs on core 1. C1001 UART work
+// is moved to core 0 so FSR + MPU timing can continue.
+//
+// C1001's own update() still enforces its existing 1 Hz sample
+// interval and all existing warm-up/filter logic is unchanged.
+// ============================================================
+
+TaskHandle_t c1001TaskHandle =
+    nullptr;
+
+
+void c1001Task(
+    void *parameter
+)
+{
+    (void) parameter;
+
+
+    while (
+        true
+    )
+    {
+        if (
+            c1001Initialized
+        )
+        {
+            c1001.update();
+        }
+
+
+        vTaskDelay(
+            pdMS_TO_TICKS(
+                10
+            )
+        );
+    }
+}
+
+
+// ============================================================
 // SERIAL REPORTING
 // ============================================================
 
@@ -309,6 +354,61 @@ void setup()
     );
 
 
+    // ========================================================
+    // RUNTIME TIMING STARTS NOW
+    //
+    // FSR calibration intentionally blocks setup for several
+    // seconds. Reset MPU rate diagnostics so those startup
+    // seconds do not pollute its reported runtime Fs.
+    // ========================================================
+
+    if (
+        mpuInitialized
+    )
+    {
+        mpu.resetSamplingDiagnostics();
+    }
+
+
+    // ========================================================
+    // START C1001 UART TASK ON CORE 0
+    // ========================================================
+
+    if (
+        c1001Initialized
+    )
+    {
+        BaseType_t taskResult =
+            xTaskCreatePinnedToCore(
+                c1001Task,
+                "SafeSeat_C1001",
+                4096,
+                nullptr,
+                1,
+                &c1001TaskHandle,
+                0
+            );
+
+
+        if (
+            taskResult
+            ==
+            pdPASS
+        )
+        {
+            Serial.println(
+                "[MAIN] C1001 background task started on core 0."
+            );
+        }
+        else
+        {
+            Serial.println(
+                "[MAIN] WARNING: C1001 background task creation failed."
+            );
+        }
+    }
+
+
     printInitializationSummary();
 }
 
@@ -334,12 +434,8 @@ void loop()
         mpu.update();
     }
 
-    if (
-        c1001Initialized
-    )
-    {
-        c1001.update();
-    }
+    // C1001 updates on core 0 in c1001Task().
+    // Do not run its blocking UART queries on the I2C loop.
 
     if (
         mlxInitialized

@@ -223,6 +223,23 @@ private:
     unsigned long previousCompletedSample = 0;
 
 
+    // ========================================================
+    // NON-BLOCKING FRAME SCHEDULER
+    //
+    // A full FSR frame contains 9 channels. Reading all nine
+    // channels in one update() call starved the high-rate MPU.
+    //
+    // Step 4.5 reads ONE FSR channel per update() invocation,
+    // allowing Main to run MPU updates between channels.
+    // ========================================================
+
+    bool frameInProgress = false;
+
+    uint8_t frameChannelIndex = 0;
+
+    int16_t pendingRaw[NUM_FSR] = {0};
+
+
     static const char*
         SENSOR_LABELS[NUM_FSR];
 
@@ -239,6 +256,12 @@ private:
     void readAllSensors(
         int16_t destination[]
     );
+
+    int16_t readOneSensor(
+        uint8_t index
+    );
+
+    void completeScheduledFrame();
 
     float applyAdaptiveFilter(
         int16_t raw,

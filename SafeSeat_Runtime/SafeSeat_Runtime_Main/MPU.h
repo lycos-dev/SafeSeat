@@ -74,6 +74,10 @@ public:
 
     void update();
 
+    // Reset rate diagnostics after other blocking startup
+    // calibration work has completed.
+    void resetSamplingDiagnostics();
+
     const MPUReading&
     getReading() const;
 

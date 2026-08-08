@@ -107,6 +107,15 @@ bool FSRSensor::begin()
     );
 
 
+    // 860 SPS is required so a 5-sample median across all
+    // channels can support the ~12.5 Hz full-frame target.
+    // The earlier calibration failure was caused by whole-frame
+    // negative-value rejection, not by this data rate.
+    ads1.setDataRate(
+        RATE_ADS1115_860SPS
+    );
+
+
     Serial.println(
         "ADS1115 #1 Ready - Backrest FSR1 to FSR4"
     );
@@ -146,6 +155,11 @@ bool FSRSensor::begin()
 
     ads2.setGain(
         GAIN_ONE
+    );
+
+
+    ads2.setDataRate(
+        RATE_ADS1115_860SPS
     );
 
 
@@ -442,6 +456,170 @@ void FSRSensor::readAllSensors(
         readMedianNative(
             CUSHION_FSR3_PIN
         );
+}
+
+
+// ============================================================
+// READ ONE SENSOR
+//
+// Used by the Step 4.5 cooperative scheduler so the MPU can run
+// between FSR channel acquisitions.
+// ============================================================
+
+int16_t FSRSensor::readOneSensor(
+    uint8_t index
+)
+{
+    switch (
+        index
+    )
+    {
+        case BACKREST_FSR1:
+            return readMedianADS(
+                ads1,
+                0
+            );
+
+        case BACKREST_FSR2:
+            return readMedianADS(
+                ads1,
+                1
+            );
+
+        case BACKREST_FSR3:
+            return readMedianADS(
+                ads1,
+                2
+            );
+
+        case BACKREST_FSR4:
+            return readMedianADS(
+                ads1,
+                3
+            );
+
+        case BACKREST_FSR5:
+            return readMedianADS(
+                ads2,
+                0
+            );
+
+        case BACKREST_FSR6:
+            return readMedianADS(
+                ads2,
+                1
+            );
+
+        case CUSHION_FSR1:
+            return readMedianADS(
+                ads2,
+                2
+            );
+
+        case CUSHION_FSR2:
+            return readMedianADS(
+                ads2,
+                3
+            );
+
+        case CUSHION_FSR3:
+            return readMedianNative(
+                CUSHION_FSR3_PIN
+            );
+
+        default:
+            return 0;
+    }
+}
+
+
+// ============================================================
+// COMPLETE SCHEDULED FRAME
+// ============================================================
+
+void FSRSensor::completeScheduledFrame()
+{
+    for (
+        int i = 0;
+        i < NUM_FSR;
+        i++
+    )
+    {
+        reading.raw[i] =
+            pendingRaw[i];
+
+
+        reading.filtered[i] =
+            applyAdaptiveFilter(
+                pendingRaw[i],
+                reading.filtered[i]
+            );
+
+
+        reading.pressure[i] =
+            calculatePressureDelta(
+                reading.filtered[i],
+                reading.baseline[i]
+            );
+    }
+
+
+    calculatePressureFeatures();
+
+
+    updateEmptySeatBaseline();
+
+
+    // Recalculate after possible baseline movement.
+    calculatePressureFeatures();
+
+
+    unsigned long completedNow =
+        millis();
+
+
+    if (
+        previousCompletedSample
+        >
+        0
+    )
+    {
+        unsigned long delta =
+            completedNow
+            -
+            previousCompletedSample;
+
+
+        if (
+            delta
+            >
+            0
+        )
+        {
+            reading.actualSamplingRateHz =
+                1000.0f
+                /
+                static_cast<float>(
+                    delta
+                );
+        }
+    }
+
+
+    previousCompletedSample =
+        completedNow;
+
+
+    reading.lastSampleMillis =
+        completedNow;
+
+
+    reading.valid =
+        true;
+
+
+    reading.status =
+        FSRStatus::READY;
 }
 
 
@@ -908,13 +1086,16 @@ void FSRSensor::calculatePressureFeatures()
         );
 
 
+    // Use the same finite guard as the proven combined sketch.
+    // This prevents gigantic / overflow values when the
+    // cushion has effectively zero pressure.
     reading.backrestToCushionRatio =
         reading.backrestTotal
         /
         (
             reading.cushionTotal
             +
-            EPSILON
+            1.0f
         );
 
 
@@ -1174,10 +1355,9 @@ void FSRSensor::update(
 )
 {
     /*
-     * Kept only for interface compatibility in Step 3.
-     *
-     * The restored FSR acquisition does not use C1001 to alter
-     * the pressure measurement itself.
+     * Kept only for interface compatibility in Step 4.5.
+     * FSR pressure acquisition itself remains independent of
+     * C1001 labels.
      */
     (void) occupantPresent;
 
@@ -1196,113 +1376,82 @@ void FSRSensor::update(
         millis();
 
 
+    // --------------------------------------------------------
+    // START A NEW 9-CHANNEL FRAME
+    //
+    // Full frames target ~12.5 Hz (80 ms period).
+    // --------------------------------------------------------
+
     if (
-        now
-        -
-        reading.lastSampleMillis
+        !frameInProgress
+    )
+    {
+        if (
+            now
+            -
+            reading.lastSampleMillis
+            <
+            TARGET_SAMPLE_INTERVAL_MS
+        )
+        {
+            return;
+        }
+
+
+        frameInProgress =
+            true;
+
+
+        frameChannelIndex =
+            0;
+
+
+        reading.status =
+            FSRStatus::READING;
+    }
+
+
+    // --------------------------------------------------------
+    // READ ONLY ONE CHANNEL THIS CALL
+    //
+    // Main immediately returns to MPU afterward, preventing
+    // one complete FSR frame from monopolizing the loop.
+    // --------------------------------------------------------
+
+    pendingRaw[
+        frameChannelIndex
+    ] =
+        readOneSensor(
+            frameChannelIndex
+        );
+
+
+    frameChannelIndex++;
+
+
+    if (
+        frameChannelIndex
         <
-        TARGET_SAMPLE_INTERVAL_MS
+        NUM_FSR
     )
     {
         return;
     }
 
 
-    reading.status =
-        FSRStatus::READING;
+    // --------------------------------------------------------
+    // FULL FRAME READY
+    // --------------------------------------------------------
+
+    frameInProgress =
+        false;
 
 
-    int16_t values[
-        NUM_FSR
-    ];
+    frameChannelIndex =
+        0;
 
 
-    readAllSensors(
-        values
-    );
-
-
-    for (
-        int i = 0;
-        i < NUM_FSR;
-        i++
-    )
-    {
-        reading.raw[i] =
-            values[i];
-
-
-        reading.filtered[i] =
-            applyAdaptiveFilter(
-                values[i],
-                reading.filtered[i]
-            );
-
-
-        reading.pressure[i] =
-            calculatePressureDelta(
-                reading.filtered[i],
-                reading.baseline[i]
-            );
-    }
-
-
-    calculatePressureFeatures();
-
-
-    updateEmptySeatBaseline();
-
-
-    // Recalculate after baseline drift correction.
-    calculatePressureFeatures();
-
-
-    unsigned long completedNow =
-        millis();
-
-
-    if (
-        previousCompletedSample
-        >
-        0
-    )
-    {
-        unsigned long delta =
-            completedNow
-            -
-            previousCompletedSample;
-
-
-        if (
-            delta
-            >
-            0
-        )
-        {
-            reading.actualSamplingRateHz =
-                1000.0f
-                /
-                static_cast<float>(
-                    delta
-                );
-        }
-    }
-
-
-    previousCompletedSample =
-        completedNow;
-
-
-    reading.lastSampleMillis =
-        completedNow;
-
-
-    reading.valid =
-        true;
-
-
-    reading.status =
-        FSRStatus::READY;
+    completeScheduledFrame();
 }
 
 
