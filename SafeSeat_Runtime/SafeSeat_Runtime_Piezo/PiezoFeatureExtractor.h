@@ -65,6 +65,24 @@ private:
 
     void copyOrdered(float *destination);
 
+    float computeMean(const float *x, uint16_t n);
+
+float computeStd(const float *x,
+                 uint16_t n,
+                 float mean);
+
+float computeMin(const float *x,
+                 uint16_t n);
+
+float computeMax(const float *x,
+                 uint16_t n);
+
+float computeRMS(const float *x,
+                 uint16_t n);
+
+float computeEnergy(const float *x,
+                    uint16_t n);
+
 };
 
 #endif
