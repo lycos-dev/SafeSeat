@@ -2,6 +2,42 @@
 #include "Config.h"
 
 
+namespace
+{
+    // Marks one completed 1 Hz hardware poll.
+    //
+    // The destructor runs on every return path after the sensor
+    // read has started, so sampleSequence changes only after all
+    // reading/status fields for that poll have been finalized.
+    class C1001SampleCompletionGuard
+    {
+    public:
+        C1001SampleCompletionGuard(
+            C1001Reading &target,
+            unsigned long timestamp
+        )
+            : reading(target),
+              sampleTimestamp(timestamp)
+        {
+        }
+
+        ~C1001SampleCompletionGuard()
+        {
+            reading.sampleTimestampMillis =
+                sampleTimestamp;
+
+            reading.sampleSequence++;
+        }
+
+    private:
+        C1001Reading &reading;
+
+        unsigned long sampleTimestamp;
+    };
+}
+
+
+
 // ============================================================
 // CONSTRUCTOR
 // ============================================================
@@ -761,6 +797,13 @@ void C1001Sensor::update()
 
     int rawHR =
         human.getHeartRate();
+
+
+    C1001SampleCompletionGuard
+        sampleCompletionGuard(
+            reading,
+            now
+        );
 
 
     reading.present =

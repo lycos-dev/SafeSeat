@@ -56,6 +56,19 @@ struct C1001Reading
 
 
     // -------------------------
+    // 1 Hz sample identity
+    //
+    // Incremented only after a complete C1001 sensor poll has
+    // finished. C1001ML uses this to avoid ingesting the same
+    // sample multiple times from the fast main loop.
+    // -------------------------
+
+    uint32_t sampleSequence = 0;
+
+    unsigned long sampleTimestampMillis = 0;
+
+
+    // -------------------------
     // Median values
     // -------------------------
 

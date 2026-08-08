@@ -4,6 +4,7 @@
 #include "Config.h"
 
 #include "C1001.h"
+#include "C1001ML.h"
 #include "MLX.h"
 #include "FSR.h"
 #include "MPU.h"
@@ -15,6 +16,7 @@
 // ============================================================
 
 C1001Sensor c1001;
+C1001ML c1001ML;
 MLXSensor mlx;
 FSRSensor fsr;
 MPUSensor mpu;
@@ -214,7 +216,7 @@ void setup()
     );
 
     Serial.println(
-        " Step 1 - Shared Hardware Foundation"
+        " Step 5.3 - C1001 Embedded ML + Fusion"
     );
 
     Serial.println(
@@ -322,6 +324,18 @@ void setup()
             ? "[MAIN] C1001 ready."
             : "[MAIN] WARNING: C1001 failed."
     );
+
+
+    // ========================================================
+    // C1001 EMBEDDED ML
+    //
+    // Model parameters are compiled into flash. The ML layer
+    // waits for a warmed-up occupant session and then builds the
+    // exact 30-second / 15-second-stride feature windows used
+    // during training.
+    // ========================================================
+
+    c1001ML.begin();
 
 
     // ========================================================
@@ -506,8 +520,19 @@ void loop()
     }
 
 
-    const C1001Reading &c =
+    // Take one C1001 value snapshot for this main-loop pass.
+    // C1001 is updated on core 0; using a local copy avoids
+    // repeatedly dereferencing changing fields while building
+    // the ML/Fusion inputs.
+    const C1001Reading c =
         c1001.getReading();
+
+    c1001ML.update(
+        c
+    );
+
+    const C1001MLReading &cml =
+        c1001ML.getReading();
 
     const MLXReading &t =
         mlx.getReading();
@@ -535,6 +560,37 @@ void loop()
 
     fusionInput.c1001.reading =
         c;
+
+    // C1001 model evidence is produced by the sensor-specific
+    // C1001 ML pipeline. Fusion receives only the results.
+    fusionInput.c1001.model.available =
+        cml.modelAvailable;
+
+    fusionInput.c1001.model.valid =
+        cml.valid;
+
+    fusionInput.c1001.model.isolationForestAnomaly =
+        cml.isolationForestAnomaly;
+
+    fusionInput.c1001.model.oneClassSVMAnomaly =
+        cml.oneClassSVMAnomaly;
+
+    fusionInput.c1001.model.bothModelsAnomaly =
+        cml.bothModelsAnomaly;
+
+    fusionInput.c1001.model.eitherModelAnomaly =
+        cml.eitherModelAnomaly;
+
+    fusionInput.c1001.model.isolationForestScore =
+        cml.isolationForestDecision;
+
+    fusionInput.c1001.model.oneClassSVMScore =
+        cml.oneClassSVMDecision;
+
+    fusionInput.c1001.model.confidence =
+        cml.valid
+            ? 1.0f
+            : 0.0f;
 
     fusionInput.mlx.health =
         mapSensorHealth(
@@ -731,6 +787,124 @@ void loop()
     {
         Serial.println(
             "Filtered vitals: not ready"
+        );
+    }
+
+
+    Serial.println();
+    Serial.println(
+        "C1001 ML:"
+    );
+
+    Serial.print(
+        "  Status       : "
+    );
+
+    Serial.println(
+        c1001ML.getStatusText()
+    );
+
+    Serial.print(
+        "  Window       : "
+    );
+
+    Serial.print(
+        cml.windowSamplesCollected
+    );
+
+    Serial.print(
+        " / "
+    );
+
+    Serial.println(
+        cml.windowSamplesRequired
+    );
+
+    Serial.print(
+        "  Next infer   : "
+    );
+
+    Serial.print(
+        cml.samplesUntilNextInference
+    );
+
+    Serial.println(
+        " sample(s)"
+    );
+
+    Serial.print(
+        "  Windows      : "
+    );
+
+    Serial.println(
+        cml.windowsEvaluated
+    );
+
+    if (
+        cml.valid
+    )
+    {
+        Serial.print(
+            "  IF decision  : "
+        );
+
+        Serial.print(
+            cml.isolationForestDecision,
+            6
+        );
+
+        Serial.println(
+            cml.isolationForestAnomaly
+                ? "  [ANOMALY]"
+                : "  [NORMAL]"
+        );
+
+        Serial.print(
+            "  SVM decision : "
+        );
+
+        Serial.print(
+            cml.oneClassSVMDecision,
+            6
+        );
+
+        Serial.println(
+            cml.oneClassSVMAnomaly
+                ? "  [ANOMALY]"
+                : "  [NORMAL]"
+        );
+
+        Serial.print(
+            "  Fusion vote  : "
+        );
+
+        if (
+            cml.bothModelsAnomaly
+        )
+        {
+            Serial.println(
+                "STRONG ANOMALY"
+            );
+        }
+        else if (
+            cml.eitherModelAnomaly
+        )
+        {
+            Serial.println(
+                "WEAK ANOMALY"
+            );
+        }
+        else
+        {
+            Serial.println(
+                "NORMAL"
+            );
+        }
+    }
+    else
+    {
+        Serial.println(
+            "  Model result : not ready"
         );
     }
 
@@ -1251,11 +1425,11 @@ void loop()
     );
 
     Serial.println(
-        "ML inference   : after acquisition restoration"
+        "ML inference   : C1001 ACTIVE; other sensors pending"
     );
 
     Serial.println(
-        "Fusion         : active decision engine"
+        "Fusion         : active; C1001 model evidence connected"
     );
 
     Serial.println(

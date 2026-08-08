@@ -1,0 +1,42 @@
+{
+  "pipeline": "SafeSeat C1001 embedded model",
+  "source_manifest": {
+    "sampling_rate_hz": 1.0,
+    "window_seconds": 30,
+    "window_overlap": 0.5,
+    "stride_samples": 15,
+    "feature_count": 64
+  },
+  "embedded_model": {
+    "isolation_forest_tree_count": 300,
+    "isolation_forest_total_nodes": 33900,
+    "isolation_forest_max_samples": 256,
+    "one_class_svm_support_vectors": 85,
+    "one_class_svm_gamma": 0.0025194258015908567
+  },
+  "feature_extractor_validation": {
+    "windows_tested": 100,
+    "max_absolute_feature_error": 3.7186461554483685e-06,
+    "mean_absolute_feature_error": 8.007973848446362e-08,
+    "values_over_1e-4_error": 0
+  },
+  "model_inference_validation": {
+    "test_feature_rows": 327,
+    "isolation_forest_max_abs_decision_error": 3.2412837192019595e-08,
+    "isolation_forest_prediction_match_rate": 1.0,
+    "one_class_svm_max_abs_decision_error": 9.254278472425881e-07,
+    "one_class_svm_prediction_match_rate": 1.0
+  },
+  "end_to_end_raw_window_validation": {
+    "full_raw_windows_tested": 316,
+    "isolation_forest_max_abs_decision_error": 3.2412837192019595e-08,
+    "isolation_forest_prediction_match_rate": 1.0,
+    "one_class_svm_max_abs_decision_error": 9.254278472425881e-07,
+    "one_class_svm_prediction_match_rate": 1.0
+  },
+  "notes": [
+    "C++ feature extraction was compared against saved Python-generated C1001 feature rows.",
+    "C++ model decisions were compared against the original sklearn joblib models.",
+    "Runtime starts model collection only after C1001 warm-up and resets the model window on motion artifacts or invalid samples."
+  ]
+}

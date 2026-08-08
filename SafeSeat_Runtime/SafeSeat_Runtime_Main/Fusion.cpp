@@ -350,6 +350,15 @@ void FusionEngine::update(
     // Occupancy: C1001 + FSR
     // --------------------------------------------------------
 
+    // Conservative occupancy fusion.
+    //
+    // A sensor that is unavailable/unusable must never be
+    // treated as implying EMPTY. EMPTY is only declared when
+    // BOTH independent occupancy sources are usable and agree
+    // the seat is empty. If only one usable source reports
+    // "empty" while the other source cannot be evaluated, the
+    // correct decision is UNKNOWN, not EMPTY.
+
     const bool c1001Present =
         c1001Usable
         &&
@@ -366,7 +375,7 @@ void FusionEngine::update(
             300.0f
         );
 
-    const bool seatEmpty =
+    const bool fsrSaysEmpty =
         fsrUsable
         &&
         input.fsr.reading.wholeSeatTotal
@@ -374,48 +383,53 @@ void FusionEngine::update(
         100.0f;
 
     if (
-        c1001Present
-        &&
         fsrOccupied
     )
     {
+        // FSR usable + occupied -> OCCUPIED.
+        // (Covers both "FSR occupied" and "C1001 present AND
+        // FSR occupied", since FSR occupied alone is already
+        // sufficient positive evidence.)
         reading.occupancy =
             FusionOccupancyState::OCCUPIED;
     }
     else if (
-        fsrOccupied
-    )
-    {
-        reading.occupancy =
-            FusionOccupancyState::OCCUPIED;
-    }
-    else if (
+        c1001Usable
+        &&
         c1001Present
         &&
-        seatEmpty
+        fsrUsable
+        &&
+        fsrSaysEmpty
     )
     {
+        // C1001 usable + present AND FSR usable + empty ->
+        // the two usable sources disagree.
         reading.occupancy =
             FusionOccupancyState::CONFLICT;
-    }
-    else if (
-        seatEmpty
-    )
-    {
-        reading.occupancy =
-            FusionOccupancyState::EMPTY;
     }
     else if (
         c1001Usable
         &&
         !c1001Present
+        &&
+        fsrUsable
+        &&
+        fsrSaysEmpty
     )
     {
+        // C1001 usable + not present AND FSR usable + empty ->
+        // both usable sources agree the seat is empty.
         reading.occupancy =
             FusionOccupancyState::EMPTY;
     }
     else
     {
+        // Either only one source is usable (the other source is
+        // unavailable/unusable), or the usable evidence is not
+        // strong enough (e.g. FSR in the ambiguous mid-range).
+        // A lone empty-leaning source with the other source
+        // unavailable/unusable must NOT imply EMPTY.
         reading.occupancy =
             FusionOccupancyState::UNKNOWN;
     }
@@ -703,8 +717,15 @@ void FusionEngine::update(
 
 
     // --------------------------------------------------------
-    // MLX temperature: context only
+    // MLX temperature: raw readings remain context only, but the
+    // MLX anomaly MODEL is consumed as one independent sensor
+    // vote, exactly like C1001 and FSR above. No hardcoded
+    // temperature thresholds are used for anomaly decisions.
     // --------------------------------------------------------
+
+    bool mlxStrongAnomaly = false;
+    bool mlxWeakAnomaly = false;
+    bool mlxNormalContext = false;
 
     if (
         !mlxAvailable
@@ -730,8 +751,65 @@ void FusionEngine::update(
     }
     else
     {
+        if (
+            hasStrongModelAnomaly(
+                input.mlx.model
+            )
+        )
+        {
+            mlxStrongAnomaly =
+                true;
+        }
+        else if (
+            hasWeakModelAnomaly(
+                input.mlx.model
+            )
+        )
+        {
+            mlxWeakAnomaly =
+                true;
+        }
+        else if (
+            hasModelEvidence(
+                input.mlx.model
+            )
+            &&
+            !input.mlx.model.bothModelsAnomaly
+            &&
+            !input.mlx.model.eitherModelAnomaly
+        )
+        {
+            mlxNormalContext =
+                true;
+        }
+
         reading.temperature =
-            FusionTemperatureState::STABLE;
+            mlxStrongAnomaly
+            ||
+            mlxWeakAnomaly
+                ? FusionTemperatureState::ANOMALOUS
+                : FusionTemperatureState::STABLE;
+    }
+
+
+    if (
+        mlxNormalContext
+    )
+    {
+        reading.evidence.normalEvidenceCount++;
+    }
+    else if (
+        mlxStrongAnomaly
+    )
+    {
+        reading.evidence.anomalyEvidenceCount++;
+        reading.evidence.strongAnomalyEvidenceCount++;
+    }
+    else if (
+        mlxWeakAnomaly
+    )
+    {
+        reading.evidence.anomalyEvidenceCount++;
     }
 
 
@@ -899,23 +977,39 @@ void FusionEngine::update(
         >=
         EMERGENCY_PERSIST_MS;
 
-    const bool clearCandidate =
-        !warningCandidate
-        &&
-        !strongCandidate
-        &&
-        (
-            previousLevel
-            ==
-            FusionLevel::WARNING
-            ||
-            previousLevel
-            ==
-            FusionLevel::EMERGENCY
-        );
+    // concernActive represents "something is flagging right now",
+    // independent of whether it has persisted long enough yet.
+    // This is used (rather than the raw persistence flags) so
+    // that a single flickered-off update, or a persistence timer
+    // restart, does not look identical to a genuinely clean
+    // reading for de-escalation purposes.
+    const bool concernActive =
+        warningCandidate
+        ||
+        strongCandidate;
+
+    const bool previousLevelElevated =
+        previousLevel
+        ==
+        FusionLevel::WARNING
+        ||
+        previousLevel
+        ==
+        FusionLevel::EMERGENCY;
 
     if (
-        clearCandidate
+        concernActive
+    )
+    {
+        // Concern returned - cancel any in-progress clear timer.
+        // The elevated state is retained (see final decision
+        // cascade below) until persistence re-confirms it or a
+        // fresh continuous clear period completes.
+        clearStateStartMillis =
+            0UL;
+    }
+    else if (
+        previousLevelElevated
     )
     {
         if (
@@ -934,6 +1028,32 @@ void FusionEngine::update(
             0UL;
     }
 
+    // True only once the system has been continuously clean
+    // (concernActive == false, uninterrupted) for at least
+    // CLEAR_STABLE_MS, measured with millis().
+    const bool clearPeriodComplete =
+        clearStateStartMillis
+        !=
+        0UL
+        &&
+        (
+            now
+            -
+            clearStateStartMillis
+        )
+        >=
+        CLEAR_STABLE_MS;
+
+    // True while we are still inside a continuous clear period
+    // (clean so far, but not yet long enough) and the previous
+    // state was elevated - the elevated state must be held here.
+    const bool inClearHold =
+        !concernActive
+        &&
+        previousLevelElevated
+        &&
+        !clearPeriodComplete;
+
 
     // --------------------------------------------------------
     // Final decision
@@ -951,40 +1071,98 @@ void FusionEngine::update(
         &&
         input.camera.postureAbnormal;
 
+    // CameraFusionEvidence.postureNormal: an authoritative,
+    // valid camera verification that clears/rejects the current
+    // emergency candidate. Camera remains unavailable for now,
+    // so in practice this stays false until real camera
+    // communication is integrated - it is not faked here.
+    const bool cameraConfirmedNormal =
+        input.camera.available
+        &&
+        input.camera.connected
+        &&
+        input.camera.resultValid
+        &&
+        input.camera.postureNormal;
+
     if (
         cameraConfirmedAbnormal
         &&
         persistentEmergencyCandidate
     )
     {
+        // camera abnormal + persistent candidate -> EMERGENCY.
+        // Verification is already complete, so no further
+        // camera trigger is needed.
         effectiveLevel =
             FusionLevel::EMERGENCY;
         reading.triggerAlert =
             true;
+        reading.triggerCamera =
+            false;
     }
     else if (
-        persistentWarning
+        cameraConfirmedNormal
+        &&
+        persistentEmergencyCandidate
     )
     {
+        // Camera normal with a valid result: do NOT escalate to
+        // EMERGENCY. Reject/clear this emergency candidate and
+        // transition conservatively to WATCH while sensor
+        // evidence is re-evaluated on subsequent updates.
+        effectiveLevel =
+            FusionLevel::WATCH;
+
+        emergencyCandidateStartMillis =
+            0UL;
+    }
+    else if (
+        persistentEmergencyCandidate
+    )
+    {
+        // Persistent strong multisensor candidate, no camera
+        // verification result yet -> WARNING and request camera.
+        // This is the ONLY case that triggers the camera.
         effectiveLevel =
             FusionLevel::WARNING;
         reading.triggerCamera =
             true;
     }
     else if (
-        clearCandidate
-        &&
-        clearStateStartMillis
-        !=
-        0UL
-        &&
-        now
-        -
-        clearStateStartMillis
-        <
-        CLEAR_STABLE_MS
+        persistentWarning
     )
     {
+        // Persistent but weaker (non-strong) concern -> WARNING.
+        // Not a persistent strong multi-sensor candidate, so no
+        // camera verification is requested.
+        effectiveLevel =
+            FusionLevel::WARNING;
+        reading.triggerCamera =
+            false;
+    }
+    else if (
+        concernActive
+        &&
+        previousLevelElevated
+    )
+    {
+        // Concern has returned (candidate flickered back on, or
+        // its persistence timer just restarted) but has not yet
+        // re-confirmed persistence. Do not drop out of the
+        // previous elevated state on a single flicker - hold it
+        // until persistence re-confirms (handled above) or a
+        // full continuous CLEAR_STABLE_MS clean period elapses.
+        effectiveLevel =
+            previousLevel;
+    }
+    else if (
+        inClearHold
+    )
+    {
+        // Continuously clean so far, but the clear period has
+        // not yet run for CLEAR_STABLE_MS - keep holding the
+        // previous elevated state.
         effectiveLevel =
             previousLevel;
     }
@@ -1038,20 +1216,6 @@ void FusionEngine::update(
             FusionLevel::WATCH;
     }
 
-
-    if (
-        effectiveLevel
-        ==
-        FusionLevel::WARNING
-        ||
-        effectiveLevel
-        ==
-        FusionLevel::EMERGENCY
-    )
-    {
-        reading.triggerCamera =
-            true;
-    }
 
     reading.level =
         effectiveLevel;

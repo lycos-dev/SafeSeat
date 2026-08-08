@@ -1,0 +1,58 @@
+{
+  "pipeline": "SafeSeat C1001 anomaly detection",
+  "trained_at_utc": "2026-08-06T15:34:09.616008+00:00",
+  "training_input": "C:\\Users\\Lycos Blanza\\Downloads\\SAFESEAT_DATASETS\\SafeSeat_ML\\features\\C1001\\train_features.csv",
+  "testing_input": "C:\\Users\\Lycos Blanza\\Downloads\\SAFESEAT_DATASETS\\SafeSeat_ML\\features\\C1001\\test_features.csv",
+  "training_windows": 1340,
+  "testing_windows": 327,
+  "feature_count": 64,
+  "models": {
+    "isolation_forest": {
+      "n_estimators": 300,
+      "contamination": 0.05,
+      "random_state": 42,
+      "training_anomaly_percentage": 5.0,
+      "testing_anomaly_percentage": 7.339449541284404,
+      "training_score_summary": {
+        "minimum": -0.11367735516735178,
+        "maximum": 0.1896264997717826,
+        "mean": 0.11408390030357335,
+        "median": 0.12886646942024158,
+        "standard_deviation": 0.05808968889280624
+      },
+      "testing_score_summary": {
+        "minimum": -0.10355636477164143,
+        "maximum": 0.1892648617766804,
+        "mean": 0.13191676591325052,
+        "median": 0.15792532816160165,
+        "standard_deviation": 0.0668563373907612
+      }
+    },
+    "one_class_svm": {
+      "kernel": "rbf",
+      "nu": 0.05,
+      "gamma": "scale",
+      "training_anomaly_percentage": 5.149253731343284,
+      "testing_anomaly_percentage": 10.397553516819572,
+      "training_score_summary": {
+        "minimum": -3.113265352815958,
+        "maximum": 2.6001420360110075,
+        "mean": 0.754658298540675,
+        "median": 0.7665937583910098,
+        "standard_deviation": 0.5911003860776388
+      },
+      "testing_score_summary": {
+        "minimum": -5.285229074090352,
+        "maximum": 2.025655096356033,
+        "mean": 0.4482436073561971,
+        "median": 0.5969697181740408,
+        "standard_deviation": 0.9192997210959207
+      }
+    }
+  },
+  "test_prediction_agreement_percentage": 95.10703363914374,
+  "prediction_meaning": {
+    "1": "normal/inlier",
+    "-1": "anomaly/outlier"
+  }
+}
