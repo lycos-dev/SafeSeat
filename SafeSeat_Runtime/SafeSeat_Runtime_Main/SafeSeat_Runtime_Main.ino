@@ -14,25 +14,99 @@
 // ============================================================
 
 C1001Sensor c1001;
-
 MLXSensor mlx;
-
 FSRSensor fsr;
-
 MPUSensor mpu;
+
+
+// ============================================================
+// INITIALIZATION STATE
+//
+// These flags describe what actually happened during begin().
+// We do NOT print "acquisition active" for a module that failed
+// initialization.
+// ============================================================
+
+bool c1001Initialized = false;
+bool mlxInitialized = false;
+bool fsrInitialized = false;
+bool mpuInitialized = false;
 
 
 // ============================================================
 // SERIAL REPORTING
 // ============================================================
 
-unsigned long lastPrintTime =
-    0;
+unsigned long lastPrintTime = 0;
 
 
-constexpr unsigned long
-    PRINT_INTERVAL_MS =
-        1000UL;
+// ============================================================
+// HELPERS
+// ============================================================
+
+const char* readyText(
+    bool ready
+)
+{
+    return ready
+        ? "READY"
+        : "FAILED / UNAVAILABLE";
+}
+
+
+void printInitializationSummary()
+{
+    Serial.println();
+    Serial.println(
+        "=========================================="
+    );
+
+    Serial.println(
+        " MAIN SENSOR INITIALIZATION COMPLETE"
+    );
+
+    Serial.println(
+        "=========================================="
+    );
+
+    Serial.print(
+        "C1001    : "
+    );
+    Serial.println(
+        readyText(
+            c1001Initialized
+        )
+    );
+
+    Serial.print(
+        "MLX90614 : "
+    );
+    Serial.println(
+        readyText(
+            mlxInitialized
+        )
+    );
+
+    Serial.print(
+        "FSR      : "
+    );
+    Serial.println(
+        readyText(
+            fsrInitialized
+        )
+    );
+
+    Serial.print(
+        "MPU6050  : "
+    );
+    Serial.println(
+        readyText(
+            mpuInitialized
+        )
+    );
+
+    Serial.println();
+}
 
 
 // ============================================================
@@ -45,11 +119,9 @@ void setup()
         115200
     );
 
-
     delay(
         1000
     );
-
 
     Serial.println();
     Serial.println(
@@ -61,7 +133,7 @@ void setup()
     );
 
     Serial.println(
-        " Stage 4 - Main Sensors"
+        " Step 1 - Shared Hardware Foundation"
     );
 
     Serial.println(
@@ -70,33 +142,85 @@ void setup()
 
 
     // ========================================================
-    // SHARED I2C BUS
+    // ONE SHARED I2C BUS
+    //
+    // This mirrors the proven combined sketch:
+    //
+    //     Wire.begin(21, 22);
+    //
+    // All I2C modules use this already-running bus.
     // ========================================================
 
     Serial.println();
     Serial.println(
-        "[MAIN] Starting I2C bus..."
+        "[MAIN] Starting shared I2C bus..."
     );
-
 
     Wire.begin(
         I2C_SDA_PIN,
         I2C_SCL_PIN
     );
 
-
-    /*
-     * 400 kHz significantly reduces I2C transaction time.
-     *
-     * MLX90614, ADS1115 and MPU6050 share this bus.
-     */
     Wire.setClock(
-        400000
+        I2C_CLOCK_HZ
+    );
+
+    Serial.print(
+        "[MAIN] I2C ready on SDA="
+    );
+
+    Serial.print(
+        I2C_SDA_PIN
+    );
+
+    Serial.print(
+        ", SCL="
+    );
+
+    Serial.print(
+        I2C_SCL_PIN
+    );
+
+    Serial.print(
+        " @ "
+    );
+
+    Serial.print(
+        I2C_CLOCK_HZ
+        /
+        1000UL
+    );
+
+    Serial.println(
+        " kHz."
     );
 
 
+    // ========================================================
+    // ONE SHARED ESP32 ADC CONFIGURATION
+    //
+    // Same setup used by the proven combined sketch.
+    // ========================================================
+
     Serial.println(
-        "[MAIN] I2C bus ready."
+        "[MAIN] Configuring shared ESP32 ADC..."
+    );
+
+    analogReadResolution(
+        MAIN_ADC_RESOLUTION_BITS
+    );
+
+    analogSetAttenuation(
+        ADC_11db
+    );
+
+    pinMode(
+        CUSHION_FSR3_PIN,
+        INPUT
+    );
+
+    Serial.println(
+        "[MAIN] ADC ready: 12-bit, 11 dB attenuation."
     );
 
 
@@ -109,13 +233,11 @@ void setup()
         "[MAIN] Starting C1001..."
     );
 
-
-    bool c1001Ready =
+    c1001Initialized =
         c1001.begin();
 
-
     Serial.println(
-        c1001Ready
+        c1001Initialized
             ? "[MAIN] C1001 ready."
             : "[MAIN] WARNING: C1001 failed."
     );
@@ -130,13 +252,11 @@ void setup()
         "[MAIN] Starting MLX90614..."
     );
 
-
-    bool mlxReady =
+    mlxInitialized =
         mlx.begin();
 
-
     Serial.println(
-        mlxReady
+        mlxInitialized
             ? "[MAIN] MLX90614 ready."
             : "[MAIN] WARNING: MLX90614 failed."
     );
@@ -145,7 +265,8 @@ void setup()
     // ========================================================
     // MPU6050
     //
-    // Initialize before the slower FSR calibration.
+    // Kept before the slower FSR empty-seat calibration.
+    // The MPU implementation itself is NOT changed in Step 1.
     // ========================================================
 
     Serial.println();
@@ -153,13 +274,11 @@ void setup()
         "[MAIN] Starting MPU6050..."
     );
 
-
-    bool mpuReady =
+    mpuInitialized =
         mpu.begin();
 
-
     Serial.println(
-        mpuReady
+        mpuInitialized
             ? "[MAIN] MPU6050 ready."
             : "[MAIN] WARNING: MPU6050 failed."
     );
@@ -167,6 +286,8 @@ void setup()
 
     // ========================================================
     // FSR
+    //
+    // The FSR implementation itself is NOT changed in Step 1.
     // ========================================================
 
     Serial.println();
@@ -174,59 +295,21 @@ void setup()
         "[MAIN] Starting FSR array..."
     );
 
-
     Serial.println(
         "[MAIN] IMPORTANT: keep seat empty for calibration."
     );
 
-
-    bool fsrReady =
+    fsrInitialized =
         fsr.begin();
 
-
     Serial.println(
-        fsrReady
+        fsrInitialized
             ? "[MAIN] FSR array ready."
             : "[MAIN] WARNING: FSR initialization failed."
     );
 
 
-    // ========================================================
-    // COMPLETE
-    // ========================================================
-
-    Serial.println();
-    Serial.println(
-        "=========================================="
-    );
-
-    Serial.println(
-        " MAIN SENSOR INITIALIZATION COMPLETE"
-    );
-
-    Serial.println(
-        "=========================================="
-    );
-
-
-    Serial.println(
-        "C1001    : acquisition active"
-    );
-
-    Serial.println(
-        "MLX90614 : acquisition active"
-    );
-
-    Serial.println(
-        "FSR      : acquisition active"
-    );
-
-    Serial.println(
-        "MPU6050  : acquisition active"
-    );
-
-
-    Serial.println();
+    printInitializationSummary();
 }
 
 
@@ -237,39 +320,56 @@ void setup()
 void loop()
 {
     // ========================================================
-    // HIGH-RATE MPU
+    // UPDATE ONLY MODULES THAT ACTUALLY INITIALIZED
     //
-    // Keep this call first.
+    // Failed/disconnected sensors are not treated as normal
+    // data. Their reading structures remain available for the
+    // dashboard and, later, Fusion validity gating.
     // ========================================================
 
-    mpu.update();
+    if (
+        mpuInitialized
+    )
+    {
+        mpu.update();
+    }
 
+    if (
+        c1001Initialized
+    )
+    {
+        c1001.update();
+    }
 
-    // ========================================================
-    // OTHER SENSOR MODULES
-    // ========================================================
-
-    c1001.update();
-
-
-    mlx.update();
-
+    if (
+        mlxInitialized
+    )
+    {
+        mlx.update();
+    }
 
     bool occupantPresent =
-        c1001.getReading()
-            .present;
+        c1001Initialized
+        &&
+        c1001.getReading().present;
 
+    if (
+        fsrInitialized
+    )
+    {
+        fsr.update(
+            occupantPresent
+        );
+    }
 
-    fsr.update(
-        occupantPresent
-    );
-
-
-    /*
-     * Give MPU another opportunity immediately after the
-     * potentially slower FSR acquisition.
-     */
-    mpu.update();
+    // Give the high-rate MPU another opportunity after the
+    // potentially slower I2C/FSR work.
+    if (
+        mpuInitialized
+    )
+    {
+        mpu.update();
+    }
 
 
     // ========================================================
@@ -279,41 +379,32 @@ void loop()
     unsigned long now =
         millis();
 
-
     if (
         now
         -
         lastPrintTime
         <
-        PRINT_INTERVAL_MS
+        MAIN_PRINT_INTERVAL_MS
     )
     {
         return;
     }
 
-
     lastPrintTime =
         now;
 
 
-    const C1001Reading&
-        c =
-            c1001.getReading();
+    const C1001Reading &c =
+        c1001.getReading();
 
+    const MLXReading &t =
+        mlx.getReading();
 
-    const MLXReading&
-        t =
-            mlx.getReading();
+    const FSRReading &f =
+        fsr.getReading();
 
-
-    const FSRReading&
-        f =
-            fsr.getReading();
-
-
-    const MPUReading&
-        m =
-            mpu.getReading();
+    const MPUReading &m =
+        mpu.getReading();
 
 
     Serial.println();
@@ -339,6 +430,15 @@ void loop()
         "--------------- C1001 -------------------"
     );
 
+    Serial.print(
+        "Init           : "
+    );
+
+    Serial.println(
+        readyText(
+            c1001Initialized
+        )
+    );
 
     Serial.print(
         "Status         : "
@@ -347,7 +447,6 @@ void loop()
     Serial.println(
         c1001.getStatusText()
     );
-
 
     Serial.print(
         "Presence       : "
@@ -359,7 +458,6 @@ void loop()
             : "NO"
     );
 
-
     Serial.print(
         "MoveRange      : "
     );
@@ -367,7 +465,6 @@ void loop()
     Serial.println(
         c.moveRange
     );
-
 
     Serial.print(
         "Raw RR / HR    : "
@@ -384,7 +481,6 @@ void loop()
     Serial.println(
         c.rawHeartRate
     );
-
 
     if (
         c.status
@@ -405,7 +501,6 @@ void loop()
         );
     }
 
-
     if (
         c1001.hasTrustedVitals()
     )
@@ -422,7 +517,6 @@ void loop()
         Serial.println(
             " BPM"
         );
-
 
         Serial.print(
             "Filtered HR    : "
@@ -454,6 +548,15 @@ void loop()
         "-------------- MLX90614 -----------------"
     );
 
+    Serial.print(
+        "Init           : "
+    );
+
+    Serial.println(
+        readyText(
+            mlxInitialized
+        )
+    );
 
     Serial.print(
         "Status         : "
@@ -463,8 +566,9 @@ void loop()
         mlx.getStatusText()
     );
 
-
     if (
+        mlxInitialized
+        &&
         mlx.hasValidReading()
     )
     {
@@ -481,7 +585,6 @@ void loop()
             " C"
         );
 
-
         Serial.print(
             "Object         : "
         );
@@ -494,7 +597,6 @@ void loop()
         Serial.println(
             " C"
         );
-
 
         Serial.print(
             "Object-Ambient : "
@@ -512,7 +614,7 @@ void loop()
     else
     {
         Serial.println(
-            "Temperature    : not ready"
+            "Temperature    : unavailable"
         );
     }
 
@@ -526,6 +628,15 @@ void loop()
         "---------------- FSR --------------------"
     );
 
+    Serial.print(
+        "Init           : "
+    );
+
+    Serial.println(
+        readyText(
+            fsrInitialized
+        )
+    );
 
     Serial.print(
         "Status         : "
@@ -534,7 +645,6 @@ void loop()
     Serial.println(
         fsr.getStatusText()
     );
-
 
     Serial.print(
         "Actual Fs      : "
@@ -549,15 +659,15 @@ void loop()
         " Hz"
     );
 
-
     if (
+        fsrInitialized
+        &&
         fsr.hasValidReading()
     )
     {
         Serial.println(
             "Backrest:"
         );
-
 
         for (
             int i = BACKREST_FSR1;
@@ -585,11 +695,9 @@ void loop()
             );
         }
 
-
         Serial.println(
             "Cushion:"
         );
-
 
         for (
             int i = CUSHION_FSR1;
@@ -617,7 +725,6 @@ void loop()
             );
         }
 
-
         Serial.print(
             "Backrest total : "
         );
@@ -626,7 +733,6 @@ void loop()
             f.backrestTotal,
             1
         );
-
 
         Serial.print(
             "Cushion total  : "
@@ -637,7 +743,6 @@ void loop()
             1
         );
 
-
         Serial.print(
             "Whole total    : "
         );
@@ -646,7 +751,6 @@ void loop()
             f.wholeSeatTotal,
             1
         );
-
 
         Serial.print(
             "Back L/R       : "
@@ -657,7 +761,6 @@ void loop()
             3
         );
 
-
         Serial.print(
             "Cushion L/R    : "
         );
@@ -667,7 +770,6 @@ void loop()
             3
         );
 
-
         Serial.print(
             "Back/Cushion   : "
         );
@@ -675,6 +777,12 @@ void loop()
         Serial.println(
             f.backrestToCushionRatio,
             3
+        );
+    }
+    else
+    {
+        Serial.println(
+            "Pressure data  : unavailable"
         );
     }
 
@@ -688,6 +796,15 @@ void loop()
         "-------------- MPU6050 ------------------"
     );
 
+    Serial.print(
+        "Init           : "
+    );
+
+    Serial.println(
+        readyText(
+            mpuInitialized
+        )
+    );
 
     Serial.print(
         "Status         : "
@@ -697,7 +814,6 @@ void loop()
         mpu.getStatusText()
     );
 
-
     Serial.print(
         "Samples        : "
     );
@@ -705,7 +821,6 @@ void loop()
     Serial.println(
         m.sampleCount
     );
-
 
     Serial.print(
         "Actual Fs      : "
@@ -720,8 +835,9 @@ void loop()
         " Hz"
     );
 
-
     if (
+        mpuInitialized
+        &&
         mpu.hasValidReading()
     )
     {
@@ -756,7 +872,6 @@ void loop()
             " g"
         );
 
-
         Serial.print(
             "Gyro X/Y/Z     : "
         );
@@ -788,7 +903,6 @@ void loop()
             " deg/s"
         );
 
-
         Serial.print(
             "Accel magnitude: "
         );
@@ -801,7 +915,6 @@ void loop()
         Serial.println(
             " g"
         );
-
 
         Serial.print(
             "Gyro magnitude : "
@@ -816,7 +929,6 @@ void loop()
             " deg/s"
         );
 
-
         Serial.print(
             "Dynamic accel  : "
         );
@@ -830,6 +942,12 @@ void loop()
             " g"
         );
     }
+    else
+    {
+        Serial.println(
+            "Motion data    : unavailable"
+        );
+    }
 
 
     // ========================================================
@@ -841,26 +959,21 @@ void loop()
         "------------------------------------------"
     );
 
-
     Serial.println(
         "Piezo          : separate ESP32"
     );
 
-
     Serial.println(
-        "ML inference   : next phase"
+        "ML inference   : after acquisition restoration"
     );
 
-
     Serial.println(
-        "Fusion         : after inference"
+        "Fusion         : files intentionally untouched"
     );
-
 
     Serial.println(
         "Camera         : separate ESP32-CAM"
     );
-
 
     Serial.println(
         "=========================================="
