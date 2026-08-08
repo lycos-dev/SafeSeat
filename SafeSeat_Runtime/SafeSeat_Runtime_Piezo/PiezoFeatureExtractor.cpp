@@ -233,14 +233,13 @@ features.rms =
 features.energy =
     computeEnergy(signal,
                   PIEZO_WINDOW_SAMPLES);
-}
 
 features.meanAbsDiff =
     computeMeanAbsDiff(
         signal,
         PIEZO_WINDOW_SAMPLES
     );
-    
+
 features.stdDiff =
     computeStdDiff(
         signal,
@@ -254,6 +253,38 @@ features.zeroCrossingRate =
         PIEZO_WINDOW_SAMPLES,
         features.mean
     );
+
+// ============================================================
+// FREQUENCY FEATURES
+// ============================================================
+
+computeFrequencyFeatures(
+    signal,
+    PIEZO_WINDOW_SAMPLES,
+    static_cast<float>(
+        PIEZO_SAMPLE_RATE
+    ),
+    features.mean,
+    features.dominantFrequencyHz,
+    features.respirationBPM,
+    features.spectralEntropy
+);
+
+
+// ============================================================
+// AUTOCORRELATION
+// ============================================================
+
+features.autocorrelationPeak =
+    computeAutocorrelationPeak(
+        signal,
+        PIEZO_WINDOW_SAMPLES,
+        static_cast<float>(
+            PIEZO_SAMPLE_RATE
+        ),
+        features.mean
+    );
+}
 
 float PiezoFeatureExtractor::computeMean(
     const float *x,
@@ -507,6 +538,7 @@ float PiezoFeatureExtractor::computeIQR(
         -
         q25
     );
+}
 
 // ============================================================
 // MEAN ABSOLUTE FIRST DIFFERENCE
@@ -782,4 +814,710 @@ float PiezoFeatureExtractor::computeZeroCrossingRate(
     );
 }
 
+// ============================================================
+// FREQUENCY-DOMAIN FEATURES
+//
+// Mirrors the relevant behavior of:
+//
+// scipy.signal.periodogram(
+//     signal,
+//     fs=25,
+//     detrend="constant"
+// )
+//
+// We only calculate DFT bins inside:
+//
+//     0.05 Hz <= f <= 1.00 Hz
+//
+// because those are the only bins used by the Python model.
+//
+// For N = 750 and Fs = 25 Hz:
+//
+//     frequency resolution = 25 / 750
+//                          = 0.033333... Hz
+//
+// Therefore the respiration band corresponds to:
+//
+//     k = 2 ... 30
+//
+// The exact periodogram scaling factor is unnecessary here,
+// because:
+//
+// 1. dominant-frequency selection only depends on relative power
+// 2. spectral-entropy probabilities normalize by total power
+//
+// so a constant scale multiplier cancels.
+// ============================================================
+
+void PiezoFeatureExtractor::computeFrequencyFeatures(
+    const float *x,
+    uint16_t n,
+    float samplingRate,
+    float mean,
+    float &dominantFrequencyHz,
+    float &respirationBPM,
+    float &spectralEntropy)
+{
+    dominantFrequencyHz = 0.0f;
+    respirationBPM = 0.0f;
+    spectralEntropy = 0.0f;
+
+
+    if (
+        x == nullptr
+        ||
+        n == 0
+        ||
+        samplingRate <= 0.0f
+    )
+    {
+        return;
+    }
+
+
+    // --------------------------------------------------------
+    // Frequency-bin spacing
+    // --------------------------------------------------------
+
+    const double frequencyResolution =
+        static_cast<double>(
+            samplingRate
+        )
+        /
+        static_cast<double>(
+            n
+        );
+
+
+    // --------------------------------------------------------
+    // Match Python mask:
+    //
+    // frequencies >= 0.05
+    // frequencies <= 1.00
+    // --------------------------------------------------------
+
+    int firstBin =
+        static_cast<int>(
+            ceil(
+                0.05
+                /
+                frequencyResolution
+            )
+        );
+
+
+    int lastBin =
+        static_cast<int>(
+            floor(
+                1.00
+                /
+                frequencyResolution
+            )
+        );
+
+
+    // One-sided DFT cannot exceed Nyquist bin.
+    int maximumOneSidedBin =
+        n / 2;
+
+
+    if (
+        lastBin
+        >
+        maximumOneSidedBin
+    )
+    {
+        lastBin =
+            maximumOneSidedBin;
+    }
+
+
+    if (
+        firstBin < 0
+    )
+    {
+        firstBin = 0;
+    }
+
+
+    if (
+        lastBin < firstBin
+    )
+    {
+        return;
+    }
+
+
+    const int bandBinCount =
+        lastBin
+        -
+        firstBin
+        +
+        1;
+
+
+    /*
+     * For the current SafeSeat configuration this is 29.
+     *
+     * Use a fixed-size array safely larger than needed.
+     */
+    constexpr int MAX_RESPIRATION_BINS = 64;
+
+
+    if (
+        bandBinCount
+        >
+        MAX_RESPIRATION_BINS
+    )
+    {
+        return;
+    }
+
+
+    double power[
+        MAX_RESPIRATION_BINS
+    ] = {0.0};
+
+
+    double totalPower =
+        0.0;
+
+
+    double maximumPower =
+        -1.0;
+
+
+    int dominantBin =
+        firstBin;
+
+
+    const double TWO_PI_LOCAL =
+        6.28318530717958647692;
+
+
+    // ========================================================
+    // DIRECT DFT — RESPIRATION BINS ONLY
+    // ========================================================
+
+    int powerIndex =
+        0;
+
+
+    for (
+        int k = firstBin;
+        k <= lastBin;
+        k++
+    )
+    {
+        double realPart =
+            0.0;
+
+
+        double imaginaryPart =
+            0.0;
+
+
+        for (
+            uint16_t sampleIndex = 0;
+            sampleIndex < n;
+            sampleIndex++
+        )
+        {
+            /*
+             * scipy periodogram detrend="constant"
+             *
+             * -> subtract the window mean.
+             */
+
+            double centered =
+                static_cast<double>(
+                    x[
+                        sampleIndex
+                    ]
+                )
+                -
+                static_cast<double>(
+                    mean
+                );
+
+
+            double angle =
+                TWO_PI_LOCAL
+                *
+                static_cast<double>(
+                    k
+                )
+                *
+                static_cast<double>(
+                    sampleIndex
+                )
+                /
+                static_cast<double>(
+                    n
+                );
+
+
+            realPart +=
+                centered
+                *
+                cos(
+                    angle
+                );
+
+
+            imaginaryPart -=
+                centered
+                *
+                sin(
+                    angle
+                );
+        }
+
+
+        // Magnitude-squared spectral power.
+        double binPower =
+            (
+                realPart
+                *
+                realPart
+            )
+            +
+            (
+                imaginaryPart
+                *
+                imaginaryPart
+            );
+
+
+        power[
+            powerIndex
+        ] =
+            binPower;
+
+
+        totalPower +=
+            binPower;
+
+
+        if (
+            binPower
+            >
+            maximumPower
+        )
+        {
+            maximumPower =
+                binPower;
+
+
+            dominantBin =
+                k;
+        }
+
+
+        powerIndex++;
+    }
+
+
+    // ========================================================
+    // NO SPECTRAL POWER
+    //
+    // Matches:
+    //
+    // if np.all(respiration_power <= 0):
+    //     return zeros
+    // ========================================================
+
+    if (
+        totalPower <= 0.0
+        ||
+        maximumPower <= 0.0
+    )
+    {
+        dominantFrequencyHz =
+            0.0f;
+
+
+        respirationBPM =
+            0.0f;
+
+
+        spectralEntropy =
+            0.0f;
+
+
+        return;
+    }
+
+
+    // ========================================================
+    // DOMINANT FREQUENCY
+    // ========================================================
+
+    dominantFrequencyHz =
+        static_cast<float>(
+            static_cast<double>(
+                dominantBin
+            )
+            *
+            frequencyResolution
+        );
+
+
+    // ========================================================
+    // ESTIMATED RESPIRATION BPM
+    //
+    // Python:
+    //
+    // dominant_frequency * 60
+    // ========================================================
+
+    respirationBPM =
+        dominantFrequencyHz
+        *
+        60.0f;
+
+
+    // ========================================================
+    // SPECTRAL ENTROPY
+    //
+    // Python:
+    //
+    // probabilities = power / total_power
+    //
+    // entropy =
+    //     -sum(p * log2(p))
+    //
+    // max_entropy =
+    //     log2(len(respiration_power))
+    //
+    // spectral_entropy =
+    //     entropy / max_entropy
+    // ========================================================
+
+    double entropy =
+        0.0;
+
+
+    for (
+        int i = 0;
+        i < bandBinCount;
+        i++
+    )
+    {
+        if (
+            power[i]
+            <= 0.0
+        )
+        {
+            continue;
+        }
+
+
+        double probability =
+            power[i]
+            /
+            totalPower;
+
+
+        entropy -=
+            probability
+            *
+            (
+                log(
+                    probability
+                )
+                /
+                log(
+                    2.0
+                )
+            );
+    }
+
+
+    double maximumEntropy =
+        log(
+            static_cast<double>(
+                bandBinCount
+            )
+        )
+        /
+        log(
+            2.0
+        );
+
+
+    if (
+        maximumEntropy > 0.0
+    )
+    {
+        spectralEntropy =
+            static_cast<float>(
+                entropy
+                /
+                maximumEntropy
+            );
+    }
+    else
+    {
+        spectralEntropy =
+            0.0f;
+    }
+}
+
+
+
+// ============================================================
+// AUTOCORRELATION PEAK
+//
+// Matches Python:
+//
+// centered = signal - mean
+// variance = np.var(centered)
+//
+// correlation = np.correlate(
+//     centered,
+//     centered,
+//     mode="full"
+// )
+//
+// keep positive lags
+//
+// correlation /= correlation[0]
+//
+// search:
+//
+//     1 second <= lag <= 20 seconds
+//
+// Python does NOT divide every lag by its overlap count.
+// Therefore this implementation also uses the raw overlapping
+// dot product before dividing by lag-zero correlation.
+// ============================================================
+
+float PiezoFeatureExtractor::computeAutocorrelationPeak(
+    const float *x,
+    uint16_t n,
+    float samplingRate,
+    float mean)
+{
+    if (
+        x == nullptr
+        ||
+        n == 0
+        ||
+        samplingRate <= 0.0f
+    )
+    {
+        return 0.0f;
+    }
+
+
+    // ========================================================
+    // ZERO-LAG CORRELATION
+    //
+    // correlation[0] =
+    // sum(centered[i]^2)
+    // ========================================================
+
+    double zeroLagCorrelation =
+        0.0;
+
+
+    for (
+        uint16_t i = 0;
+        i < n;
+        i++
+    )
+    {
+        double centered =
+            static_cast<double>(
+                x[i]
+            )
+            -
+            static_cast<double>(
+                mean
+            );
+
+
+        zeroLagCorrelation +=
+            centered
+            *
+            centered;
+    }
+
+
+    /*
+     * Equivalent to Python's very-small-variance guard.
+     *
+     * np.var(centered) < 1e-12
+     *
+     * Since:
+     *
+     * zeroLagCorrelation = variance * N
+     */
+    double variance =
+        zeroLagCorrelation
+        /
+        static_cast<double>(
+            n
+        );
+
+
+    if (
+        variance < 1e-12
+        ||
+        zeroLagCorrelation <= 0.0
+    )
+    {
+        return 0.0f;
+    }
+
+
+    // ========================================================
+    // LAG RANGE
+    //
+    // Python:
+    //
+    // min_lag = int(fs * 1.0)
+    // max_lag = int(fs * 20.0)
+    // ========================================================
+
+    int minimumLag =
+        static_cast<int>(
+            samplingRate
+            *
+            1.0f
+        );
+
+
+    int maximumLag =
+        static_cast<int>(
+            samplingRate
+            *
+            20.0f
+        );
+
+
+    int largestPossibleLag =
+        static_cast<int>(
+            n
+        )
+        -
+        1;
+
+
+    if (
+        maximumLag
+        >
+        largestPossibleLag
+    )
+    {
+        maximumLag =
+            largestPossibleLag;
+    }
+
+
+    if (
+        maximumLag
+        <=
+        minimumLag
+    )
+    {
+        return 0.0f;
+    }
+
+
+    double maximumNormalizedCorrelation =
+        -1.0;
+
+
+    // ========================================================
+    // AUTOCORRELATION
+    // ========================================================
+
+    for (
+        int lag = minimumLag;
+        lag <= maximumLag;
+        lag++
+    )
+    {
+        double correlation =
+            0.0;
+
+
+        int overlappingSamples =
+            static_cast<int>(
+                n
+            )
+            -
+            lag;
+
+
+        for (
+            int i = 0;
+            i < overlappingSamples;
+            i++
+        )
+        {
+            double first =
+                static_cast<double>(
+                    x[i]
+                )
+                -
+                static_cast<double>(
+                    mean
+                );
+
+
+            double second =
+                static_cast<double>(
+                    x[
+                        i
+                        +
+                        lag
+                    ]
+                )
+                -
+                static_cast<double>(
+                    mean
+                );
+
+
+            correlation +=
+                first
+                *
+                second;
+        }
+
+
+        double normalizedCorrelation =
+            correlation
+            /
+            zeroLagCorrelation;
+
+
+        if (
+            normalizedCorrelation
+            >
+            maximumNormalizedCorrelation
+        )
+        {
+            maximumNormalizedCorrelation =
+                normalizedCorrelation;
+        }
+    }
+
+
+    if (
+        maximumNormalizedCorrelation
+        ==
+        -1.0
+    )
+    {
+        return 0.0f;
+    }
+
+
+    return static_cast<float>(
+        maximumNormalizedCorrelation
+    );
 }

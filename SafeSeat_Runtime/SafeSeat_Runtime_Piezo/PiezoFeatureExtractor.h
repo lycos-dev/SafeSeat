@@ -2,12 +2,12 @@
 #define PIEZO_FEATURE_EXTRACTOR_H
 
 #include <Arduino.h>
+#include "Config.h"
 
 constexpr uint16_t PIEZO_SAMPLE_RATE = 25;
-constexpr uint16_t PIEZO_WINDOW_SECONDS = 30;
-
-constexpr uint16_t PIEZO_WINDOW_SAMPLES =
-    PIEZO_SAMPLE_RATE * PIEZO_WINDOW_SECONDS;
+// PIEZO_WINDOW_SECONDS and PIEZO_WINDOW_SAMPLES are defined once,
+// in Config.h, and reused here to avoid a redefinition error when
+// a translation unit includes both this header and Config.h.
 
 struct PiezoFeatures
 {
@@ -112,6 +112,23 @@ float computeStdDiff(
 float computeZeroCrossingRate(
     const float *x,
     uint16_t n,
+    float mean
+);
+
+void computeFrequencyFeatures(
+    const float *x,
+    uint16_t n,
+    float samplingRate,
+    float mean,
+    float &dominantFrequencyHz,
+    float &respirationBPM,
+    float &spectralEntropy
+);
+
+float computeAutocorrelationPeak(
+    const float *x,
+    uint16_t n,
+    float samplingRate,
     float mean
 );
 
