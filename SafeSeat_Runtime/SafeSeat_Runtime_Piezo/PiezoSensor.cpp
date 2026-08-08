@@ -701,7 +701,12 @@ void PiezoSensor::storeRespirationSample(
 
 
     /*
-     * First full window should become available immediately.
+     * First complete 30-second window should be emitted
+     * immediately.
+     *
+     * storeRespirationSample() runs before sampleCount is
+     * incremented in update(), so on the 750th stored sample
+     * reading.sampleCount is still 749 here.
      */
     if (
         bufferCount
@@ -712,7 +717,7 @@ void PiezoSensor::storeRespirationSample(
 
         reading.sampleCount
         ==
-        PIEZO_WINDOW_SAMPLES
+        PIEZO_WINDOW_SAMPLES - 1
     )
     {
         reading.newFeatureWindowDue =

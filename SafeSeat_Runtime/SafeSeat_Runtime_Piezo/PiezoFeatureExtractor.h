@@ -1,137 +1,161 @@
-#ifndef PIEZO_FEATURE_EXTRACTOR_H
-#define PIEZO_FEATURE_EXTRACTOR_H
+#pragma once
 
 #include <Arduino.h>
 #include "Config.h"
 
-constexpr uint16_t PIEZO_SAMPLE_RATE = 25;
-// PIEZO_WINDOW_SECONDS and PIEZO_WINDOW_SAMPLES are defined once,
-// in Config.h, and reused here to avoid a redefinition error when
-// a translation unit includes both this header and Config.h.
+// ============================================================
+// SAFESEAT PIEZO FEATURE VECTOR
+//
+// Order matches the trained Python pipeline exactly:
+//
+//  1 mean
+//  2 std
+//  3 min
+//  4 max
+//  5 range
+//  6 median
+//  7 iqr
+//  8 rms
+//  9 energy
+// 10 mean_abs_diff
+// 11 std_diff
+// 12 zero_crossing_rate
+// 13 dominant_frequency_hz
+// 14 estimated_respiration_bpm
+// 15 spectral_entropy
+// 16 autocorrelation_peak
+// ============================================================
 
 struct PiezoFeatures
 {
-    float mean;
-
-    float std;
-
-    float minimum;
-    float maximum;
-    float range;
-
-    float median;
-    float iqr;
-
-    float rms;
-
-    float energy;
-
-    float meanAbsDiff;
-    float stdDiff;
-
-    float zeroCrossingRate;
-
-    float dominantFrequencyHz;
-    float respirationBPM;
-
-    float spectralEntropy;
-
-    float autocorrelationPeak;
+    float mean = 0.0f;
+    float std = 0.0f;
+    float minimum = 0.0f;
+    float maximum = 0.0f;
+    float range = 0.0f;
+    float median = 0.0f;
+    float iqr = 0.0f;
+    float rms = 0.0f;
+    float energy = 0.0f;
+    float meanAbsDiff = 0.0f;
+    float stdDiff = 0.0f;
+    float zeroCrossingRate = 0.0f;
+    float dominantFrequencyHz = 0.0f;
+    float respirationBPM = 0.0f;
+    float spectralEntropy = 0.0f;
+    float autocorrelationPeak = 0.0f;
 };
 
 class PiezoFeatureExtractor
 {
 public:
+    PiezoFeatureExtractor() = default;
 
-    PiezoFeatureExtractor();
+    // --------------------------------------------------------
+    // Runtime normalization bridge
+    //
+    // Training normalization:
+    //     (x - median) / (1.4826 * MAD)
+    //
+    // In training this was calculated over each complete
+    // participant recording. In live deployment there is no
+    // completed recording available, so SafeSeat applies the
+    // same robust formula to the current 30-second live window.
+    //
+    // This is a deployment adaptation and must be validated
+    // against collected real Piezo data before final claims.
+    // --------------------------------------------------------
+    bool robustNormalizeWindow(
+        const float *input,
+        float *output,
+        uint16_t n
+    ) const;
 
-    void reset();
-
-    void addSample(float sample);
-
-    bool isWindowReady() const;
-
-    uint16_t sampleCount() const;
-
-    void computeFeatures(PiezoFeatures &features);
+    // Extract all 16 model features from a normalized window.
+    bool computeFeatures(
+        const float *signal,
+        uint16_t n,
+        PiezoFeatures &features
+    ) const;
 
 private:
+    float computeMean(
+        const float *x,
+        uint16_t n
+    ) const;
 
-    float buffer[PIEZO_WINDOW_SAMPLES];
+    float computeStd(
+        const float *x,
+        uint16_t n,
+        float mean
+    ) const;
 
-    uint16_t writeIndex;
+    float computeMin(
+        const float *x,
+        uint16_t n
+    ) const;
 
-    bool full;
+    float computeMax(
+        const float *x,
+        uint16_t n
+    ) const;
 
-    void copyOrdered(float *destination);
+    float computeRMS(
+        const float *x,
+        uint16_t n
+    ) const;
 
-    float computeMean(const float *x, uint16_t n);
+    float computeEnergy(
+        const float *x,
+        uint16_t n
+    ) const;
 
-float computeStd(const float *x,
-                 uint16_t n,
-                 float mean);
+    float computePercentile(
+        const float *sorted,
+        uint16_t n,
+        float percentile
+    ) const;
 
-float computeMin(const float *x,
-                 uint16_t n);
+    float computeMedian(
+        const float *sorted,
+        uint16_t n
+    ) const;
 
-float computeMax(const float *x,
-                 uint16_t n);
+    float computeIQR(
+        const float *sorted,
+        uint16_t n
+    ) const;
 
-float computeRMS(const float *x,
-                 uint16_t n);
+    float computeMeanAbsDiff(
+        const float *x,
+        uint16_t n
+    ) const;
 
-float computeEnergy(const float *x,
-                    uint16_t n);
+    float computeStdDiff(
+        const float *x,
+        uint16_t n
+    ) const;
 
-                    float computePercentile(
-    const float *sorted,
-    uint16_t n,
-    float percentile
-);
+    float computeZeroCrossingRate(
+        const float *x,
+        uint16_t n,
+        float mean
+    ) const;
 
-float computeMedian(
-    const float *sorted,
-    uint16_t n
-);
+    void computeFrequencyFeatures(
+        const float *x,
+        uint16_t n,
+        float samplingRate,
+        float mean,
+        float &dominantFrequencyHz,
+        float &respirationBPM,
+        float &spectralEntropy
+    ) const;
 
-float computeIQR(
-    const float *sorted,
-    uint16_t n
-);
-
-float computeMeanAbsDiff(
-    const float *x,
-    uint16_t n
-);
-
-float computeStdDiff(
-    const float *x,
-    uint16_t n
-);
-
-float computeZeroCrossingRate(
-    const float *x,
-    uint16_t n,
-    float mean
-);
-
-void computeFrequencyFeatures(
-    const float *x,
-    uint16_t n,
-    float samplingRate,
-    float mean,
-    float &dominantFrequencyHz,
-    float &respirationBPM,
-    float &spectralEntropy
-);
-
-float computeAutocorrelationPeak(
-    const float *x,
-    uint16_t n,
-    float samplingRate,
-    float mean
-);
-
+    float computeAutocorrelationPeak(
+        const float *x,
+        uint16_t n,
+        float samplingRate,
+        float mean
+    ) const;
 };
-
-#endif
