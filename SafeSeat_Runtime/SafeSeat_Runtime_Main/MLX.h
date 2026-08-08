@@ -4,37 +4,100 @@
 #include <Adafruit_MLX90614.h>
 
 
+// ============================================================
+// MLX90614 STATUS
+// ============================================================
+
 enum class MLXStatus
 {
     DISCONNECTED,
+
     INITIALIZING,
+
+    // Current physical read was invalid, but a previously
+    // trusted filtered value may still be retained.
     INVALID_READING,
+
     FILTER_INITIALIZED,
-    TRUSTED
+
+    TRUSTED,
+
+    HOLDING_LAST_VALUE
 };
 
+
+// ============================================================
+// MLX90614 READING
+// ============================================================
 
 struct MLXReading
 {
     bool connected = false;
-    bool valid = false;
 
-    float rawAmbientC = NAN;
-    float rawObjectC = NAN;
-
-    float filteredAmbientC = NAN;
-    float filteredObjectC = NAN;
-
-    // Runtime environmental context.
+    // True once a trusted filtered temperature pair exists.
     //
     // IMPORTANT:
-    // This is NOT a WESAD-trained feature by itself.
+    // An isolated invalid raw read does not erase the previous
+    // trusted filtered values.
+    bool valid = false;
+
+
+    // --------------------------------------------------------
+    // Most recent raw hardware read
+    // --------------------------------------------------------
+
+    float rawAmbientC = NAN;
+
+    float rawObjectC = NAN;
+
+
+    // --------------------------------------------------------
+    // Trusted filtered values
+    //
+    // Proven filter:
+    // 3-sample median -> EMA(alpha = 0.35)
+    // --------------------------------------------------------
+
+    float filteredAmbientC = NAN;
+
+    float filteredObjectC = NAN;
+
+
+    // --------------------------------------------------------
+    // Runtime ambient context
+    //
+    // This is intentionally retained for SafeSeat deployment.
+    // It is environmental context, not a claim that WESAD
+    // directly trained on MLX ambient temperature.
+    // --------------------------------------------------------
+
     float objectMinusAmbientC = NAN;
+
+
+    // --------------------------------------------------------
+    // Current-sample validity
+    //
+    // This tells Fusion later whether the NEW physical MLX
+    // sample was accepted or whether the module is holding the
+    // previous trusted value.
+    // --------------------------------------------------------
+
+    bool currentSampleAccepted = false;
+
+
+    unsigned long acceptedSampleCount = 0;
+
+    unsigned long rejectedSampleCount = 0;
+
 
     MLXStatus status =
         MLXStatus::DISCONNECTED;
 };
 
+
+// ============================================================
+// SENSOR MODULE
+// ============================================================
 
 class MLXSensor
 {
@@ -42,14 +105,19 @@ public:
 
     MLXSensor();
 
+
     bool begin();
 
+
     void update();
+
 
     const MLXReading&
     getReading() const;
 
+
     bool hasValidReading() const;
+
 
     const char*
     getStatusText() const;
@@ -59,78 +127,96 @@ private:
 
     Adafruit_MLX90614 mlx;
 
+
     MLXReading reading;
 
 
     // ========================================================
     // SAMPLING
     //
-    // WESAD E4 TEMP model was engineered at 4 Hz.
-    // 250 ms = 4 samples/sec.
+    // 4 Hz runtime temperature acquisition.
     // ========================================================
 
     static constexpr unsigned long
-        SAMPLE_INTERVAL_MS = 250UL;
+        SAMPLE_INTERVAL_MS =
+            250UL;
 
 
-    unsigned long lastSampleTime = 0;
+    unsigned long lastSampleTime =
+        0;
 
 
     // ========================================================
-    // FILTER
+    // PROVEN FILTER SETTINGS
     //
-    // Preserved from your tested MLX implementation:
-    // 3-sample median -> EMA(alpha = 0.35)
+    // Copied from the old combined sketch:
+    //
+    // MLX_MEDIAN_WINDOW = 3
+    // MLX_EMA_ALPHA     = 0.35
     // ========================================================
 
     static constexpr int
-        MEDIAN_WINDOW = 3;
+        MEDIAN_WINDOW =
+            3;
+
 
     static constexpr float
-        EMA_ALPHA = 0.35f;
+        EMA_ALPHA =
+            0.35f;
 
 
     float ambientBuffer[
         MEDIAN_WINDOW
     ] = {0};
 
+
     float objectBuffer[
         MEDIAN_WINDOW
     ] = {0};
 
 
-    int bufferIndex = 0;
-
-    int bufferCount = 0;
-
-
-    bool filterInitialized = false;
+    int bufferIndex =
+        0;
 
 
-    float filteredAmbient = 0.0f;
+    bool filterInitialized =
+        false;
 
-    float filteredObject = 0.0f;
+
+    float filteredAmbient =
+        0.0f;
+
+
+    float filteredObject =
+        0.0f;
 
 
     // ========================================================
     // SENSOR-SPECIFICATION VALIDITY LIMITS
     //
-    // These reject impossible/invalid MLX output.
-    // They are NOT medical thresholds.
+    // Same limits as the proven combined sketch.
+    // They reject impossible sensor output; they are NOT
+    // medical thresholds.
     // ========================================================
 
     static constexpr float
-        MIN_AMBIENT_C = -40.0f;
-
-    static constexpr float
-        MAX_AMBIENT_C = 85.0f;
+        MIN_AMBIENT_C =
+            -40.0f;
 
 
     static constexpr float
-        MIN_OBJECT_C = -40.0f;
+        MAX_AMBIENT_C =
+            85.0f;
+
 
     static constexpr float
-        MAX_OBJECT_C = 125.0f;
+        MIN_OBJECT_C =
+            -40.0f;
+
+
+    static constexpr float
+        MAX_OBJECT_C =
+            125.0f;
 
 
     bool isValidAmbient(
@@ -143,24 +229,18 @@ private:
     ) const;
 
 
-    float medianOfThree(
-        float a,
-        float b,
-        float c
+    static float medianOfThree(
+        float firstValue,
+        float secondValue,
+        float thirdValue
     );
 
 
     void resetFilter();
 
 
-    void initializeFilter(
-        float ambient,
-        float object
-    );
-
-
-    void processReading(
-        float ambient,
-        float object
+    bool updateFilter(
+        float rawAmbient,
+        float rawObject
     );
 };

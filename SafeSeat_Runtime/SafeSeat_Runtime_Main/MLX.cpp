@@ -1,5 +1,7 @@
 #include "MLX.h"
 
+#include <math.h>
+
 
 // ============================================================
 // CONSTRUCTOR
@@ -12,38 +14,64 @@ MLXSensor::MLXSensor()
 
 // ============================================================
 // INITIALIZATION
+//
+// IMPORTANT:
+// Wire.begin() belongs to SafeSeat_Runtime_Main.ino.
+//
+// This module uses the already-running shared I2C bus, matching
+// the proven combined sketch.
 // ============================================================
 
 bool MLXSensor::begin()
 {
+    reading =
+        MLXReading{};
+
+
     reading.status =
         MLXStatus::INITIALIZING;
 
 
     Serial.println();
     Serial.println(
-        "[MLX90614] Initializing..."
+        "=================================="
+    );
+
+    Serial.println(
+        " MLX90614 Temperature Sensor"
+    );
+
+    Serial.println(
+        "=================================="
     );
 
 
-    /*
-     * Wire.begin() is handled once by the Main Hub.
-     *
-     * C1001 uses UART.
-     * MLX90614, ADS1115, and MPU6050 all share the same
-     * ESP32 I2C bus.
-     */
-    if (!mlx.begin())
+    if (
+        !mlx.begin()
+    )
     {
         reading.connected =
             false;
+
+
+        reading.valid =
+            false;
+
 
         reading.status =
             MLXStatus::DISCONNECTED;
 
 
         Serial.println(
-            "[MLX90614] ERROR: sensor not detected."
+            "[MLX90614] ERROR: sensor not detected!"
+        );
+
+        Serial.println(
+            "[MLX90614] SDA -> GPIO21"
+        );
+
+        Serial.println(
+            "[MLX90614] SCL -> GPIO22"
         );
 
 
@@ -58,8 +86,15 @@ bool MLXSensor::begin()
     resetFilter();
 
 
+    // Do not manufacture a valid value in begin().
+    // The first real pair is acquired by update(), exactly as
+    // the proven combined loop did.
+    lastSampleTime =
+        0;
+
+
     Serial.println(
-        "[MLX90614] Connected."
+        "MLX90614 Connected Successfully!"
     );
 
 
@@ -76,11 +111,17 @@ bool MLXSensor::isValidAmbient(
 ) const
 {
     return (
-        isfinite(value)
+        isfinite(
+            value
+        )
         &&
-        value >= MIN_AMBIENT_C
+        value
+        >=
+        MIN_AMBIENT_C
         &&
-        value <= MAX_AMBIENT_C
+        value
+        <=
+        MAX_AMBIENT_C
     );
 }
 
@@ -90,55 +131,93 @@ bool MLXSensor::isValidObject(
 ) const
 {
     return (
-        isfinite(value)
+        isfinite(
+            value
+        )
         &&
-        value >= MIN_OBJECT_C
+        value
+        >=
+        MIN_OBJECT_C
         &&
-        value <= MAX_OBJECT_C
+        value
+        <=
+        MAX_OBJECT_C
     );
 }
 
 
 // ============================================================
-// MEDIAN
+// MEDIAN OF THREE
+//
+// This is copied from the proven combined sketch.
 // ============================================================
 
 float MLXSensor::medianOfThree(
-    float a,
-    float b,
-    float c
+    float firstValue,
+    float secondValue,
+    float thirdValue
 )
 {
-    if (a > b)
+    if (
+        firstValue
+        >
+        secondValue
+    )
     {
-        float temp = a;
-        a = b;
-        b = temp;
+        float temporary =
+            firstValue;
+
+        firstValue =
+            secondValue;
+
+        secondValue =
+            temporary;
     }
 
 
-    if (b > c)
+    if (
+        secondValue
+        >
+        thirdValue
+    )
     {
-        float temp = b;
-        b = c;
-        c = temp;
+        float temporary =
+            secondValue;
+
+        secondValue =
+            thirdValue;
+
+        thirdValue =
+            temporary;
     }
 
 
-    if (a > b)
+    if (
+        firstValue
+        >
+        secondValue
+    )
     {
-        float temp = a;
-        a = b;
-        b = temp;
+        float temporary =
+            firstValue;
+
+        firstValue =
+            secondValue;
+
+        secondValue =
+            temporary;
     }
 
 
-    return b;
+    return secondValue;
 }
 
 
 // ============================================================
 // FILTER RESET
+//
+// Same behavior as resetMLXFilter() in the proven combined
+// sketch.
 // ============================================================
 
 void MLXSensor::resetFilter()
@@ -147,13 +226,13 @@ void MLXSensor::resetFilter()
         false;
 
 
-    bufferIndex = 0;
-
-    bufferCount = 0;
+    bufferIndex =
+        0;
 
 
     filteredAmbient =
         0.0f;
+
 
     filteredObject =
         0.0f;
@@ -167,6 +246,7 @@ void MLXSensor::resetFilter()
     {
         ambientBuffer[i] =
             0.0f;
+
 
         objectBuffer[i] =
             0.0f;
@@ -176,6 +256,7 @@ void MLXSensor::resetFilter()
     reading.rawAmbientC =
         NAN;
 
+
     reading.rawObjectC =
         NAN;
 
@@ -183,12 +264,25 @@ void MLXSensor::resetFilter()
     reading.filteredAmbientC =
         NAN;
 
+
     reading.filteredObjectC =
         NAN;
 
 
     reading.objectMinusAmbientC =
         NAN;
+
+
+    reading.currentSampleAccepted =
+        false;
+
+
+    reading.acceptedSampleCount =
+        0;
+
+
+    reading.rejectedSampleCount =
+        0;
 
 
     reading.valid =
@@ -197,107 +291,127 @@ void MLXSensor::resetFilter()
 
 
 // ============================================================
-// INITIAL FILTER VALUE
+// FILTER UPDATE
+//
+// This is the modular equivalent of updateMLXFilter() from the
+// proven combined sketch.
+//
+// Current invalid samples are rejected BEFORE touching the
+// median/EMA state.
 // ============================================================
 
-void MLXSensor::initializeFilter(
-    float ambient,
-    float object
+bool MLXSensor::updateFilter(
+    float rawAmbient,
+    float rawObject
 )
 {
-    for (
-        int i = 0;
-        i < MEDIAN_WINDOW;
-        i++
+    if (
+        !isValidAmbient(
+            rawAmbient
+        )
+        ||
+        !isValidObject(
+            rawObject
+        )
     )
     {
-        ambientBuffer[i] =
-            ambient;
-
-        objectBuffer[i] =
-            object;
+        return false;
     }
 
 
-    filteredAmbient =
-        ambient;
+    // --------------------------------------------------------
+    // First accepted pair initializes the complete 3-sample
+    // median window and EMA state.
+    // --------------------------------------------------------
 
-    filteredObject =
-        object;
-
-
-    bufferIndex = 0;
-
-    bufferCount =
-        MEDIAN_WINDOW;
-
-
-    filterInitialized =
-        true;
-
-
-    reading.filteredAmbientC =
-        filteredAmbient;
-
-    reading.filteredObjectC =
-        filteredObject;
-
-
-    reading.objectMinusAmbientC =
-        filteredObject
-        -
-        filteredAmbient;
-
-
-    reading.valid =
-        true;
-
-
-    reading.status =
-        MLXStatus::
-            FILTER_INITIALIZED;
-}
-
-
-// ============================================================
-// FILTER PROCESSING
-// ============================================================
-
-void MLXSensor::processReading(
-    float ambient,
-    float object
-)
-{
-    if (!filterInitialized)
+    if (
+        !filterInitialized
+    )
     {
-        initializeFilter(
-            ambient,
-            object
-        );
+        for (
+            int i = 0;
+            i < MEDIAN_WINDOW;
+            i++
+        )
+        {
+            ambientBuffer[i] =
+                rawAmbient;
 
-        return;
+
+            objectBuffer[i] =
+                rawObject;
+        }
+
+
+        filteredAmbient =
+            rawAmbient;
+
+
+        filteredObject =
+            rawObject;
+
+
+        bufferIndex =
+            0;
+
+
+        filterInitialized =
+            true;
+
+
+        reading.filteredAmbientC =
+            filteredAmbient;
+
+
+        reading.filteredObjectC =
+            filteredObject;
+
+
+        reading.objectMinusAmbientC =
+            filteredObject
+            -
+            filteredAmbient;
+
+
+        reading.valid =
+            true;
+
+
+        reading.status =
+            MLXStatus::FILTER_INITIALIZED;
+
+
+        return true;
     }
 
+
+    // --------------------------------------------------------
+    // 3-SAMPLE MEDIAN
+    // --------------------------------------------------------
 
     ambientBuffer[
         bufferIndex
-    ] = ambient;
+    ] =
+        rawAmbient;
 
 
     objectBuffer[
         bufferIndex
-    ] = object;
+    ] =
+        rawObject;
 
 
     bufferIndex++;
 
 
     if (
-        bufferIndex >=
+        bufferIndex
+        >=
         MEDIAN_WINDOW
     )
     {
-        bufferIndex = 0;
+        bufferIndex =
+            0;
     }
 
 
@@ -316,6 +430,10 @@ void MLXSensor::processReading(
             objectBuffer[2]
         );
 
+
+    // --------------------------------------------------------
+    // EMA(alpha = 0.35)
+    // --------------------------------------------------------
 
     filteredAmbient =
         EMA_ALPHA
@@ -353,16 +471,6 @@ void MLXSensor::processReading(
         filteredObject;
 
 
-    /*
-     * Runtime ambient compensation/context.
-     *
-     * We preserve this because MLX object temperature can shift
-     * when cabin/environment temperature changes.
-     *
-     * However:
-     * the WESAD model itself was trained using TEMP behavior,
-     * not MLX ambient readings.
-     */
     reading.objectMinusAmbientC =
         filteredObject
         -
@@ -375,6 +483,9 @@ void MLXSensor::processReading(
 
     reading.status =
         MLXStatus::TRUSTED;
+
+
+    return true;
 }
 
 
@@ -384,10 +495,17 @@ void MLXSensor::processReading(
 
 void MLXSensor::update()
 {
-    if (!reading.connected)
+    if (
+        !reading.connected
+    )
     {
+        reading.currentSampleAccepted =
+            false;
+
+
         reading.status =
             MLXStatus::DISCONNECTED;
+
 
         return;
     }
@@ -413,9 +531,9 @@ void MLXSensor::update()
         now;
 
 
-    // --------------------------------------------------------
-    // RAW SENSOR READ
-    // --------------------------------------------------------
+    // ========================================================
+    // EXACT HARDWARE READ ORDER FROM THE PROVEN COMBINED LOOP
+    // ========================================================
 
     float rawAmbient =
         mlx.readAmbientTempC();
@@ -433,46 +551,75 @@ void MLXSensor::update()
         rawObject;
 
 
-    // --------------------------------------------------------
-    // REJECT INVALID SENSOR OUTPUT
-    // --------------------------------------------------------
+    bool accepted =
+        updateFilter(
+            rawAmbient,
+            rawObject
+        );
+
+
+    reading.currentSampleAccepted =
+        accepted;
+
 
     if (
-        !isValidAmbient(
-            rawAmbient
+        accepted
+    )
+    {
+        reading.acceptedSampleCount++;
+
+
+        // updateFilter() already sets FILTER_INITIALIZED or
+        // TRUSTED as appropriate.
+        return;
+    }
+
+
+    // ========================================================
+    // INVALID CURRENT SAMPLE
+    //
+    // Proven combined code returned false without modifying
+    // filteredAmbientTemp/filteredObjectTemp.
+    //
+    // Do the same here:
+    // - do not contaminate median/EMA state
+    // - retain previous trusted filtered values
+    // - explicitly expose that the CURRENT sample was rejected
+    // ========================================================
+
+    reading.rejectedSampleCount++;
+
+
+    if (
+        filterInitialized
+        &&
+        isfinite(
+            reading.filteredAmbientC
         )
-        ||
-        !isValidObject(
-            rawObject
+        &&
+        isfinite(
+            reading.filteredObjectC
         )
     )
     {
+        // We still possess a valid previous filtered pair.
+        reading.valid =
+            true;
+
+
+        reading.status =
+            MLXStatus::HOLDING_LAST_VALUE;
+    }
+    else
+    {
+        // No trusted pair has ever been obtained.
         reading.valid =
             false;
 
 
         reading.status =
-            MLXStatus::
-                INVALID_READING;
-
-
-        /*
-         * Do NOT contaminate the median/EMA state.
-         * Keep the last trusted filtered values available.
-         */
-
-        return;
+            MLXStatus::INVALID_READING;
     }
-
-
-    // --------------------------------------------------------
-    // FILTER
-    // --------------------------------------------------------
-
-    processReading(
-        rawAmbient,
-        rawObject
-    );
 }
 
 
@@ -495,11 +642,15 @@ bool MLXSensor::hasValidReading() const
         reading.valid
         &&
         isfinite(
+            reading.filteredAmbientC
+        )
+        &&
+        isfinite(
             reading.filteredObjectC
         )
         &&
         isfinite(
-            reading.filteredAmbientC
+            reading.objectMinusAmbientC
         )
     );
 }
@@ -519,17 +670,26 @@ MLXSensor::getStatusText() const
         case MLXStatus::DISCONNECTED:
             return "DISCONNECTED";
 
+
         case MLXStatus::INITIALIZING:
             return "INITIALIZING";
 
+
         case MLXStatus::INVALID_READING:
-            return "INVALID READING - HOLD";
+            return "INVALID READING - NO TRUSTED VALUE YET";
+
 
         case MLXStatus::FILTER_INITIALIZED:
             return "FILTER INITIALIZED";
 
+
         case MLXStatus::TRUSTED:
-            return "FILTERED AND TRUSTED";
+            return "FILTERED AND VALID";
+
+
+        case MLXStatus::HOLDING_LAST_VALUE:
+            return "INVALID CURRENT SAMPLE - HOLDING PREVIOUS VALUE";
+
 
         default:
             return "UNKNOWN";
