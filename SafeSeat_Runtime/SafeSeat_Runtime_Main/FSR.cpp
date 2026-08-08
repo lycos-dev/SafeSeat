@@ -104,6 +104,9 @@ bool FSRSensor::begin()
         GAIN_ONE
     );
 
+    ads1.setDataRate(
+    RATE_ADS1115_860SPS
+);
 
     Serial.println(
         "[FSR] ADS1115 #1 (0x48) ready."
@@ -149,6 +152,9 @@ bool FSRSensor::begin()
         GAIN_ONE
     );
 
+    ads2.setDataRate(
+    RATE_ADS1115_860SPS
+);
 
     Serial.println(
         "[FSR] ADS1115 #2 (0x49) ready."
