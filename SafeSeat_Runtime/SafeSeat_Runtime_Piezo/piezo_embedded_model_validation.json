@@ -1,0 +1,12 @@
+{
+  "scikit_learn_version": "1.8.0",
+  "feature_count": 16,
+  "iforest_tree_count": 200,
+  "iforest_total_nodes": 24562,
+  "ocsvm_support_vectors": 35,
+  "random_vectors_tested": 200,
+  "iforest_max_abs_decision_error": 1.1102230246251565e-16,
+  "iforest_prediction_match_rate": 1.0,
+  "ocsvm_max_abs_decision_error": 1.9534828421541306e-07,
+  "ocsvm_prediction_match_rate": 1.0
+}

@@ -1,0 +1,14 @@
+{
+  "feature_count": 16,
+  "iforest_trees": 200,
+  "iforest_nodes": 24562,
+  "ocsvm_support_vectors": 35,
+  "invalid_integer_float_literals_found": 0,
+  "old_monolithic_PiezoModelData_cpp_included": false,
+  "instructions": [
+    "Delete the old PiezoModelData.cpp from your Arduino sketch folder.",
+    "Copy every file from this package into SafeSeat_Runtime_Piezo.",
+    "Keep all split PiezoModelData_*.cpp files in the same sketch folder."
+  ],
+  "validation_note": "Scientific notation such as 9.11086463e-05f is valid C++ and is not counted."
+}

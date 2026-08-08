@@ -3,6 +3,7 @@
 #include "Config.h"
 #include "PiezoSensor.h"
 #include "PiezoFeatureExtractor.h"
+#include "PiezoInference.h"
 
 
 // ============================================================
@@ -11,15 +12,20 @@
 
 PiezoSensor piezo;
 PiezoFeatureExtractor featureExtractor;
+PiezoInference piezoInference;
 
 
 // ============================================================
-// FEATURE STATE
+// FEATURE / INFERENCE STATE
 // ============================================================
 
 PiezoFeatures latestFeatures;
+PiezoInferenceResult latestInference;
 
 bool featureVectorReady =
+    false;
+
+bool inferenceReady =
     false;
 
 unsigned long featureWindowCount =
@@ -29,11 +35,9 @@ unsigned long featureWindowCount =
 // ============================================================
 // WORKING BUFFERS
 //
-// PiezoSensor owns the only rolling 750-sample acquisition
-// buffer.
-//
-// These arrays are temporary working copies used only when a
-// new 5-second feature stride is due.
+// PiezoSensor owns the persistent rolling 750-sample window.
+// These are temporary working arrays only when a feature
+// stride is due.
 // ============================================================
 
 float respirationWindow[
@@ -54,14 +58,13 @@ unsigned long lastReportMillis =
 
 
 // ============================================================
-// FEATURE GENERATION
+// WINDOW -> FEATURES -> MODEL
 // ============================================================
 
-void processFeatureWindow()
+void processModelWindow()
 {
     const PiezoReading &p =
         piezo.getReading();
-
 
     if (
         !p.newFeatureWindowDue
@@ -70,6 +73,11 @@ void processFeatureWindow()
         return;
     }
 
+    inferenceReady =
+        false;
+
+    featureVectorReady =
+        false;
 
     if (
         !piezo.copyRespirationWindow(
@@ -79,65 +87,57 @@ void processFeatureWindow()
     )
     {
         piezo.acknowledgeFeatureWindow();
-
         return;
     }
 
-
     // --------------------------------------------------------
-    // Runtime robust normalization bridge
+    // DEPLOYMENT NORMALIZATION BRIDGE
     //
-    // Training used median/MAD robust standardization.
-    // In training this was calculated over a complete subject
-    // recording. A live system cannot access future samples,
-    // so the same formula is applied to the current 30-second
-    // live window.
+    // The training pipeline robust-standardized each complete
+    // WESAD subject recording using median + MAD.
     //
-    // This is a deployment adaptation to validate later using
-    // actual collected SafeSeat Piezo data.
+    // A live device cannot see an entire future recording, so
+    // the same robust formula is applied to the current
+    // 30-second live window.
+    //
+    // This adaptation must be validated with collected
+    // SafeSeat Piezo recordings before final model claims.
     // --------------------------------------------------------
 
-    bool normalized =
-        featureExtractor.robustNormalizeWindow(
+    if (
+        !featureExtractor.robustNormalizeWindow(
             respirationWindow,
             normalizedWindow,
             PIEZO_WINDOW_SAMPLES
-        );
-
-
-    if (
-        !normalized
+        )
     )
     {
-        featureVectorReady =
-            false;
-
-
         piezo.acknowledgeFeatureWindow();
-
         return;
     }
 
-
-    bool extracted =
-        featureExtractor.computeFeatures(
+    if (
+        !featureExtractor.computeFeatures(
             normalizedWindow,
             PIEZO_WINDOW_SAMPLES,
             latestFeatures
-        );
-
-
-    featureVectorReady =
-        extracted;
-
-
-    if (
-        extracted
+        )
     )
     {
-        featureWindowCount++;
+        piezo.acknowledgeFeatureWindow();
+        return;
     }
 
+    featureVectorReady =
+        true;
+
+    featureWindowCount++;
+
+    inferenceReady =
+        piezoInference.predict(
+            latestFeatures,
+            latestInference
+        );
 
     piezo.acknowledgeFeatureWindow();
 }
@@ -153,11 +153,9 @@ void setup()
         115200
     );
 
-
     delay(
         1000
     );
-
 
     Serial.println();
     Serial.println(
@@ -169,41 +167,33 @@ void setup()
     );
 
     Serial.println(
-        " Stage 2 - Piezo Feature Extraction"
+        " Stage 3 - Embedded Piezo Inference"
     );
 
     Serial.println(
         "=========================================="
     );
 
-
     bool piezoReady =
         piezo.begin();
 
-
-    if (
+    Serial.println(
         piezoReady
-    )
-    {
-        Serial.println(
-            "[PIEZO] Acquisition ready."
-        );
-    }
-    else
-    {
-        Serial.println(
-            "[PIEZO] ERROR: initialization failed."
-        );
-    }
-
+            ? "[PIEZO] Acquisition ready."
+            : "[PIEZO] ERROR: initialization failed."
+    );
 
     Serial.println();
     Serial.println(
-        "[ML] Waiting for first 30-second window..."
+        "[ML] Model source: tuned SafeSeat PIEZO joblib models."
     );
 
     Serial.println(
-        "[ML] New feature vector every 5 seconds thereafter."
+        "[ML] First result after 30 seconds."
+    );
+
+    Serial.println(
+        "[ML] New result every 5 seconds thereafter."
     );
 
     Serial.println();
@@ -216,27 +206,12 @@ void setup()
 
 void loop()
 {
-    // ========================================================
-    // 25 Hz ACQUISITION
-    // ========================================================
-
     piezo.update();
 
-
-    // ========================================================
-    // 30 s WINDOW / 5 s STRIDE FEATURE EXTRACTION
-    // ========================================================
-
-    processFeatureWindow();
-
-
-    // ========================================================
-    // SERIAL DASHBOARD
-    // ========================================================
+    processModelWindow();
 
     unsigned long now =
         millis();
-
 
     if (
         now -
@@ -248,14 +223,11 @@ void loop()
         return;
     }
 
-
     lastReportMillis =
         now;
 
-
     const PiezoReading &p =
         piezo.getReading();
-
 
     Serial.println();
     Serial.println(
@@ -270,47 +242,16 @@ void loop()
         "=========================================="
     );
 
-
     // ========================================================
-    // ACQUISITION
+    // SENSOR
     // ========================================================
 
     Serial.println(
         "Acquisition:"
     );
 
-
     Serial.print(
-        "  Status         : "
-    );
-
-
-    switch (
-        p.status
-    )
-    {
-        case PiezoStatus::INITIALIZING:
-            Serial.println(
-                "INITIALIZING"
-            );
-            break;
-
-        case PiezoStatus::READY:
-            Serial.println(
-                "READY"
-            );
-            break;
-
-        case PiezoStatus::INVALID_READING:
-            Serial.println(
-                "INVALID READING"
-            );
-            break;
-    }
-
-
-    Serial.print(
-        "  Sample rate    : "
+        "  Sample rate     : "
     );
 
     Serial.print(
@@ -322,57 +263,16 @@ void loop()
         " Hz"
     );
 
-
     Serial.print(
-        "  Sample count   : "
+        "  Samples         : "
     );
 
     Serial.println(
         p.sampleCount
     );
 
-
-    // ========================================================
-    // SIGNAL
-    // ========================================================
-
-    Serial.println();
-    Serial.println(
-        "Signal:"
-    );
-
-
     Serial.print(
-        "  Raw ADC        : "
-    );
-
-    Serial.println(
-        p.rawADC
-    );
-
-
-    Serial.print(
-        "  Filtered       : "
-    );
-
-    Serial.println(
-        p.filteredSignal,
-        2
-    );
-
-
-    Serial.print(
-        "  Baseline       : "
-    );
-
-    Serial.println(
-        p.baseline,
-        2
-    );
-
-
-    Serial.print(
-        "  Resp waveform  : "
+        "  Resp waveform   : "
     );
 
     Serial.println(
@@ -380,9 +280,24 @@ void loop()
         2
     );
 
+    Serial.print(
+        "  30s window      : "
+    );
+
+    Serial.print(
+        p.windowSamplesAvailable
+    );
+
+    Serial.print(
+        " / "
+    );
+
+    Serial.println(
+        PIEZO_WINDOW_SAMPLES
+    );
 
     // ========================================================
-    // BREATHING CONTEXT
+    // AUXILIARY BREATH CONTEXT
     // ========================================================
 
     Serial.println();
@@ -390,20 +305,9 @@ void loop()
         "Breathing context:"
     );
 
-
     Serial.print(
-        "  Total breaths  : "
+        "  Peak-based RR   : "
     );
-
-    Serial.println(
-        p.totalBreaths
-    );
-
-
-    Serial.print(
-        "  Peak-based RR  : "
-    );
-
 
     if (
         isfinite(
@@ -423,13 +327,12 @@ void loop()
     else
     {
         Serial.println(
-            "not enough breaths"
+            "not ready"
         );
     }
 
-
     Serial.print(
-        "  No-breath time : "
+        "  No-breath time  : "
     );
 
     Serial.print(
@@ -442,9 +345,8 @@ void loop()
         " sec"
     );
 
-
     Serial.print(
-        "  15s timer      : "
+        "  15s timer       : "
     );
 
     Serial.println(
@@ -453,212 +355,53 @@ void loop()
             : "NO"
     );
 
-
     // ========================================================
-    // MODEL WINDOW
+    // FEATURE VECTOR
     // ========================================================
 
     Serial.println();
     Serial.println(
-        "ML window:"
-    );
-
-
-    Serial.print(
-        "  Samples        : "
+        "Model window:"
     );
 
     Serial.print(
-        p.windowSamplesAvailable
-    );
-
-    Serial.print(
-        " / "
-    );
-
-    Serial.println(
-        PIEZO_WINDOW_SAMPLES
-    );
-
-
-    Serial.print(
-        "  30s ready      : "
-    );
-
-    Serial.println(
-        p.fullWindowReady
-            ? "YES"
-            : "NO"
-    );
-
-
-    Serial.print(
-        "  Feature vectors: "
+        "  Feature windows : "
     );
 
     Serial.println(
         featureWindowCount
     );
 
-
-    // ========================================================
-    // 16 FEATURES
-    // ========================================================
-
     if (
         featureVectorReady
     )
     {
-        Serial.println();
-        Serial.println(
-            "Latest normalized 30s features:"
-        );
-
-
         Serial.print(
-            "  01 mean        : "
-        );
-        Serial.println(
-            latestFeatures.mean,
-            6
+            "  Spectral RR     : "
         );
 
-
-        Serial.print(
-            "  02 std         : "
-        );
-        Serial.println(
-            latestFeatures.std,
-            6
-        );
-
-
-        Serial.print(
-            "  03 min         : "
-        );
-        Serial.println(
-            latestFeatures.minimum,
-            6
-        );
-
-
-        Serial.print(
-            "  04 max         : "
-        );
-        Serial.println(
-            latestFeatures.maximum,
-            6
-        );
-
-
-        Serial.print(
-            "  05 range       : "
-        );
-        Serial.println(
-            latestFeatures.range,
-            6
-        );
-
-
-        Serial.print(
-            "  06 median      : "
-        );
-        Serial.println(
-            latestFeatures.median,
-            6
-        );
-
-
-        Serial.print(
-            "  07 IQR         : "
-        );
-        Serial.println(
-            latestFeatures.iqr,
-            6
-        );
-
-
-        Serial.print(
-            "  08 RMS         : "
-        );
-        Serial.println(
-            latestFeatures.rms,
-            6
-        );
-
-
-        Serial.print(
-            "  09 energy      : "
-        );
-        Serial.println(
-            latestFeatures.energy,
-            6
-        );
-
-
-        Serial.print(
-            "  10 meanAbsDiff : "
-        );
-        Serial.println(
-            latestFeatures.meanAbsDiff,
-            6
-        );
-
-
-        Serial.print(
-            "  11 stdDiff     : "
-        );
-        Serial.println(
-            latestFeatures.stdDiff,
-            6
-        );
-
-
-        Serial.print(
-            "  12 ZCR         : "
-        );
-        Serial.println(
-            latestFeatures.zeroCrossingRate,
-            6
-        );
-
-
-        Serial.print(
-            "  13 domFreq     : "
-        );
-        Serial.print(
-            latestFeatures.dominantFrequencyHz,
-            6
-        );
-        Serial.println(
-            " Hz"
-        );
-
-
-        Serial.print(
-            "  14 spectral RR : "
-        );
         Serial.print(
             latestFeatures.respirationBPM,
             2
         );
+
         Serial.println(
             " BPM"
         );
 
-
         Serial.print(
-            "  15 specEntropy : "
+            "  Spectral entropy: "
         );
+
         Serial.println(
             latestFeatures.spectralEntropy,
             6
         );
 
-
         Serial.print(
-            "  16 autocorr    : "
+            "  Autocorr peak   : "
         );
+
         Serial.println(
             latestFeatures.autocorrelationPeak,
             6
@@ -666,28 +409,93 @@ void loop()
     }
     else
     {
-        Serial.println();
         Serial.println(
-            "Features        : waiting for first complete window"
+            "  Features         : waiting"
         );
     }
 
-
     // ========================================================
-    // UPCOMING
+    // TRAINED MODEL INFERENCE
     // ========================================================
 
     Serial.println();
     Serial.println(
-        "------------------------------------------"
+        "Trained anomaly models:"
     );
 
-    Serial.println(
-        "Inference       : not integrated yet"
-    );
+    if (
+        inferenceReady &&
+        latestInference.valid
+    )
+    {
+        Serial.print(
+            "  IsolationForest : "
+        );
 
+        Serial.print(
+            latestInference.isolationForestDecision,
+            6
+        );
+
+        Serial.print(
+            " -> "
+        );
+
+        Serial.println(
+            latestInference.isolationForestAnomaly
+                ? "ANOMALY"
+                : "NORMAL"
+        );
+
+        Serial.print(
+            "  One-Class SVM   : "
+        );
+
+        Serial.print(
+            latestInference.oneClassSVMDecision,
+            6
+        );
+
+        Serial.print(
+            " -> "
+        );
+
+        Serial.println(
+            latestInference.oneClassSVMAnomaly
+                ? "ANOMALY"
+                : "NORMAL"
+        );
+
+        Serial.print(
+            "  BOTH models     : "
+        );
+
+        Serial.println(
+            latestInference.bothModelsAnomaly
+                ? "ANOMALY"
+                : "NORMAL"
+        );
+
+        Serial.print(
+            "  EITHER model    : "
+        );
+
+        Serial.println(
+            latestInference.eitherModelAnomaly
+                ? "ANOMALY"
+                : "NORMAL"
+        );
+    }
+    else
+    {
+        Serial.println(
+            "  Inference        : waiting for first window"
+        );
+    }
+
+    Serial.println();
     Serial.println(
-        "PiezoComm       : not integrated yet"
+        "PiezoComm        : next stage"
     );
 
     Serial.println(
