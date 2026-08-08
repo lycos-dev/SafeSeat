@@ -1,6 +1,7 @@
 #include "MPU.h"
 #include "Config.h"
 
+#include <Wire.h>
 #include <math.h>
 
 
@@ -9,8 +10,187 @@
 // ============================================================
 
 MPUSensor::MPUSensor()
-    : mpu(MPU6050_ADDRESS)
 {
+}
+
+
+// ============================================================
+// LOW-LEVEL REGISTER WRITE
+// ============================================================
+
+bool MPUSensor::writeRegister(
+    uint8_t reg,
+    uint8_t value
+)
+{
+    Wire.beginTransmission(
+        MPU6050_ADDRESS
+    );
+
+    Wire.write(
+        reg
+    );
+
+    Wire.write(
+        value
+    );
+
+    return (
+        Wire.endTransmission()
+        ==
+        0
+    );
+}
+
+
+// ============================================================
+// CONNECTION TEST
+// ============================================================
+
+bool MPUSensor::testConnection()
+{
+    // WHO_AM_I register = 0x75
+
+    Wire.beginTransmission(
+        MPU6050_ADDRESS
+    );
+
+    Wire.write(
+        0x75
+    );
+
+    if (
+        Wire.endTransmission(
+            false
+        )
+        != 0
+    )
+    {
+        return false;
+    }
+
+    uint8_t received =
+        Wire.requestFrom(
+            MPU6050_ADDRESS,
+            (uint8_t)1,
+            (bool)true
+        );
+
+    if (
+        received != 1
+    )
+    {
+        return false;
+    }
+
+    uint8_t whoAmI =
+        Wire.read();
+
+    /*
+     * MPU6050 typically returns 0x68.
+     */
+    return (
+        whoAmI == 0x68
+    );
+}
+
+
+// ============================================================
+// READ ALL MOTION REGISTERS
+// ============================================================
+
+bool MPUSensor::readMotionRegisters(
+    int16_t& ax,
+    int16_t& ay,
+    int16_t& az,
+    int16_t& temperature,
+    int16_t& gx,
+    int16_t& gy,
+    int16_t& gz
+)
+{
+    /*
+     * ACCEL_XOUT_H starts at 0x3B.
+     *
+     * 14 consecutive bytes:
+     *
+     * AX H/L
+     * AY H/L
+     * AZ H/L
+     * TEMP H/L
+     * GX H/L
+     * GY H/L
+     * GZ H/L
+     */
+
+    Wire.beginTransmission(
+        MPU6050_ADDRESS
+    );
+
+    Wire.write(
+        0x3B
+    );
+
+    if (
+        Wire.endTransmission(
+            false
+        )
+        != 0
+    )
+    {
+        return false;
+    }
+
+    uint8_t received =
+        Wire.requestFrom(
+            MPU6050_ADDRESS,
+            (uint8_t)14,
+            (bool)true
+        );
+
+    if (
+        received != 14
+    )
+    {
+        return false;
+    }
+
+    ax =
+        (Wire.read() << 8)
+        |
+        Wire.read();
+
+    ay =
+        (Wire.read() << 8)
+        |
+        Wire.read();
+
+    az =
+        (Wire.read() << 8)
+        |
+        Wire.read();
+
+    temperature =
+        (Wire.read() << 8)
+        |
+        Wire.read();
+
+    gx =
+        (Wire.read() << 8)
+        |
+        Wire.read();
+
+    gy =
+        (Wire.read() << 8)
+        |
+        Wire.read();
+
+    gz =
+        (Wire.read() << 8)
+        |
+        Wire.read();
+
+    return true;
 }
 
 
@@ -23,75 +203,120 @@ bool MPUSensor::begin()
     reading.status =
         MPUStatus::INITIALIZING;
 
-
     Serial.println();
     Serial.println(
-        "[MPU6050] Initializing..."
+        "[MPU6050] Initializing using raw I2C..."
     );
 
-
-    /*
-     * Wire has already been started by the Main Hub.
-     */
-    mpu.initialize();
-
-
     if (
-        !mpu.testConnection()
+        !testConnection()
     )
     {
         reading.connected =
             false;
 
-
         reading.status =
             MPUStatus::DISCONNECTED;
 
-
         Serial.println(
-            "[MPU6050] ERROR: connection failed."
+            "[MPU6050] ERROR: device not detected at 0x68."
         );
-
 
         return false;
     }
 
 
     // ========================================================
-    // MODEL-CONSISTENT SENSOR RANGES
+    // WAKE SENSOR
+    //
+    // PWR_MGMT_1 = 0x6B
+    // Writing 0 removes sleep mode.
     // ========================================================
 
-    mpu.setFullScaleAccelRange(
-        MPU6050_ACCEL_FS_2
+    if (
+        !writeRegister(
+            0x6B,
+            0x00
+        )
+    )
+    {
+        reading.connected =
+            false;
+
+        reading.status =
+            MPUStatus::DISCONNECTED;
+
+        Serial.println(
+            "[MPU6050] ERROR: failed to wake sensor."
+        );
+
+        return false;
+    }
+
+
+    delay(
+        100
     );
 
 
-    mpu.setFullScaleGyroRange(
-        MPU6050_GYRO_FS_250
+    // ========================================================
+    // ACCELEROMETER RANGE
+    //
+    // ACCEL_CONFIG = 0x1C
+    // 0x00 = +/-2g
+    // ========================================================
+
+    writeRegister(
+        0x1C,
+        0x00
     );
 
 
-    /*
-     * Digital low-pass filtering.
-     *
-     * This still retains road impacts while reducing
-     * very high-frequency electrical/mechanical noise.
-     */
-    mpu.setDLPFMode(
-        MPU6050_DLPF_BW_42
+    // ========================================================
+    // GYROSCOPE RANGE
+    //
+    // GYRO_CONFIG = 0x1B
+    // 0x00 = +/-250 deg/s
+    // ========================================================
+
+    writeRegister(
+        0x1B,
+        0x00
     );
 
 
-    /*
-     * MPU internal output rate:
-     *
-     * with DLPF enabled:
-     * 1 kHz / (1 + divider)
-     *
-     * divider = 9
-     * -> 100 Hz
-     */
-    mpu.setRate(
+    // ========================================================
+    // DIGITAL LOW PASS FILTER
+    //
+    // CONFIG = 0x1A
+    //
+    // DLPF_CFG = 3
+    // Approx:
+    // accel BW ~44 Hz
+    // gyro BW ~42 Hz
+    //
+    // Good compromise for road vibration acquisition.
+    // ========================================================
+
+    writeRegister(
+        0x1A,
+        0x03
+    );
+
+
+    // ========================================================
+    // SAMPLE RATE
+    //
+    // SMPLRT_DIV = 0x19
+    //
+    // With DLPF enabled:
+    // internal rate = 1 kHz
+    //
+    // 1000 / (1 + 9) = 100 Hz
+    // ========================================================
+
+    writeRegister(
+        0x19,
         9
     );
 
@@ -99,75 +324,37 @@ bool MPUSensor::begin()
     reading.connected =
         true;
 
-
     reading.valid =
         false;
-
 
     reading.sampleCount =
         0;
 
-
-    reading.lastSampleMicros =
+    lastSampleMicros =
         micros();
-
 
     reading.status =
         MPUStatus::READY;
 
 
     Serial.println(
-        "[MPU6050] Connected."
+        "[MPU6050] Connected at 0x68."
     );
 
-
     Serial.println(
-        "[MPU6050] Range: +/-2g, +/-250 deg/s."
+        "[MPU6050] Accel range: +/-2g."
     );
 
+    Serial.println(
+        "[MPU6050] Gyro range: +/-250 deg/s."
+    );
 
     Serial.println(
-        "[MPU6050] Target sampling: 100 Hz."
+        "[MPU6050] Configured for ~100 Hz."
     );
 
 
     return true;
-}
-
-
-// ============================================================
-// VALIDATION
-// ============================================================
-
-bool MPUSensor::valuesAreValid(
-    int16_t ax,
-    int16_t ay,
-    int16_t az,
-    int16_t gx,
-    int16_t gy,
-    int16_t gz
-) const
-{
-    /*
-     * int16_t itself always lies within legal MPU output range.
-     *
-     * This check mainly rejects the highly suspicious situation
-     * where every channel simultaneously returns zero.
-     */
-
-    return !(
-        ax == 0
-        &&
-        ay == 0
-        &&
-        az == 0
-        &&
-        gx == 0
-        &&
-        gy == 0
-        &&
-        gz == 0
-    );
 }
 
 
@@ -182,11 +369,15 @@ void MPUSensor::calculateDerivedValues()
             reading.accelX
             *
             reading.accelX
+
             +
+
             reading.accelY
             *
             reading.accelY
+
             +
+
             reading.accelZ
             *
             reading.accelZ
@@ -198,17 +389,26 @@ void MPUSensor::calculateDerivedValues()
             reading.gyroX
             *
             reading.gyroX
+
             +
+
             reading.gyroY
             *
             reading.gyroY
+
             +
+
             reading.gyroZ
             *
             reading.gyroZ
         );
 
 
+    /*
+     * Stationary MPU magnitude is approximately 1g.
+     *
+     * Remove the static gravity component.
+     */
     reading.dynamicAcceleration =
         fabsf(
             reading.accelMagnitude
@@ -231,7 +431,6 @@ void MPUSensor::update()
         reading.status =
             MPUStatus::DISCONNECTED;
 
-
         return;
     }
 
@@ -243,7 +442,7 @@ void MPUSensor::update()
     uint32_t elapsed =
         now
         -
-        reading.lastSampleMicros;
+        lastSampleMicros;
 
 
     if (
@@ -255,10 +454,9 @@ void MPUSensor::update()
     }
 
 
-    // ========================================================
-    // SAMPLE RATE MEASUREMENT
-    // ========================================================
-
+    /*
+     * Use actual elapsed time instead of assuming exactly 10ms.
+     */
     if (
         elapsed > 0
     )
@@ -272,42 +470,27 @@ void MPUSensor::update()
     }
 
 
-    reading.lastSampleMicros =
+    lastSampleMicros =
         now;
 
-
-    // ========================================================
-    // MPU READ
-    // ========================================================
 
     int16_t ax;
     int16_t ay;
     int16_t az;
+
+    int16_t temperature;
 
     int16_t gx;
     int16_t gy;
     int16_t gz;
 
 
-    mpu.getMotion6(
-        &ax,
-        &ay,
-        &az,
-        &gx,
-        &gy,
-        &gz
-    );
-
-
-    // ========================================================
-    // VALIDITY
-    // ========================================================
-
     if (
-        !valuesAreValid(
+        !readMotionRegisters(
             ax,
             ay,
             az,
+            temperature,
             gx,
             gy,
             gz
@@ -317,11 +500,8 @@ void MPUSensor::update()
         reading.valid =
             false;
 
-
         reading.status =
-            MPUStatus::
-                INVALID_READING;
-
+            MPUStatus::INVALID_READING;
 
         return;
     }
@@ -351,8 +531,14 @@ void MPUSensor::update()
         gz;
 
 
+    reading.rawTemperature =
+        temperature;
+
+
     // ========================================================
     // UNIT CONVERSION
+    //
+    // These match the configured sensor ranges.
     // ========================================================
 
     reading.accelX =
@@ -402,10 +588,6 @@ void MPUSensor::update()
         /
         GYRO_SCALE;
 
-
-    // ========================================================
-    // DERIVED MOTION VALUES
-    // ========================================================
 
     calculateDerivedValues();
 
