@@ -2,6 +2,11 @@
 
 #include <Arduino.h>
 
+
+// ============================================================
+// MPU6050 STATUS
+// ============================================================
+
 enum class MPUStatus
 {
     DISCONNECTED,
@@ -10,12 +15,17 @@ enum class MPUStatus
     INVALID_READING
 };
 
+
+// ============================================================
+// MPU6050 READING
+// ============================================================
+
 struct MPUReading
 {
     bool connected = false;
     bool valid = false;
 
-    // Raw MPU6050 values
+    // Raw register values
     int16_t rawAx = 0;
     int16_t rawAy = 0;
     int16_t rawAz = 0;
@@ -35,7 +45,9 @@ struct MPUReading
     float gyroY = 0.0f;
     float gyroZ = 0.0f;
 
-    // Derived values
+    float temperatureC = 0.0f;
+
+    // Derived runtime context
     float accelMagnitude = 0.0f;
     float gyroMagnitude = 0.0f;
     float dynamicAcceleration = 0.0f;
@@ -44,8 +56,14 @@ struct MPUReading
     unsigned long sampleCount = 0;
     float actualSamplingRateHz = 0.0f;
 
-    MPUStatus status = MPUStatus::DISCONNECTED;
+    MPUStatus status =
+        MPUStatus::DISCONNECTED;
 };
+
+
+// ============================================================
+// SENSOR CLASS
+// ============================================================
 
 class MPUSensor
 {
@@ -53,31 +71,61 @@ public:
     MPUSensor();
 
     bool begin();
+
     void update();
 
-    const MPUReading& getReading() const;
+    const MPUReading&
+    getReading() const;
 
     bool hasValidReading() const;
 
-    const char* getStatusText() const;
+    const char*
+    getStatusText() const;
+
 
 private:
-    static constexpr uint32_t SAMPLE_INTERVAL_US = 10000UL;
+    // --------------------------------------------------------
+    // Proven combined-sketch scales:
+    //
+    // MPU6050 accel config 0x00 -> +/-2g -> 16384 LSB/g
+    // MPU6050 gyro config  0x00 -> +/-250 dps -> 131 LSB/dps
+    // --------------------------------------------------------
 
-    // +/-2g
-    static constexpr float ACCEL_SCALE = 16384.0f;
+    static constexpr float
+        ACCEL_SCALE =
+            16384.0f;
 
-    // +/-250 degrees/sec
-    static constexpr float GYRO_SCALE = 131.0f;
+    static constexpr float
+        GYRO_SCALE =
+            131.0f;
+
+
+    // Keep the runtime around 100 Hz.
+    static constexpr uint32_t
+        SAMPLE_INTERVAL_US =
+            10000UL;
+
 
     MPUReading reading;
 
-    uint32_t lastSampleMicros = 0;
 
-    bool writeRegister(
+    uint32_t lastSampleMicros =
+        0;
+
+
+    uint32_t acquisitionStartMicros =
+        0;
+
+
+    // ========================================================
+    // PROVEN RAW I2C ROUTINES
+    // ========================================================
+
+    void writeRegister(
         uint8_t reg,
         uint8_t value
     );
+
 
     bool readMotionRegisters(
         int16_t& ax,
@@ -89,7 +137,12 @@ private:
         int16_t& gz
     );
 
-    bool testConnection();
+
+    void calculateConvertedValues();
 
     void calculateDerivedValues();
+
+    void updateSamplingRate(
+        uint32_t nowMicros
+    );
 };

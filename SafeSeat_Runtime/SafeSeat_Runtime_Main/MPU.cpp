@@ -15,10 +15,16 @@ MPUSensor::MPUSensor()
 
 
 // ============================================================
-// LOW-LEVEL REGISTER WRITE
+// RAW REGISTER WRITE
+//
+// Direct modular equivalent of:
+//
+// void mpu6050Write(uint8_t reg, uint8_t data)
+//
+// from the proven combined sketch.
 // ============================================================
 
-bool MPUSensor::writeRegister(
+void MPUSensor::writeRegister(
     uint8_t reg,
     uint8_t value
 )
@@ -35,68 +41,19 @@ bool MPUSensor::writeRegister(
         value
     );
 
-    return (
-        Wire.endTransmission()
-        ==
-        0
-    );
+    Wire.endTransmission();
 }
 
 
 // ============================================================
-// CONNECTION TEST
-// ============================================================
-
-bool MPUSensor::testConnection()
-{
-    // WHO_AM_I register = 0x75
-
-    Wire.beginTransmission(
-        MPU6050_ADDRESS
-    );
-
-    Wire.write(
-        0x75
-    );
-
-    if (
-        Wire.endTransmission(
-            false
-        )
-        != 0
-    )
-    {
-        return false;
-    }
-
-    uint8_t received =
-        Wire.requestFrom(
-            MPU6050_ADDRESS,
-            (uint8_t)1,
-            (bool)true
-        );
-
-    if (
-        received != 1
-    )
-    {
-        return false;
-    }
-
-    uint8_t whoAmI =
-        Wire.read();
-
-    /*
-     * MPU6050 typically returns 0x68.
-     */
-    return (
-        whoAmI == 0x68
-    );
-}
-
-
-// ============================================================
-// READ ALL MOTION REGISTERS
+// RAW 14-BYTE MOTION READ
+//
+// Exact pattern from the proven combined sketch:
+//
+// start at 0x3B
+// repeated start
+// request 14 bytes
+// Ax Ay Az Temp Gx Gy Gz
 // ============================================================
 
 bool MPUSensor::readMotionRegisters(
@@ -109,20 +66,6 @@ bool MPUSensor::readMotionRegisters(
     int16_t& gz
 )
 {
-    /*
-     * ACCEL_XOUT_H starts at 0x3B.
-     *
-     * 14 consecutive bytes:
-     *
-     * AX H/L
-     * AY H/L
-     * AZ H/L
-     * TEMP H/L
-     * GX H/L
-     * GY H/L
-     * GZ H/L
-     */
-
     Wire.beginTransmission(
         MPU6050_ADDRESS
     );
@@ -131,64 +74,124 @@ bool MPUSensor::readMotionRegisters(
         0x3B
     );
 
+
     if (
         Wire.endTransmission(
             false
         )
-        != 0
+        !=
+        0
     )
     {
         return false;
     }
+
 
     uint8_t received =
         Wire.requestFrom(
             MPU6050_ADDRESS,
-            (uint8_t)14,
-            (bool)true
+            static_cast<uint8_t>(
+                14
+            ),
+            static_cast<bool>(
+                true
+            )
         );
 
+
     if (
-        received != 14
+        received
+        !=
+        14
     )
     {
         return false;
     }
 
+
     ax =
-        (Wire.read() << 8)
-        |
-        Wire.read();
+        static_cast<int16_t>(
+            (
+                Wire.read()
+                <<
+                8
+            )
+            |
+            Wire.read()
+        );
+
 
     ay =
-        (Wire.read() << 8)
-        |
-        Wire.read();
+        static_cast<int16_t>(
+            (
+                Wire.read()
+                <<
+                8
+            )
+            |
+            Wire.read()
+        );
+
 
     az =
-        (Wire.read() << 8)
-        |
-        Wire.read();
+        static_cast<int16_t>(
+            (
+                Wire.read()
+                <<
+                8
+            )
+            |
+            Wire.read()
+        );
+
 
     temperature =
-        (Wire.read() << 8)
-        |
-        Wire.read();
+        static_cast<int16_t>(
+            (
+                Wire.read()
+                <<
+                8
+            )
+            |
+            Wire.read()
+        );
+
 
     gx =
-        (Wire.read() << 8)
-        |
-        Wire.read();
+        static_cast<int16_t>(
+            (
+                Wire.read()
+                <<
+                8
+            )
+            |
+            Wire.read()
+        );
+
 
     gy =
-        (Wire.read() << 8)
-        |
-        Wire.read();
+        static_cast<int16_t>(
+            (
+                Wire.read()
+                <<
+                8
+            )
+            |
+            Wire.read()
+        );
+
 
     gz =
-        (Wire.read() << 8)
-        |
-        Wire.read();
+        static_cast<int16_t>(
+            (
+                Wire.read()
+                <<
+                8
+            )
+            |
+            Wire.read()
+        );
+
 
     return true;
 }
@@ -196,161 +199,164 @@ bool MPUSensor::readMotionRegisters(
 
 // ============================================================
 // INITIALIZATION
+//
+// Restores the exact successful setup sequence:
+//
+// 0x6B = 0x00 -> wake
+// 0x1B = 0x00 -> gyro +/-250 dps
+// 0x1C = 0x00 -> accel +/-2g
+//
+// No WHO_AM_I gate and no separate connection-test stage.
+// The proven combined sketch simply configured the device and
+// successfully read it afterward.
 // ============================================================
 
 bool MPUSensor::begin()
 {
+    reading =
+        MPUReading{};
+
+
     reading.status =
         MPUStatus::INITIALIZING;
 
+
     Serial.println();
     Serial.println(
-        "[MPU6050] Initializing using raw I2C..."
-    );
-
-    if (
-        !testConnection()
-    )
-    {
-        reading.connected =
-            false;
-
-        reading.status =
-            MPUStatus::DISCONNECTED;
-
-        Serial.println(
-            "[MPU6050] ERROR: device not detected at 0x68."
-        );
-
-        return false;
-    }
-
-
-    // ========================================================
-    // WAKE SENSOR
-    //
-    // PWR_MGMT_1 = 0x6B
-    // Writing 0 removes sleep mode.
-    // ========================================================
-
-    if (
-        !writeRegister(
-            0x6B,
-            0x00
-        )
-    )
-    {
-        reading.connected =
-            false;
-
-        reading.status =
-            MPUStatus::DISCONNECTED;
-
-        Serial.println(
-            "[MPU6050] ERROR: failed to wake sensor."
-        );
-
-        return false;
-    }
-
-
-    delay(
-        100
+        "[MPU6050] Initializing from proven combined sketch..."
     );
 
 
-    // ========================================================
-    // ACCELEROMETER RANGE
-    //
-    // ACCEL_CONFIG = 0x1C
-    // 0x00 = +/-2g
-    // ========================================================
-
+    // Wake MPU6050.
     writeRegister(
-        0x1C,
+        0x6B,
         0x00
     );
 
 
-    // ========================================================
-    // GYROSCOPE RANGE
-    //
-    // GYRO_CONFIG = 0x1B
-    // 0x00 = +/-250 deg/s
-    // ========================================================
+    delay(
+        10
+    );
 
+
+    // Gyroscope +/-250 deg/s.
     writeRegister(
         0x1B,
         0x00
     );
 
 
-    // ========================================================
-    // DIGITAL LOW PASS FILTER
-    //
-    // CONFIG = 0x1A
-    //
-    // DLPF_CFG = 3
-    // Approx:
-    // accel BW ~44 Hz
-    // gyro BW ~42 Hz
-    //
-    // Good compromise for road vibration acquisition.
-    // ========================================================
-
+    // Accelerometer +/-2g.
     writeRegister(
-        0x1A,
-        0x03
+        0x1C,
+        0x00
     );
 
 
-    // ========================================================
-    // SAMPLE RATE
-    //
-    // SMPLRT_DIV = 0x19
-    //
-    // With DLPF enabled:
-    // internal rate = 1 kHz
-    //
-    // 1000 / (1 + 9) = 100 Hz
-    // ========================================================
-
-    writeRegister(
-        0x19,
-        9
+    delay(
+        10
     );
+
+
+    /*
+     * Instead of a separate WHO_AM_I test, verify the exact
+     * operation we need: reading the 14-byte motion block.
+     *
+     * This preserves the proven low-level behavior while still
+     * allowing Runtime_Main to report a real initialization
+     * failure if communication is unavailable.
+     */
+    int16_t ax;
+    int16_t ay;
+    int16_t az;
+    int16_t temperature;
+    int16_t gx;
+    int16_t gy;
+    int16_t gz;
+
+
+    if (
+        !readMotionRegisters(
+            ax,
+            ay,
+            az,
+            temperature,
+            gx,
+            gy,
+            gz
+        )
+    )
+    {
+        reading.connected =
+            false;
+
+
+        reading.valid =
+            false;
+
+
+        reading.status =
+            MPUStatus::DISCONNECTED;
+
+
+        Serial.println(
+            "[MPU6050] ERROR: 14-byte motion read failed."
+        );
+
+
+        return false;
+    }
 
 
     reading.connected =
         true;
 
-    reading.valid =
-        false;
 
-    reading.sampleCount =
-        0;
+    reading.valid =
+        true;
+
+
+    reading.rawAx =
+        ax;
+
+    reading.rawAy =
+        ay;
+
+    reading.rawAz =
+        az;
+
+    reading.rawTemperature =
+        temperature;
+
+    reading.rawGx =
+        gx;
+
+    reading.rawGy =
+        gy;
+
+    reading.rawGz =
+        gz;
+
+
+    calculateConvertedValues();
+
+    calculateDerivedValues();
+
+
+    acquisitionStartMicros =
+        micros();
+
 
     lastSampleMicros =
-        micros();
+        acquisitionStartMicros;
+
 
     reading.status =
         MPUStatus::READY;
 
 
     Serial.println(
-        "[MPU6050] Connected at 0x68."
-    );
-
-    Serial.println(
-        "[MPU6050] Accel range: +/-2g."
-    );
-
-    Serial.println(
-        "[MPU6050] Gyro range: +/-250 deg/s."
-    );
-
-    Serial.println(
-        "[MPU6050] Configured for ~100 Hz."
+        "MPU6050 (0x68) Ready"
     );
 
 
@@ -359,7 +365,80 @@ bool MPUSensor::begin()
 
 
 // ============================================================
+// CONVERSION
+//
+// Exact scales from the proven combined sketch.
+// ============================================================
+
+void MPUSensor::calculateConvertedValues()
+{
+    reading.accelX =
+        static_cast<float>(
+            reading.rawAx
+        )
+        /
+        ACCEL_SCALE;
+
+
+    reading.accelY =
+        static_cast<float>(
+            reading.rawAy
+        )
+        /
+        ACCEL_SCALE;
+
+
+    reading.accelZ =
+        static_cast<float>(
+            reading.rawAz
+        )
+        /
+        ACCEL_SCALE;
+
+
+    reading.gyroX =
+        static_cast<float>(
+            reading.rawGx
+        )
+        /
+        GYRO_SCALE;
+
+
+    reading.gyroY =
+        static_cast<float>(
+            reading.rawGy
+        )
+        /
+        GYRO_SCALE;
+
+
+    reading.gyroZ =
+        static_cast<float>(
+            reading.rawGz
+        )
+        /
+        GYRO_SCALE;
+
+
+    reading.temperatureC =
+        (
+            static_cast<float>(
+                reading.rawTemperature
+            )
+            /
+            340.0f
+        )
+        +
+        36.53f;
+}
+
+
+// ============================================================
 // DERIVED VALUES
+//
+// These are retained from the modular runtime because they are
+// useful later for vibration gating / fusion. They sit ON TOP
+// of the restored proven raw acquisition.
 // ============================================================
 
 void MPUSensor::calculateDerivedValues()
@@ -369,15 +448,11 @@ void MPUSensor::calculateDerivedValues()
             reading.accelX
             *
             reading.accelX
-
             +
-
             reading.accelY
             *
             reading.accelY
-
             +
-
             reading.accelZ
             *
             reading.accelZ
@@ -389,15 +464,11 @@ void MPUSensor::calculateDerivedValues()
             reading.gyroX
             *
             reading.gyroX
-
             +
-
             reading.gyroY
             *
             reading.gyroY
-
             +
-
             reading.gyroZ
             *
             reading.gyroZ
@@ -405,15 +476,60 @@ void MPUSensor::calculateDerivedValues()
 
 
     /*
-     * Stationary MPU magnitude is approximately 1g.
+     * Simple gravity-relative dynamic acceleration context:
+     * absolute deviation of total acceleration from 1 g.
      *
-     * Remove the static gravity component.
+     * This is NOT the trained MPU feature vector itself.
+     * It is runtime context useful for later sensor fusion.
      */
     reading.dynamicAcceleration =
         fabsf(
             reading.accelMagnitude
             -
             1.0f
+        );
+}
+
+
+// ============================================================
+// SAMPLE RATE
+// ============================================================
+
+void MPUSensor::updateSamplingRate(
+    uint32_t nowMicros
+)
+{
+    uint32_t elapsed =
+        nowMicros
+        -
+        acquisitionStartMicros;
+
+
+    if (
+        elapsed
+        ==
+        0
+    )
+    {
+        reading.actualSamplingRateHz =
+            0.0f;
+
+
+        return;
+    }
+
+
+    reading.actualSamplingRateHz =
+        (
+            static_cast<float>(
+                reading.sampleCount
+            )
+            *
+            1000000.0f
+        )
+        /
+        static_cast<float>(
+            elapsed
         );
 }
 
@@ -428,8 +544,13 @@ void MPUSensor::update()
         !reading.connected
     )
     {
+        reading.valid =
+            false;
+
+
         reading.status =
             MPUStatus::DISCONNECTED;
+
 
         return;
     }
@@ -439,14 +560,13 @@ void MPUSensor::update()
         micros();
 
 
-    uint32_t elapsed =
-        now
-        -
-        lastSampleMicros;
-
-
     if (
-        elapsed <
+        static_cast<uint32_t>(
+            now
+            -
+            lastSampleMicros
+        )
+        <
         SAMPLE_INTERVAL_US
     )
     {
@@ -455,31 +575,38 @@ void MPUSensor::update()
 
 
     /*
-     * Use actual elapsed time instead of assuming exactly 10ms.
+     * Advance by one target interval rather than setting
+     * directly to now, reducing long-term cadence drift.
+     */
+    lastSampleMicros +=
+        SAMPLE_INTERVAL_US;
+
+
+    /*
+     * If something blocked the MCU for a long period, avoid
+     * attempting a rapid catch-up burst.
      */
     if (
-        elapsed > 0
+        static_cast<uint32_t>(
+            now
+            -
+            lastSampleMicros
+        )
+        >
+        SAMPLE_INTERVAL_US
+        *
+        4UL
     )
     {
-        reading.actualSamplingRateHz =
-            1000000.0f
-            /
-            static_cast<float>(
-                elapsed
-            );
+        lastSampleMicros =
+            now;
     }
-
-
-    lastSampleMicros =
-        now;
 
 
     int16_t ax;
     int16_t ay;
     int16_t az;
-
     int16_t temperature;
-
     int16_t gx;
     int16_t gy;
     int16_t gz;
@@ -500,16 +627,14 @@ void MPUSensor::update()
         reading.valid =
             false;
 
+
         reading.status =
             MPUStatus::INVALID_READING;
+
 
         return;
     }
 
-
-    // ========================================================
-    // RAW VALUES
-    // ========================================================
 
     reading.rawAx =
         ax;
@@ -520,6 +645,8 @@ void MPUSensor::update()
     reading.rawAz =
         az;
 
+    reading.rawTemperature =
+        temperature;
 
     reading.rawGx =
         gx;
@@ -531,68 +658,17 @@ void MPUSensor::update()
         gz;
 
 
-    reading.rawTemperature =
-        temperature;
-
-
-    // ========================================================
-    // UNIT CONVERSION
-    //
-    // These match the configured sensor ranges.
-    // ========================================================
-
-    reading.accelX =
-        static_cast<float>(
-            ax
-        )
-        /
-        ACCEL_SCALE;
-
-
-    reading.accelY =
-        static_cast<float>(
-            ay
-        )
-        /
-        ACCEL_SCALE;
-
-
-    reading.accelZ =
-        static_cast<float>(
-            az
-        )
-        /
-        ACCEL_SCALE;
-
-
-    reading.gyroX =
-        static_cast<float>(
-            gx
-        )
-        /
-        GYRO_SCALE;
-
-
-    reading.gyroY =
-        static_cast<float>(
-            gy
-        )
-        /
-        GYRO_SCALE;
-
-
-    reading.gyroZ =
-        static_cast<float>(
-            gz
-        )
-        /
-        GYRO_SCALE;
-
+    calculateConvertedValues();
 
     calculateDerivedValues();
 
 
     reading.sampleCount++;
+
+
+    updateSamplingRate(
+        now
+    );
 
 
     reading.valid =
@@ -626,7 +702,7 @@ bool MPUSensor::hasValidReading() const
 
 
 // ============================================================
-// STATUS
+// STATUS TEXT
 // ============================================================
 
 const char*
@@ -639,14 +715,18 @@ MPUSensor::getStatusText() const
         case MPUStatus::DISCONNECTED:
             return "DISCONNECTED";
 
+
         case MPUStatus::INITIALIZING:
             return "INITIALIZING";
+
 
         case MPUStatus::READY:
             return "READY";
 
+
         case MPUStatus::INVALID_READING:
             return "INVALID READING";
+
 
         default:
             return "UNKNOWN";
