@@ -6,6 +6,7 @@
 #include "C1001.h"
 #include "C1001ML.h"
 #include "MLX.h"
+#include "MLXML.h"
 #include "FSR.h"
 #include "MPU.h"
 #include "Fusion.h"
@@ -18,6 +19,7 @@
 C1001Sensor c1001;
 C1001ML c1001ML;
 MLXSensor mlx;
+MLXML mlxML;
 FSRSensor fsr;
 MPUSensor mpu;
 FusionEngine fusion;
@@ -216,7 +218,7 @@ void setup()
     );
 
     Serial.println(
-        " Step 5.3 - C1001 Embedded ML + Fusion"
+        " Step 5.4 - C1001 + MLX Embedded ML + Fusion"
     );
 
     Serial.println(
@@ -355,6 +357,17 @@ void setup()
             ? "[MAIN] MLX90614 ready."
             : "[MAIN] WARNING: MLX90614 failed."
     );
+
+
+    // ========================================================
+    // MLX90614 EMBEDDED ML
+    //
+    // Uses the raw object-temperature stream at 4 Hz to match
+    // the WESAD TEMP training feature cadence. Ambient
+    // temperature remains separate runtime context.
+    // ========================================================
+
+    mlxML.begin();
 
 
     // ========================================================
@@ -537,6 +550,13 @@ void loop()
     const MLXReading &t =
         mlx.getReading();
 
+    mlxML.update(
+        t
+    );
+
+    const MLXMLReading &tml =
+        mlxML.getReading();
+
     const FSRReading &f =
         fsr.getReading();
 
@@ -604,6 +624,37 @@ void loop()
 
     fusionInput.mlx.reading =
         t;
+
+    // MLX model evidence is produced by the sensor-specific
+    // MLX ML pipeline. Ambient temperature is not model input.
+    fusionInput.mlx.model.available =
+        tml.modelAvailable;
+
+    fusionInput.mlx.model.valid =
+        tml.valid;
+
+    fusionInput.mlx.model.isolationForestAnomaly =
+        tml.isolationForestAnomaly;
+
+    fusionInput.mlx.model.oneClassSVMAnomaly =
+        tml.oneClassSVMAnomaly;
+
+    fusionInput.mlx.model.bothModelsAnomaly =
+        tml.bothModelsAnomaly;
+
+    fusionInput.mlx.model.eitherModelAnomaly =
+        tml.eitherModelAnomaly;
+
+    fusionInput.mlx.model.isolationForestScore =
+        tml.isolationForestDecision;
+
+    fusionInput.mlx.model.oneClassSVMScore =
+        tml.oneClassSVMDecision;
+
+    fusionInput.mlx.model.confidence =
+        tml.valid
+            ? 1.0f
+            : 0.0f;
 
     fusionInput.fsr.health =
         mapSensorHealth(
@@ -985,6 +1036,148 @@ void loop()
     {
         Serial.println(
             "Temperature    : unavailable"
+        );
+    }
+
+
+    Serial.println();
+
+    Serial.println(
+        "MLX ML:"
+    );
+
+    Serial.print(
+        "  Status       : "
+    );
+
+    Serial.println(
+        mlxML.getStatusText()
+    );
+
+    Serial.print(
+        "  Window       : "
+    );
+
+    Serial.print(
+        tml.windowSamplesCollected
+    );
+
+    Serial.print(
+        " / "
+    );
+
+    Serial.println(
+        tml.windowSamplesRequired
+    );
+
+    Serial.print(
+        "  Next infer   : "
+    );
+
+    Serial.print(
+        tml.samplesUntilNextInference
+    );
+
+    Serial.println(
+        " sample(s)"
+    );
+
+    Serial.print(
+        "  Windows      : "
+    );
+
+    Serial.println(
+        tml.windowsEvaluated
+    );
+
+    if (
+        tml.lastFiniteSampleCount
+        >
+        0
+    )
+    {
+        Serial.print(
+            "  Finite data  : "
+        );
+
+        Serial.print(
+            tml.lastFiniteSampleCount
+        );
+
+        Serial.print(
+            " / "
+        );
+
+        Serial.println(
+            MLX_ML_WINDOW_SAMPLES
+        );
+    }
+
+    if (
+        tml.valid
+    )
+    {
+        Serial.print(
+            "  IF decision  : "
+        );
+
+        Serial.print(
+            tml.isolationForestDecision,
+            6
+        );
+
+        Serial.println(
+            tml.isolationForestAnomaly
+                ? "  [ANOMALY]"
+                : "  [NORMAL]"
+        );
+
+        Serial.print(
+            "  SVM decision : "
+        );
+
+        Serial.print(
+            tml.oneClassSVMDecision,
+            6
+        );
+
+        Serial.println(
+            tml.oneClassSVMAnomaly
+                ? "  [ANOMALY]"
+                : "  [NORMAL]"
+        );
+
+        Serial.print(
+            "  Fusion vote  : "
+        );
+
+        if (
+            tml.bothModelsAnomaly
+        )
+        {
+            Serial.println(
+                "STRONG ANOMALY"
+            );
+        }
+        else if (
+            tml.eitherModelAnomaly
+        )
+        {
+            Serial.println(
+                "WEAK ANOMALY"
+            );
+        }
+        else
+        {
+            Serial.println(
+                "NORMAL"
+            );
+        }
+    }
+    else
+    {
+        Serial.println(
+            "  Model result : not ready"
         );
     }
 
@@ -1425,11 +1618,11 @@ void loop()
     );
 
     Serial.println(
-        "ML inference   : C1001 ACTIVE; other sensors pending"
+        "ML inference   : C1001 + MLX ACTIVE; FSR/MPU pending"
     );
 
     Serial.println(
-        "Fusion         : active; C1001 model evidence connected"
+        "Fusion         : active; C1001 + MLX model evidence connected"
     );
 
     Serial.println(

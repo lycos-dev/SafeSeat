@@ -1,0 +1,46 @@
+{
+  "step": "5.4",
+  "sensor": "MLX90614",
+  "source_dataset": "WESAD Empatica E4 TEMP",
+  "embedded_input": "MLX90614 raw object-temperature stream only",
+  "ambient_temperature_role": "separate environmental context; not model input",
+  "sampling_rate_hz": 4.0,
+  "window_seconds": 30,
+  "window_samples": 120,
+  "stride_seconds": 15,
+  "stride_samples": 60,
+  "feature_count": 44,
+  "isolation_forest": {
+    "trees": 300,
+    "nodes": 35818,
+    "max_samples": 256,
+    "offset": -0.5518207324771185
+  },
+  "one_class_svm": {
+    "support_vectors": 296,
+    "kernel": "rbf",
+    "gamma": 0.013309710746992448,
+    "intercept": -25.637814606265536
+  },
+  "validation": {
+    "model_only_test_feature_rows": 1441,
+    "model_only_isolation_forest_prediction_match": "100%",
+    "model_only_one_class_svm_prediction_match": "100%",
+    "model_only_max_abs_if_score_error": 1.7953264430659033e-08,
+    "model_only_max_abs_svm_score_error": 2.115270015679016e-05,
+    "end_to_end_full_raw_windows": 1438,
+    "end_to_end_isolation_forest_prediction_match": "100%",
+    "end_to_end_one_class_svm_prediction_match": "100%",
+    "end_to_end_max_abs_feature_error": 5.6058435697170506e-05,
+    "end_to_end_max_abs_if_score_error": 0.00038842505549077644,
+    "end_to_end_max_abs_svm_score_error": 0.0006906823499965853,
+    "synthetic_missing_data_cases_checked": 3,
+    "synthetic_missing_data_max_abs_feature_error": 8.33460923008178e-06
+  },
+  "notes": [
+    "Prediction parity was checked against the serialized sklearn artifacts.",
+    "The WESAD model learned wearable skin-temperature patterns; live MLX90614 deployment remains a domain-transfer problem.",
+    "Anomaly means out-of-distribution relative to training, not a medical diagnosis.",
+    "Final calibration/validation should be done after the real seat/headrest geometry exists."
+  ]
+}

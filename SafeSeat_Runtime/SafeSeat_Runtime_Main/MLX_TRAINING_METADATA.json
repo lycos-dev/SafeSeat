@@ -1,0 +1,62 @@
+{
+  "pipeline": "SafeSeat MLX90614 anomaly detection",
+  "source_dataset": "WESAD Empatica E4 TEMP",
+  "trained_at_utc": "2026-08-07T05:58:00.186595+00:00",
+  "training_input": "C:\\Users\\Lycos Blanza\\Downloads\\SAFESEAT_DATASETS\\SafeSeat_ML\\features\\MLX90614\\train_features.csv",
+  "testing_input": "C:\\Users\\Lycos Blanza\\Downloads\\SAFESEAT_DATASETS\\SafeSeat_ML\\features\\MLX90614\\test_features.csv",
+  "training_windows": 5678,
+  "testing_windows": 1441,
+  "feature_count": 44,
+  "models": {
+    "isolation_forest": {
+      "n_estimators": 300,
+      "contamination": 0.05,
+      "random_state": 42,
+      "training_anomaly_percentage": 5.001761183515322,
+      "testing_anomaly_percentage": 7.425399028452463,
+      "training_score_summary": {
+        "minimum": -0.182263609242708,
+        "maximum": 0.18838803247969493,
+        "mean": 0.10953099111399367,
+        "median": 0.12419973964584555,
+        "standard_deviation": 0.05537886462251315
+      },
+      "testing_score_summary": {
+        "minimum": -0.16654950685326442,
+        "maximum": 0.18216553299749383,
+        "mean": 0.09835836258119734,
+        "median": 0.11253473596615254,
+        "standard_deviation": 0.05615169656250412
+      }
+    },
+    "one_class_svm": {
+      "kernel": "rbf",
+      "nu": 0.05,
+      "gamma": "scale",
+      "training_anomaly_percentage": 5.054596688974991,
+      "testing_anomaly_percentage": 6.384455239417071,
+      "training_score_summary": {
+        "minimum": -24.637814606264843,
+        "maximum": 11.726053986589392,
+        "mean": 5.629417891444488,
+        "median": 6.449004202323035,
+        "standard_deviation": 4.202601865976871
+      },
+      "testing_score_summary": {
+        "minimum": -23.301655563673915,
+        "maximum": 11.260114844452389,
+        "mean": 5.481700313839637,
+        "median": 6.061997044750193,
+        "standard_deviation": 3.5825840503815676
+      }
+    }
+  },
+  "test_prediction_agreement_percentage": 96.73837612768911,
+  "test_both_models_anomaly_percentage": 5.27411519777932,
+  "test_either_model_anomaly_percentage": 8.535739070090214,
+  "prediction_meaning": {
+    "1": "normal/inlier",
+    "-1": "anomaly/outlier"
+  },
+  "deployment_note": "Ambient temperature is not part of the WESAD-trained temperature model. It should be used separately for environmental compensation and sensor fusion."
+}
