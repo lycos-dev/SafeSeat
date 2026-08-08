@@ -1,27 +1,30 @@
 #include "FSR.h"
 #include "Config.h"
 
+#include <Wire.h>
 #include <math.h>
 
 
 // ============================================================
 // SENSOR LABELS
+//
+// Match the proven combined sketch terminology.
 // ============================================================
 
 const char*
 FSRSensor::SENSOR_LABELS[NUM_FSR] =
 {
-    "Backrest FSR1",
-    "Backrest FSR2",
-    "Backrest FSR3",
+    "BackLeftTop",
+    "BackLeftMiddle",
+    "BackLeftBottom",
 
-    "Backrest FSR4",
-    "Backrest FSR5",
-    "Backrest FSR6",
+    "BackRightTop",
+    "BackRightMiddle",
+    "BackRightBottom",
 
-    "Cushion FSR1",
-    "Cushion FSR2",
-    "Cushion FSR3"
+    "CushionLeft",
+    "CushionCenter",
+    "CushionRight"
 };
 
 
@@ -36,50 +39,49 @@ FSRSensor::FSRSensor()
 
 // ============================================================
 // INITIALIZATION
+//
+// Step 3 restores the exact successful hardware pattern:
+//
+// ads1.begin(0x48)
+// ads1.setGain(GAIN_ONE)
+//
+// ads2.begin(0x49)
+// ads2.setGain(GAIN_ONE)
+//
+// No forced 860 SPS data rate.
+// No extra negative-value rejection.
+//
+// Wire and ESP32 ADC are already initialized ONCE by Main.
 // ============================================================
 
 bool FSRSensor::begin()
 {
+    reading =
+        FSRReading{};
+
+
     reading.status =
         FSRStatus::CALIBRATING;
 
 
     Serial.println();
     Serial.println(
-        "[FSR] Initializing..."
-    );
-
-
-    // --------------------------------------------------------
-    // ESP32 ADC
-    // --------------------------------------------------------
-
-    analogReadResolution(
-        12
-    );
-
-
-    analogSetPinAttenuation(
-        CUSHION_FSR3_PIN,
-        ADC_11db
+        "[FSR] Initializing from proven combined sketch..."
     );
 
 
     // --------------------------------------------------------
     // ADS1115 #1
     //
-    // 0x48
-    //
-    // A0 = Backrest FSR1
-    // A1 = Backrest FSR2
-    // A2 = Backrest FSR3
-    // A3 = Backrest FSR4
+    // A0 = Backrest FSR1 / BackLeftTop
+    // A1 = Backrest FSR2 / BackLeftMiddle
+    // A2 = Backrest FSR3 / BackLeftBottom
+    // A3 = Backrest FSR4 / BackRightTop
     // --------------------------------------------------------
 
     if (
         !ads1.begin(
-            ADS1115_1_ADDRESS,
-            &Wire
+            ADS1115_1_ADDRESS
         )
     )
     {
@@ -92,7 +94,7 @@ bool FSRSensor::begin()
 
 
         Serial.println(
-            "[FSR] ERROR: ADS1115 #1 (0x48) not detected."
+            "ADS1115 #1 (0x48) NOT FOUND!"
         );
 
 
@@ -104,30 +106,24 @@ bool FSRSensor::begin()
         GAIN_ONE
     );
 
-    ads1.setDataRate(
-    RATE_ADS1115_860SPS
-);
 
     Serial.println(
-        "[FSR] ADS1115 #1 (0x48) ready."
+        "ADS1115 #1 Ready - Backrest FSR1 to FSR4"
     );
 
 
     // --------------------------------------------------------
     // ADS1115 #2
     //
-    // 0x49
-    //
-    // A0 = Backrest FSR5
-    // A1 = Backrest FSR6
-    // A2 = Cushion FSR1
-    // A3 = Cushion FSR2
+    // A0 = Backrest FSR5 / BackRightMiddle
+    // A1 = Backrest FSR6 / BackRightBottom
+    // A2 = Cushion FSR1 / CushionLeft
+    // A3 = Cushion FSR2 / CushionCenter
     // --------------------------------------------------------
 
     if (
         !ads2.begin(
-            ADS1115_2_ADDRESS,
-            &Wire
+            ADS1115_2_ADDRESS
         )
     )
     {
@@ -140,7 +136,7 @@ bool FSRSensor::begin()
 
 
         Serial.println(
-            "[FSR] ERROR: ADS1115 #2 (0x49) not detected."
+            "ADS1115 #2 (0x49) NOT FOUND!"
         );
 
 
@@ -152,12 +148,14 @@ bool FSRSensor::begin()
         GAIN_ONE
     );
 
-    ads2.setDataRate(
-    RATE_ADS1115_860SPS
-);
 
     Serial.println(
-        "[FSR] ADS1115 #2 (0x49) ready."
+        "ADS1115 #2 Ready - Backrest FSR5/6 + Cushion Left/Center"
+    );
+
+
+    Serial.println(
+        "GPIO34 Ready - Cushion Right"
     );
 
 
@@ -165,25 +163,25 @@ bool FSRSensor::begin()
         true;
 
 
-    // --------------------------------------------------------
-    // EMPTY-SEAT CALIBRATION
-    // --------------------------------------------------------
-
     if (
         !calibrateEmptySeat()
     )
     {
-        reading.connected =
-            false;
-
-
         reading.calibrated =
             false;
 
 
+        reading.valid =
+            false;
+
+
         reading.status =
-            FSRStatus::
-                INVALID_READING;
+            FSRStatus::INVALID_READING;
+
+
+        Serial.println(
+            "[FSR] ERROR: empty-seat calibration failed."
+        );
 
 
         return false;
@@ -205,6 +203,8 @@ bool FSRSensor::begin()
 
 // ============================================================
 // MEDIAN ADS1115 READ
+//
+// Exact proven 5-read median behavior.
 // ============================================================
 
 int16_t FSRSensor::readMedianADS(
@@ -346,16 +346,24 @@ int16_t FSRSensor::readMedianNative(
 
 // ============================================================
 // READ ALL NINE FSRs
+//
+// IMPORTANT FIX:
+//
+// The failed Runtime_Main version rejected any negative ADS1115
+// sample. The proven combined sketch did NOT do that.
+//
+// ADS1115 single-ended channels near zero can still return a
+// tiny negative code from ADC offset/noise. That must not make
+// the entire 9-sensor calibration fail.
+//
+// Therefore this routine intentionally mirrors the proven code
+// and simply returns the median readings.
 // ============================================================
 
-bool FSRSensor::readAllSensors(
+void FSRSensor::readAllSensors(
     int16_t destination[]
 )
 {
-    // --------------------------------------------------------
-    // ADS1115 #1
-    // --------------------------------------------------------
-
     destination[
         BACKREST_FSR1
     ] =
@@ -391,10 +399,6 @@ bool FSRSensor::readAllSensors(
             3
         );
 
-
-    // --------------------------------------------------------
-    // ADS1115 #2
-    // --------------------------------------------------------
 
     destination[
         BACKREST_FSR5
@@ -432,64 +436,21 @@ bool FSRSensor::readAllSensors(
         );
 
 
-    // --------------------------------------------------------
-    // ESP32 native ADC
-    // --------------------------------------------------------
-
     destination[
         CUSHION_FSR3
     ] =
         readMedianNative(
             CUSHION_FSR3_PIN
         );
-
-
-    return readingsAreValid(
-        destination
-    );
-}
-
-
-// ============================================================
-// BASIC VALIDATION
-// ============================================================
-
-bool FSRSensor::readingsAreValid(
-    const int16_t values[]
-) const
-{
-    for (
-        int i = 0;
-        i < NUM_FSR;
-        i++
-    )
-    {
-        /*
-         * ADS1115 single-ended values should never be negative.
-         *
-         * ESP32 ADC also cannot return a negative value.
-         */
-
-        if (
-            values[i] < 0
-        )
-        {
-            return false;
-        }
-    }
-
-
-    return true;
 }
 
 
 // ============================================================
 // ADAPTIVE FILTER
 //
-// Preserved from your tested FSR implementation.
-//
-// Key property:
-// fast release after pressure removal to avoid lingering values.
+// Exact proven response:
+// - ignore <15 ADC jitter
+// - faster release than application
 // ============================================================
 
 float FSRSensor::applyAdaptiveFilter(
@@ -507,12 +468,10 @@ float FSRSensor::applyAdaptiveFilter(
         );
 
 
-    // --------------------------------------------------------
-    // Tiny noise
-    // --------------------------------------------------------
-
     if (
-        difference < 15.0f
+        difference
+        <
+        15.0f
     )
     {
         return previousFiltered;
@@ -522,17 +481,15 @@ float FSRSensor::applyAdaptiveFilter(
     float alpha;
 
 
-    // --------------------------------------------------------
-    // PRESSURE RELEASE
-    // --------------------------------------------------------
-
     if (
-        raw <
+        raw
+        <
         previousFiltered
     )
     {
         if (
-            difference >
+            difference
+            >
             5000.0f
         )
         {
@@ -540,7 +497,8 @@ float FSRSensor::applyAdaptiveFilter(
                 0.95f;
         }
         else if (
-            difference >
+            difference
+            >
             1000.0f
         )
         {
@@ -553,16 +511,11 @@ float FSRSensor::applyAdaptiveFilter(
                 0.65f;
         }
     }
-
-
-    // --------------------------------------------------------
-    // PRESSURE APPLICATION
-    // --------------------------------------------------------
-
     else
     {
         if (
-            difference >
+            difference
+            >
             5000.0f
         )
         {
@@ -570,7 +523,8 @@ float FSRSensor::applyAdaptiveFilter(
                 0.90f;
         }
         else if (
-            difference >
+            difference
+            >
             1000.0f
         )
         {
@@ -588,7 +542,9 @@ float FSRSensor::applyAdaptiveFilter(
     return (
         alpha
         *
-        raw
+        static_cast<float>(
+            raw
+        )
     )
     +
     (
@@ -603,6 +559,12 @@ float FSRSensor::applyAdaptiveFilter(
 
 // ============================================================
 // EMPTY-SEAT CALIBRATION
+//
+// Exact proven pattern:
+// - wait 3 seconds
+// - 20 rounds
+// - each round uses 5-read median per sensor
+// - 50 ms between rounds
 // ============================================================
 
 bool FSRSensor::calibrateEmptySeat()
@@ -613,7 +575,7 @@ bool FSRSensor::calibrateEmptySeat()
 
     Serial.println();
     Serial.println(
-        "=========================================="
+        "========================================"
     );
 
     Serial.println(
@@ -621,24 +583,15 @@ bool FSRSensor::calibrateEmptySeat()
     );
 
     Serial.println(
-        "=========================================="
+        "========================================"
     );
 
     Serial.println(
-        "Keep BACKREST and CUSHION completely empty."
-    );
-
-
-    Serial.print(
-        "Calibration begins in "
-    );
-
-    Serial.print(
-        CALIBRATION_DELAY_MS / 1000
+        "Keep the backrest and cushion EMPTY."
     );
 
     Serial.println(
-        " seconds..."
+        "Calibration begins in 3 seconds..."
     );
 
 
@@ -663,19 +616,9 @@ bool FSRSensor::calibrateEmptySeat()
         ];
 
 
-        if (
-            !readAllSensors(
-                values
-            )
-        )
-        {
-            Serial.println();
-            Serial.println(
-                "[FSR] ERROR during baseline calibration."
-            );
-
-            return false;
-        }
+        readAllSensors(
+            values
+        );
 
 
         for (
@@ -685,7 +628,9 @@ bool FSRSensor::calibrateEmptySeat()
         )
         {
             totals[i] +=
-                values[i];
+                static_cast<float>(
+                    values[i]
+                );
         }
 
 
@@ -712,7 +657,9 @@ bool FSRSensor::calibrateEmptySeat()
         reading.baseline[i] =
             totals[i]
             /
-            CALIBRATION_ROUNDS;
+            static_cast<float>(
+                CALIBRATION_ROUNDS
+            );
 
 
         reading.filtered[i] =
@@ -737,7 +684,7 @@ bool FSRSensor::calibrateEmptySeat()
 
 
     Serial.println(
-        "[FSR] Empty-seat calibration complete."
+        "FSR baseline calibration complete."
     );
 
 
@@ -756,7 +703,7 @@ bool FSRSensor::calibrateEmptySeat()
         );
 
         Serial.print(
-            " baseline = "
+            " baseline: "
         );
 
         Serial.println(
@@ -771,6 +718,10 @@ bool FSRSensor::calibrateEmptySeat()
 
     previousCompletedSample =
         millis();
+
+
+    reading.lastSampleMillis =
+        previousCompletedSample;
 
 
     return true;
@@ -795,7 +746,8 @@ float FSRSensor::calculatePressureDelta(
 
 
     if (
-        difference <
+        difference
+        <
         0.0f
     )
     {
@@ -809,15 +761,11 @@ float FSRSensor::calculatePressureDelta(
 
 
 // ============================================================
-// GROUP / DISTRIBUTION FEATURES
+// FEATURE CALCULATION
 // ============================================================
 
 void FSRSensor::calculatePressureFeatures()
 {
-    // ========================================================
-    // BACKREST LEFT
-    // ========================================================
-
     reading.backrestLeftTotal =
         reading.pressure[
             BACKREST_FSR1
@@ -832,10 +780,6 @@ void FSRSensor::calculatePressureFeatures()
         ];
 
 
-    // ========================================================
-    // BACKREST RIGHT
-    // ========================================================
-
     reading.backrestRightTotal =
         reading.pressure[
             BACKREST_FSR4
@@ -849,10 +793,6 @@ void FSRSensor::calculatePressureFeatures()
             BACKREST_FSR6
         ];
 
-
-    // ========================================================
-    // BACKREST VERTICAL LEVELS
-    // ========================================================
 
     reading.backrestUpperTotal =
         reading.pressure[
@@ -884,10 +824,6 @@ void FSRSensor::calculatePressureFeatures()
         ];
 
 
-    // ========================================================
-    // CUSHION
-    // ========================================================
-
     reading.cushionLeft =
         reading.pressure[
             CUSHION_FSR1
@@ -905,10 +841,6 @@ void FSRSensor::calculatePressureFeatures()
             CUSHION_FSR3
         ];
 
-
-    // ========================================================
-    // TOTALS
-    // ========================================================
 
     reading.backrestTotal =
         reading.backrestLeftTotal
@@ -934,14 +866,8 @@ void FSRSensor::calculatePressureFeatures()
         0.000001f;
 
 
-    // ========================================================
-    // BACKREST LEFT/RIGHT BALANCE
-    //
-    // -1 approximately = left dominant
-    //  0               = balanced
-    // +1 approximately = right dominant
-    // ========================================================
-
+    // Keep the current runtime balance convention.
+    // Negative means right-dominant with this field definition.
     reading.backrestLRBalance =
         (
             reading.backrestLeftTotal
@@ -950,17 +876,11 @@ void FSRSensor::calculatePressureFeatures()
         )
         /
         (
-            reading.backrestLeftTotal
-            +
-            reading.backrestRightTotal
+            reading.backrestTotal
             +
             EPSILON
         );
 
-
-    // ========================================================
-    // CUSHION LEFT/RIGHT BALANCE
-    // ========================================================
 
     reading.cushionLRBalance =
         (
@@ -978,10 +898,6 @@ void FSRSensor::calculatePressureFeatures()
         );
 
 
-    // ========================================================
-    // CUSHION CENTER SHARE
-    // ========================================================
-
     reading.cushionCenterRatio =
         reading.cushionCenter
         /
@@ -991,10 +907,6 @@ void FSRSensor::calculatePressureFeatures()
             EPSILON
         );
 
-
-    // ========================================================
-    // BACKREST / CUSHION RELATIONSHIP
-    // ========================================================
 
     reading.backrestToCushionRatio =
         reading.backrestTotal
@@ -1007,6 +919,9 @@ void FSRSensor::calculatePressureFeatures()
 
 
     calculatePressureShares();
+
+
+    calculatePrototypePostureContext();
 }
 
 
@@ -1041,39 +956,180 @@ void FSRSensor::calculatePressureShares()
 
 
 // ============================================================
-// EMPTY-SEAT BASELINE DRIFT CORRECTION
+// PROTOTYPE POSTURE CONTEXT
+//
+// Reproduces the diagnostic behavior that was already working
+// in the combined sketch.
 // ============================================================
 
-void FSRSensor::updateBaselineWhenEmpty(
-    bool occupantPresent
-)
+void FSRSensor::calculatePrototypePostureContext()
 {
-    /*
-     * NEVER adapt baseline while the C1001 sees an occupant.
-     */
+    reading.occupied =
+        reading.cushionTotal
+        >=
+        CUSHION_OCCUPANCY_THRESHOLD;
+
+
+    reading.backContact =
+        reading.backrestTotal
+        >=
+        BACK_CONTACT_THRESHOLD;
+
 
     if (
-        occupantPresent
+        reading.cushionTotal
+        >
+        0.0f
+    )
+    {
+        reading.horizontalCOP =
+            (
+                reading.cushionRight
+                -
+                reading.cushionLeft
+            )
+            /
+            reading.cushionTotal;
+    }
+    else
+    {
+        reading.horizontalCOP =
+            0.0f;
+    }
+
+
+    float combinedLeft =
+        reading.backrestLeftTotal
+        +
+        reading.cushionLeft;
+
+
+    float combinedRight =
+        reading.backrestRightTotal
+        +
+        reading.cushionRight;
+
+
+    float sideTotal =
+        combinedLeft
+        +
+        combinedRight;
+
+
+    if (
+        sideTotal
+        >
+        0.0f
+    )
+    {
+        reading.sideAsymmetry =
+            (
+                combinedRight
+                -
+                combinedLeft
+            )
+            /
+            sideTotal;
+    }
+    else
+    {
+        reading.sideAsymmetry =
+            0.0f;
+    }
+
+
+    if (
+        !reading.occupied
+    )
+    {
+        reading.datasetOrient =
+            'a';
+
+
+        reading.datasetLean =
+            '-';
+
+
+        return;
+    }
+
+
+    if (
+        reading.sideAsymmetry
+        <=
+        -LEAN_ASYMMETRY_THRESHOLD
+    )
+    {
+        reading.datasetLean =
+            'l';
+    }
+    else if (
+        reading.sideAsymmetry
+        >=
+        LEAN_ASYMMETRY_THRESHOLD
+    )
+    {
+        reading.datasetLean =
+            'r';
+    }
+    else
+    {
+        reading.datasetLean =
+            'c';
+    }
+
+
+    if (
+        !reading.backContact
+        ||
+        reading.backrestToCushionRatio
+        <
+        FORWARD_BACK_RATIO
+    )
+    {
+        reading.datasetOrient =
+            'f';
+    }
+    else if (
+        reading.backrestToCushionRatio
+        >
+        BACKWARD_BACK_RATIO
+    )
+    {
+        reading.datasetOrient =
+            'b';
+    }
+    else
+    {
+        reading.datasetOrient =
+            's';
+    }
+}
+
+
+// ============================================================
+// EMPTY-SEAT BASELINE DRIFT CORRECTION
+//
+// This restores the old proven behavior:
+//
+// do not adapt if cushion declares occupied
+// do not adapt if meaningful backrest contact exists
+// ============================================================
+
+void FSRSensor::updateEmptySeatBaseline()
+{
+    if (
+        reading.occupied
     )
     {
         return;
     }
 
 
-    /*
-     * Extra safety:
-     *
-     * If meaningful pressure is present despite C1001 saying
-     * no occupant, do not modify calibration.
-     *
-     * This prevents a bag/object/person missed by C1001 from
-     * being absorbed into the empty-seat baseline.
-     */
-
     if (
-        reading.wholeSeatTotal
-        >
-        BASELINE_ADAPT_MAX_TOTAL
+        reading.backrestTotal
+        >=
+        BACK_CONTACT_THRESHOLD
     )
     {
         return;
@@ -1087,11 +1143,9 @@ void FSRSensor::updateBaselineWhenEmpty(
     )
     {
         reading.baseline[i] =
-            (
-                BASELINE_ADAPT_ALPHA
-                *
-                reading.filtered[i]
-            )
+            BASELINE_ADAPT_ALPHA
+            *
+            reading.filtered[i]
             +
             (
                 1.0f
@@ -1119,6 +1173,15 @@ void FSRSensor::update(
     bool occupantPresent
 )
 {
+    /*
+     * Kept only for interface compatibility in Step 3.
+     *
+     * The restored FSR acquisition does not use C1001 to alter
+     * the pressure measurement itself.
+     */
+    (void) occupantPresent;
+
+
     if (
         !reading.connected
         ||
@@ -1154,28 +1217,10 @@ void FSRSensor::update(
     ];
 
 
-    if (
-        !readAllSensors(
-            values
-        )
-    )
-    {
-        reading.valid =
-            false;
+    readAllSensors(
+        values
+    );
 
-
-        reading.status =
-            FSRStatus::
-                INVALID_READING;
-
-
-        return;
-    }
-
-
-    // ========================================================
-    // RAW + FILTER
-    // ========================================================
 
     for (
         int i = 0;
@@ -1202,39 +1247,24 @@ void FSRSensor::update(
     }
 
 
-    // ========================================================
-    // FEATURES
-    // ========================================================
-
     calculatePressureFeatures();
 
 
-    // ========================================================
-    // EMPTY-SEAT BASELINE ADAPTATION
-    // ========================================================
-
-    updateBaselineWhenEmpty(
-        occupantPresent
-    );
+    updateEmptySeatBaseline();
 
 
-    /*
-     * Recalculate after baseline movement.
-     */
-
+    // Recalculate after baseline drift correction.
     calculatePressureFeatures();
 
-
-    // ========================================================
-    // SAMPLE RATE MONITOR
-    // ========================================================
 
     unsigned long completedNow =
         millis();
 
 
     if (
-        previousCompletedSample > 0
+        previousCompletedSample
+        >
+        0
     )
     {
         unsigned long delta =
@@ -1244,7 +1274,9 @@ void FSRSensor::update(
 
 
         if (
-            delta > 0
+            delta
+            >
+            0
         )
         {
             reading.actualSamplingRateHz =
@@ -1332,17 +1364,22 @@ FSRSensor::getStatusText() const
         case FSRStatus::DISCONNECTED:
             return "DISCONNECTED";
 
+
         case FSRStatus::CALIBRATING:
             return "CALIBRATING";
+
 
         case FSRStatus::READY:
             return "READY";
 
+
         case FSRStatus::READING:
             return "READING";
 
+
         case FSRStatus::INVALID_READING:
             return "INVALID READING";
+
 
         default:
             return "UNKNOWN";
