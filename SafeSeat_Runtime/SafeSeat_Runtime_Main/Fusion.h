@@ -19,7 +19,7 @@
 // - No Isolation Forest / OCSVM implementation lives here.
 // - Sensor-specific ML remains inside each sensor pipeline.
 // - Fusion receives only the RESULTS of those models.
-// - Piezo arrives as remote model evidence over UART.
+// - Piezo arrives as remote model evidence over ESP-NOW.
 // - Camera remains a verification placeholder until its link is integrated.
 // ============================================================
 
@@ -179,7 +179,7 @@ enum class FusionTemperatureState
 // RESPIRATION / PIEZO STATE
 //
 // Piezo runs on another ESP32 and is received as remote
-// respiration-pattern evidence over UART.
+// respiration-pattern evidence over ESP-NOW.
 // ============================================================
 
 enum class FusionRespirationState
@@ -222,7 +222,7 @@ enum class FusionLevel
 
 
 // ============================================================
-// PIEZO REMOTE EVIDENCE - STEP 5.7.2
+// PIEZO REMOTE EVIDENCE - STEP 5.7.3
 //
 // Populated by Main Hub PiezoComm from the separate seatbelt
 // ESP32. The source model is WESAD RespiBAN -> PVDF surrogate

@@ -4,6 +4,7 @@
 
 #include "Fusion.h"
 #include "PiezoProtocol.h"
+#include "SafeSeatNow.h"
 
 struct PiezoRemoteStatus
 {
@@ -19,6 +20,9 @@ struct PiezoRemoteStatus
 
     float remoteSamplingRateHz = 0.0f;
     uint32_t remoteFeatureWindowCount = 0;
+
+    uint8_t linkChannel = 0;
+    uint8_t sourceMac[6]{};
 };
 
 class PiezoComm
@@ -37,17 +41,22 @@ public:
         return status;
     }
 
-private:
-    uint8_t receiveBuffer[sizeof(PiezoWirePacket)]{};
-    size_t receiveIndex = 0;
+    const SafeSeatNowStatus&
+    getWirelessStatus() const
+    {
+        return SafeSeatNow::instance().getStatus();
+    }
 
+private:
     PiezoWirePacket latestPacket{};
     PiezoRemoteStatus status{};
-
     bool packetReceived = false;
 
-    void consumeByte(uint8_t value);
-    void processBufferedPacket();
+    void processPacket(
+        const PiezoWirePacket &packet,
+        const uint8_t sourceMac[6]
+    );
+
     bool packetIsValid(
         const PiezoWirePacket &packet
     ) const;

@@ -11,7 +11,7 @@
 // ============================================================
 // SAFESEAT PIEZO / SEATBELT ESP32
 //
-// STEP 5.7.2
+// STEP 5.7.3
 //
 // PVDF @ 25 Hz
 // -> exact Step 5.7 30-second window preprocessing
@@ -155,7 +155,7 @@ void setup()
         " SafeSeat Piezo Seatbelt Runtime"
     );
     Serial.println(
-        " Step 5.7.2 - ML + Main Hub Communication"
+        " Step 5.7.3 - ML + ESP-NOW Communication"
     );
     Serial.println(
         "=========================================="
@@ -175,8 +175,8 @@ void setup()
 
     Serial.println(
         commReady
-            ? "[PIEZO-COMM] UART TX ready on GPIO17 @ 115200."
-            : "[PIEZO-COMM] UART initialization failed."
+            ? "[PIEZO-COMM] ESP-NOW ready; searching for Main Hub beacon."
+            : "[PIEZO-COMM] ESP-NOW initialization failed."
     );
 
     Serial.println(
@@ -192,7 +192,7 @@ void setup()
         "     -> Step 5.7 IF + OCSVM"
     );
     Serial.println(
-        "[LINK] Piezo GPIO17 TX -> Main Hub GPIO25 RX + common GND"
+        "[LINK] ESP-NOW wireless; no Piezo/Main signal wire required"
     );
 }
 
@@ -240,7 +240,7 @@ void loop()
         "=========================================="
     );
     Serial.println(
-        " SAFESEAT PIEZO ESP32 - STEP 5.7.2"
+        " SAFESEAT PIEZO ESP32 - STEP 5.7.3"
     );
     Serial.println(
         "=========================================="
@@ -453,8 +453,40 @@ void loop()
         piezoComm.getPacketsSent()
     );
 
+    Serial.printf(
+        "Send errors       : %lu\n",
+        piezoComm.getSendErrors()
+    );
+
+    Serial.printf(
+        "Hub beacons       : %lu\n",
+        piezoComm.getHubBeaconsReceived()
+    );
+
+    Serial.print(
+        "ESP-NOW link      : "
+    );
     Serial.println(
-        "Link              : GPIO17 TX -> Main GPIO25 RX"
+        piezoComm.isHubLocked()
+            ? "LOCKED"
+            : "SCANNING"
+    );
+
+    Serial.printf(
+        "Wi-Fi channel     : %u\n",
+        piezoComm.getChannel()
+    );
+
+    if (piezoComm.isHubLocked())
+    {
+        Serial.printf(
+            "Beacon age       : %lu ms\n",
+            piezoComm.getBeaconAgeMillis()
+        );
+    }
+
+    Serial.println(
+        "Link              : ESP-NOW wireless -> Main Hub"
     );
 
     Serial.println(

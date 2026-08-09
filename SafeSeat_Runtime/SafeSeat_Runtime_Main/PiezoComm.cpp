@@ -4,23 +4,17 @@
 
 bool PiezoComm::begin()
 {
-    // Receive-only UART. TX is intentionally disabled.
-    Serial2.begin(
-        PIEZO_COMM_BAUD,
-        SERIAL_8N1,
-        PIEZO_COMM_RX_PIN,
-        -1
-    );
-
-    receiveIndex = 0;
     latestPacket = PiezoWirePacket{};
     status = PiezoRemoteStatus{};
-    status.initialized = true;
     packetReceived = false;
 
-    return true;
-}
+    const bool wirelessReady =
+        SafeSeatNow::instance().begin();
 
+    status.initialized = wirelessReady;
+
+    return wirelessReady;
+}
 
 void PiezoComm::update()
 {
@@ -29,19 +23,24 @@ void PiezoComm::update()
         return;
     }
 
-    while (Serial2.available() > 0)
+    SafeSeatNow &wireless =
+        SafeSeatNow::instance();
+
+    wireless.update();
+
+    PiezoWirePacket candidate;
+    uint8_t sourceMac[6]{};
+
+    if (
+        wireless.takeLatestPiezoPacket(
+            candidate,
+            sourceMac
+        )
+    )
     {
-        int value = Serial2.read();
-
-        if (value < 0)
-        {
-            break;
-        }
-
-        consumeByte(
-            static_cast<uint8_t>(
-                value
-            )
+        processPacket(
+            candidate,
+            sourceMac
         );
     }
 
@@ -62,105 +61,30 @@ void PiezoComm::update()
         status.packetAgeMillis = 0;
         status.connected = false;
     }
+
+    status.linkChannel =
+        wireless.getStatus().channel;
 }
 
-
-void PiezoComm::consumeByte(
-    uint8_t value
+void PiezoComm::processPacket(
+    const PiezoWirePacket &packet,
+    const uint8_t sourceMac[6]
 )
 {
-    const uint8_t magicLow =
-        static_cast<uint8_t>(
-            PIEZO_WIRE_MAGIC
-            &
-            0xFFu
-        );
-
-    const uint8_t magicHigh =
-        static_cast<uint8_t>(
-            (
-                PIEZO_WIRE_MAGIC
-                >>
-                8
-            )
-            &
-            0xFFu
-        );
-
-    if (receiveIndex == 0)
-    {
-        if (value == magicLow)
-        {
-            receiveBuffer[0] = value;
-            receiveIndex = 1;
-        }
-
-        return;
-    }
-
-    if (receiveIndex == 1)
-    {
-        if (value == magicHigh)
-        {
-            receiveBuffer[1] = value;
-            receiveIndex = 2;
-        }
-        else if (value == magicLow)
-        {
-            // Possible new packet start.
-            receiveBuffer[0] = value;
-            receiveIndex = 1;
-        }
-        else
-        {
-            receiveIndex = 0;
-        }
-
-        return;
-    }
-
-    receiveBuffer[
-        receiveIndex++
-    ] = value;
-
-    if (
-        receiveIndex
-        >=
-        sizeof(PiezoWirePacket)
-    )
-    {
-        processBufferedPacket();
-        receiveIndex = 0;
-    }
-}
-
-
-void PiezoComm::processBufferedPacket()
-{
-    PiezoWirePacket candidate;
-
-    memcpy(
-        &candidate,
-        receiveBuffer,
-        sizeof(candidate)
-    );
-
-    if (!packetIsValid(candidate))
+    if (!packetIsValid(packet))
     {
         status.badPackets++;
         return;
     }
 
-    latestPacket = candidate;
+    latestPacket = packet;
     packetReceived = true;
 
     status.packetsReceived++;
     status.lastSequence =
         latestPacket.sequence;
 
-    status.lastPacketMillis =
-        millis();
-
+    status.lastPacketMillis = millis();
     status.packetAgeMillis = 0;
     status.connected = true;
 
@@ -169,8 +93,13 @@ void PiezoComm::processBufferedPacket()
 
     status.remoteFeatureWindowCount =
         latestPacket.featureWindowCount;
-}
 
+    memcpy(
+        status.sourceMac,
+        sourceMac,
+        6
+    );
+}
 
 bool PiezoComm::packetIsValid(
     const PiezoWirePacket &packet
@@ -206,11 +135,8 @@ bool PiezoComm::packetIsValid(
     return
         packet.checksum
         ==
-        piezoPacketChecksum(
-            packet
-        );
+        piezoPacketChecksum(packet);
 }
-
 
 PiezoFusionEvidence
 PiezoComm::getFusionEvidence() const
@@ -285,8 +211,7 @@ PiezoComm::getFusionEvidence() const
         !=
         0;
 
-    evidence.model.available =
-        true;
+    evidence.model.available = true;
 
     evidence.model.valid =
         (

@@ -483,10 +483,10 @@ void setup()
 
 
     // ========================================================
-    // PIEZO REMOTE UART - STEP 5.7.2
+    // PIEZO REMOTE ESP-NOW - STEP 5.7.3
     //
-    // Receive-only link from the separate seatbelt ESP32.
-    // Wiring: Piezo TX GPIO17 -> Main RX GPIO25 + common GND.
+    // Wireless evidence from the separate seatbelt ESP32.
+    // No Piezo/Main signal wire or common-ground link is required.
     // ========================================================
 
     Serial.println();
@@ -499,8 +499,8 @@ void setup()
 
     Serial.println(
         piezoCommInitialized
-            ? "[MAIN] Piezo UART RX ready on GPIO25 @ 115200."
-            : "[MAIN] WARNING: Piezo UART link failed."
+            ? "[MAIN] SafeSeat ESP-NOW ready; waiting for Piezo evidence."
+            : "[MAIN] WARNING: ESP-NOW initialization failed."
     );
 
 
@@ -851,9 +851,9 @@ void loop()
             ? 1.0f
             : 0.0f;
 
-    // Step 5.7.2 remote Piezo evidence. The separate Piezo ESP32
+    // Step 5.7.3 remote Piezo evidence. The separate Piezo ESP32
     // performs its own 25 Hz preprocessing + IF/OCSVM inference.
-    // Main Hub receives only model/signal evidence over UART.
+    // Main Hub receives only model/signal evidence over ESP-NOW.
     fusionInput.piezo =
         piezoComm.getFusionEvidence();
 
@@ -2117,7 +2117,7 @@ void loop()
 
 
     // ========================================================
-    // PIEZO REMOTE - STEP 5.7.2
+    // PIEZO REMOTE - STEP 5.7.3
     // ========================================================
 
     Serial.println();
@@ -2157,6 +2157,30 @@ void loop()
         piezoStatus.badPackets
     );
 
+    const SafeSeatNowStatus &wirelessStatus =
+        piezoComm.getWirelessStatus();
+
+    Serial.print(
+        "Transport      : "
+    );
+    Serial.println(
+        "ESP-NOW"
+    );
+
+    Serial.print(
+        "Wi-Fi channel  : "
+    );
+    Serial.println(
+        wirelessStatus.channel
+    );
+
+    Serial.print(
+        "Hub beacons TX : "
+    );
+    Serial.println(
+        wirelessStatus.hubBeaconsSent
+    );
+
     if (piezoStatus.connected)
     {
         Serial.print(
@@ -2167,6 +2191,16 @@ void loop()
         );
         Serial.println(
             " ms"
+        );
+
+        Serial.printf(
+            "Piezo MAC      : %02X:%02X:%02X:%02X:%02X:%02X\n",
+            piezoStatus.sourceMac[0],
+            piezoStatus.sourceMac[1],
+            piezoStatus.sourceMac[2],
+            piezoStatus.sourceMac[3],
+            piezoStatus.sourceMac[4],
+            piezoStatus.sourceMac[5]
         );
 
         Serial.print(
@@ -2412,7 +2446,7 @@ void loop()
     );
 
     Serial.println(
-        "Piezo          : separate ESP32; UART evidence link ACTIVE"
+        "Piezo          : separate ESP32; ESP-NOW evidence link ACTIVE"
     );
 
     Serial.println(
