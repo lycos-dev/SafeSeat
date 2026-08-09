@@ -74,7 +74,7 @@ private:
         9.80665f;
 
     static constexpr float DEG_TO_RAD_FACTOR =
-        0.017453292519943295769236907684886f;
+        0.01745329251994329577f;
 
     MPUFeatureExtractor featureExtractor;
     MPUInference inference;

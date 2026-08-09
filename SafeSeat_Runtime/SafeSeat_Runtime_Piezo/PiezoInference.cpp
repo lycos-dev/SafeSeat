@@ -52,8 +52,15 @@ void PiezoInference::applyScaler(
         float scale =
             PIEZO_SCALER_SCALE[i];
 
+        // Do not replace very small learned scales with 1.0.
+        // Step 5.7 has a near-zero-but-nonzero median scale
+        // (~8e-18) that is part of the fitted StandardScaler.
+        // sklearn itself already maps truly constant features to
+        // scale_=1. Only zero/non-finite values need a guard.
         if (
-            fabsf(scale) < 1.0e-12f
+            !isfinite(scale)
+            ||
+            scale == 0.0f
         )
         {
             scale =

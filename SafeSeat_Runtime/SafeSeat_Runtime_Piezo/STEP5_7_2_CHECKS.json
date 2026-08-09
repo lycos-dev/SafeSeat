@@ -1,0 +1,29 @@
+{
+  "step": "5.7.2",
+  "piezo_model_artifacts_loaded": true,
+  "runtime_rate_hz": 25,
+  "window_samples": 750,
+  "stride_samples": 125,
+  "feature_count": 16,
+  "iforest_trees": 300,
+  "iforest_nodes": 34558,
+  "ocsvm_support_vectors": 34,
+  "iforest_prediction_parity": "1717/1717",
+  "ocsvm_prediction_parity": "1717/1717",
+  "feature_extractor_synthetic_max_abs_error": 0.00010414628508703672,
+  "protocol_headers_identical": true,
+  "protocol_packet_bytes": 40,
+  "protocol_crc16": true,
+  "piezo_tx_gpio": 17,
+  "main_rx_gpio": 25,
+  "main_fusion_policy": "Piezo strong model evidence requires C1001 anomaly corroboration before becoming anomaly evidence.",
+  "host_cpp_checks": {
+    "piezo_feature_extractor": "PASS",
+    "piezo_inference": "PASS",
+    "piezo_comm": "PASS",
+    "piezo_ino_syntax": "PASS",
+    "main_piezo_comm": "PASS",
+    "fusion_cpp": "PASS"
+  },
+  "full_arduino_compile": "PENDING USER VERIFY"
+}

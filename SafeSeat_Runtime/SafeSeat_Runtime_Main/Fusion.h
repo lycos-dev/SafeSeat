@@ -19,7 +19,8 @@
 // - No Isolation Forest / OCSVM implementation lives here.
 // - Sensor-specific ML remains inside each sensor pipeline.
 // - Fusion receives only the RESULTS of those models.
-// - Piezo and Camera are represented as placeholders for now.
+// - Piezo arrives as remote model evidence over UART.
+// - Camera remains a verification placeholder until its link is integrated.
 // ============================================================
 
 
@@ -177,8 +178,8 @@ enum class FusionTemperatureState
 // ============================================================
 // RESPIRATION / PIEZO STATE
 //
-// Piezo runs on another ESP32.
-// For now these fields are placeholders.
+// Piezo runs on another ESP32 and is received as remote
+// respiration-pattern evidence over UART.
 // ============================================================
 
 enum class FusionRespirationState
@@ -221,10 +222,12 @@ enum class FusionLevel
 
 
 // ============================================================
-// PIEZO EVIDENCE PLACEHOLDER
+// PIEZO REMOTE EVIDENCE - STEP 5.7.2
 //
-// This will later be populated from PiezoComm after the
-// separate seatbelt ESP32 sends its current runtime result.
+// Populated by Main Hub PiezoComm from the separate seatbelt
+// ESP32. The source model is WESAD RespiBAN -> PVDF surrogate
+// evidence and therefore requires C1001 corroboration before it
+// can become a strong Fusion anomaly vote.
 // ============================================================
 
 struct PiezoFusionEvidence
@@ -335,8 +338,8 @@ struct MPUFusionInput
 // This is the single object Fusion.cpp will evaluate.
 //
 // Main Hub sensors are already present.
-// Piezo and camera remain placeholders until communication
-// is integrated.
+// Piezo communication is integrated in Step 5.7.2.
+// Camera remains separate until its verification link is integrated.
 // ============================================================
 
 struct FusionInput

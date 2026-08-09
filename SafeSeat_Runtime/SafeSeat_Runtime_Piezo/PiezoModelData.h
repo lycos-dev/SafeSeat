@@ -3,18 +3,17 @@
 #include <Arduino.h>
 #include <stdint.h>
 
-// AUTO-GENERATED FROM TRAINED SAFESEAT PIEZO MODELS.
-// Learned parameters are split across multiple .cpp files.
-// Whole-number float literals are emitted as valid C++
-// forms such as -2.0f, 0.0f and 1.0f.
+// AUTO-GENERATED FROM SAFESEAT STEP 5.7 CANONICAL PIEZO MODELS.
+// Source: WESAD Respiban surrogate, runtime-aligned at 25 Hz.
+// Decision convention: >= 0 normal/inlier, < 0 anomaly.
 
 constexpr uint16_t PIEZO_MODEL_FEATURE_COUNT = 16;
 
-constexpr uint16_t PIEZO_IF_TREE_COUNT = 200;
-constexpr uint32_t PIEZO_IF_NODE_COUNT = 24562;
+constexpr uint16_t PIEZO_IF_TREE_COUNT = 300;
+constexpr uint32_t PIEZO_IF_NODE_COUNT = 34558;
 constexpr uint16_t PIEZO_IF_MAX_SAMPLES = 256;
 
-constexpr uint16_t PIEZO_OCSVM_SUPPORT_VECTOR_COUNT = 35;
+constexpr uint16_t PIEZO_OCSVM_SUPPORT_VECTOR_COUNT = 34;
 
 extern const float PIEZO_SCALER_MEAN[PIEZO_MODEL_FEATURE_COUNT];
 extern const float PIEZO_SCALER_SCALE[PIEZO_MODEL_FEATURE_COUNT];
@@ -31,10 +30,6 @@ extern const float PIEZO_IF_OFFSET;
 extern const float PIEZO_OCSVM_SUPPORT_VECTORS[
     PIEZO_OCSVM_SUPPORT_VECTOR_COUNT * PIEZO_MODEL_FEATURE_COUNT
 ];
-
-extern const float PIEZO_OCSVM_DUAL_COEF[
-    PIEZO_OCSVM_SUPPORT_VECTOR_COUNT
-];
-
+extern const float PIEZO_OCSVM_DUAL_COEF[PIEZO_OCSVM_SUPPORT_VECTOR_COUNT];
 extern const float PIEZO_OCSVM_INTERCEPT;
 extern const float PIEZO_OCSVM_GAMMA;

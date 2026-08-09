@@ -21,12 +21,10 @@
 //
 // normalized = (signal - median) / scale
 //
-// NOTE:
-// Training calculated this over a complete participant
-// recording. Live firmware cannot see the future, so this
-// implementation applies the same formula to the current
-// 30-second window. This deployment adaptation requires
-// real-Piezo validation before the trained model is trusted.
+// Step 5.7 retraining applies this exact formula to each
+// complete 30-second window, matching the live firmware order.
+// The remaining limitation is the WESAD RespiBAN -> PVDF
+// sensor-domain transfer, not the window normalization order.
 // ============================================================
 
 bool PiezoFeatureExtractor::robustNormalizeWindow(

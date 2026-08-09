@@ -95,3 +95,22 @@ constexpr unsigned long MAIN_PRINT_INTERVAL_MS = 1000UL;
 // ============================================================
 
 constexpr bool ENABLE_DEBUG_SERIAL = true;
+
+// ============================================================
+// PIEZO REMOTE LINK
+//
+// Separate Piezo ESP32 sends one-way evidence packets.
+//
+// Wiring:
+//   Piezo GPIO17 (TX) -> Main Hub GPIO25 (RX)
+//   Piezo GND         -> Main Hub GND
+//
+// GPIO25 is intentionally separate from:
+// - C1001 Serial1 RX/TX = GPIO16/GPIO17
+// - I2C = GPIO21/GPIO22
+// - native FSR ADC = GPIO34
+// ============================================================
+
+constexpr uint32_t PIEZO_COMM_BAUD = 115200UL;
+constexpr int8_t PIEZO_COMM_RX_PIN = 25;
+constexpr unsigned long PIEZO_COMM_FRESHNESS_TIMEOUT_MS = 2500UL;

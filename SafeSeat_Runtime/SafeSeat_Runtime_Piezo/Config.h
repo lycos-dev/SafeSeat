@@ -34,3 +34,18 @@ constexpr uint16_t PIEZO_STRIDE_SAMPLES = 125;
 
 constexpr unsigned long PIEZO_SERIAL_REPORT_INTERVAL_MS = 1000UL;
 constexpr bool PIEZO_DEBUG_SERIAL = true;
+
+// ============================================================
+// PIEZO -> MAIN HUB UART LINK
+//
+// One-way communication keeps the separate Piezo ESP32
+// independent from the Main Hub's C1001 UART.
+//
+// Wiring:
+//   Piezo GPIO17 (TX) -> Main Hub GPIO25 (RX)
+//   Piezo GND         -> Main Hub GND
+// ============================================================
+
+constexpr uint32_t PIEZO_COMM_BAUD = 115200UL;
+constexpr int8_t PIEZO_COMM_TX_PIN = 17;
+constexpr unsigned long PIEZO_COMM_TX_INTERVAL_MS = 500UL;

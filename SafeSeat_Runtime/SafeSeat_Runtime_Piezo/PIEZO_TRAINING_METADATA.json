@@ -1,0 +1,95 @@
+{
+  "sensor": "PIEZO",
+  "source_dataset": "WESAD Respiban",
+  "runtime_alignment_version": "step_5_7_window_aligned",
+  "runtime_sampling_rate_hz": 25.0,
+  "window_samples": 750,
+  "stride_samples": 125,
+  "feature_count": 16,
+  "feature_columns": [
+    "mean",
+    "std",
+    "min",
+    "max",
+    "range",
+    "median",
+    "iqr",
+    "rms",
+    "energy",
+    "mean_abs_diff",
+    "std_diff",
+    "zero_crossing_rate",
+    "dominant_frequency_hz",
+    "estimated_respiration_bpm",
+    "spectral_entropy",
+    "autocorrelation_peak"
+  ],
+  "training_condition": "baseline",
+  "training_label": 1,
+  "training_subjects": [
+    "S2",
+    "S3",
+    "S4",
+    "S5",
+    "S6",
+    "S7",
+    "S9",
+    "S10",
+    "S11",
+    "S13",
+    "S15",
+    "S16"
+  ],
+  "untouched_held_out_subjects": [
+    "S8",
+    "S14",
+    "S17"
+  ],
+  "tuning_policy": "4-fold participant-wise CV using training subjects only",
+  "best_isolation_forest": {
+    "n_estimators": 300,
+    "contamination": 0.01,
+    "max_samples": "auto",
+    "cv_baseline_anomaly_rate": 0.009834929967319937
+  },
+  "best_one_class_svm": {
+    "nu": 0.01,
+    "gamma": 0.01,
+    "cv_baseline_anomaly_rate": 0.051860192844857246
+  },
+  "held_out_evaluation": [
+    {
+      "condition": "baseline",
+      "windows": 688,
+      "isolation_forest_anomaly_rate": 0.08139534883720931,
+      "one_class_svm_anomaly_rate": 0.07122093023255814,
+      "both_models_anomaly_rate": 0.06540697674418605,
+      "either_model_anomaly_rate": 0.0872093023255814
+    },
+    {
+      "condition": "stress",
+      "windows": 396,
+      "isolation_forest_anomaly_rate": 0.03535353535353535,
+      "one_class_svm_anomaly_rate": 0.07575757575757576,
+      "both_models_anomaly_rate": 0.030303030303030304,
+      "either_model_anomaly_rate": 0.08080808080808081
+    },
+    {
+      "condition": "amusement",
+      "windows": 204,
+      "isolation_forest_anomaly_rate": 0.004901960784313725,
+      "one_class_svm_anomaly_rate": 0.004901960784313725,
+      "both_models_anomaly_rate": 0.004901960784313725,
+      "either_model_anomaly_rate": 0.004901960784313725
+    },
+    {
+      "condition": "meditation",
+      "windows": 429,
+      "isolation_forest_anomaly_rate": 0.055944055944055944,
+      "one_class_svm_anomaly_rate": 0.3076923076923077,
+      "both_models_anomaly_rate": 0.053613053613053616,
+      "either_model_anomaly_rate": 0.31002331002331
+    }
+  ],
+  "interpretation": "WESAD non-baseline conditions are physiological reference conditions, not medical-emergency ground truth. Respiban-to-PVDF transfer remains a surrogate-domain limitation."
+}

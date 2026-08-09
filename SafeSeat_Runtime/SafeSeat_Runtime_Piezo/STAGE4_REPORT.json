@@ -36,5 +36,7 @@
       -1.9909642919848656,
       0.9911254475315484
     ]
-  ]
+  ],
+  "superseded_by": "Step 5.7 runtime-aligned retraining",
+  "current_note": "Step 5.7 now trains with the same 25 Hz, per-window detrend/filter/median-MAD order used by runtime."
 }

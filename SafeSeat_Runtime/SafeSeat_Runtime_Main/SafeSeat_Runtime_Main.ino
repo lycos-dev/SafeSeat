@@ -13,6 +13,7 @@
 #include "MPU.h"
 #include "MPUML.h"
 #include "Fusion.h"
+#include "PiezoComm.h"
 
 
 // ============================================================
@@ -29,6 +30,7 @@ FSRML fsrML;
 MPUSensor mpu;
 MPUML mpuML;
 FusionEngine fusion;
+PiezoComm piezoComm;
 
 
 // ============================================================
@@ -43,6 +45,7 @@ bool c1001Initialized = false;
 bool mlxInitialized = false;
 bool fsrInitialized = false;
 bool mpuInitialized = false;
+bool piezoCommInitialized = false;
 
 
 // ============================================================
@@ -196,6 +199,15 @@ void printInitializationSummary()
         )
     );
 
+    Serial.print(
+        "PiezoLink: "
+    );
+    Serial.println(
+        readyText(
+            piezoCommInitialized
+        )
+    );
+
     Serial.println();
 }
 
@@ -224,7 +236,7 @@ void setup()
     );
 
     Serial.println(
-        " Step 5.6 - MPU6050 Embedded ML + Fusion"
+        " Step 5.7.2 - Piezo Communication + Full Sensor Fusion"
     );
 
     Serial.println(
@@ -471,6 +483,28 @@ void setup()
 
 
     // ========================================================
+    // PIEZO REMOTE UART - STEP 5.7.2
+    //
+    // Receive-only link from the separate seatbelt ESP32.
+    // Wiring: Piezo TX GPIO17 -> Main RX GPIO25 + common GND.
+    // ========================================================
+
+    Serial.println();
+    Serial.println(
+        "[MAIN] Starting Piezo evidence link..."
+    );
+
+    piezoCommInitialized =
+        piezoComm.begin();
+
+    Serial.println(
+        piezoCommInitialized
+            ? "[MAIN] Piezo UART RX ready on GPIO25 @ 115200."
+            : "[MAIN] WARNING: Piezo UART link failed."
+    );
+
+
+    // ========================================================
     // START C1001 UART TASK ON CORE 0
     // ========================================================
 
@@ -528,6 +562,13 @@ void loop()
     // data. Their reading structures remain available for the
     // dashboard and, later, Fusion validity gating.
     // ========================================================
+
+    if (
+        piezoCommInitialized
+    )
+    {
+        piezoComm.update();
+    }
 
     if (
         mpuInitialized
@@ -810,6 +851,12 @@ void loop()
             ? 1.0f
             : 0.0f;
 
+    // Step 5.7.2 remote Piezo evidence. The separate Piezo ESP32
+    // performs its own 25 Hz preprocessing + IF/OCSVM inference.
+    // Main Hub receives only model/signal evidence over UART.
+    fusionInput.piezo =
+        piezoComm.getFusionEvidence();
+
     fusion.update(
         fusionInput
     );
@@ -839,6 +886,12 @@ void loop()
 
     const FusionReading &fusionReading =
         fusion.getReading();
+
+    const PiezoRemoteStatus &piezoStatus =
+        piezoComm.getStatus();
+
+    const PiezoFusionEvidence &piezoEvidence =
+        fusionInput.piezo;
 
     Serial.println();
     Serial.println(
@@ -2064,6 +2117,201 @@ void loop()
 
 
     // ========================================================
+    // PIEZO REMOTE - STEP 5.7.2
+    // ========================================================
+
+    Serial.println();
+    Serial.println(
+        "--------------- PIEZO --------------------"
+    );
+
+    Serial.print(
+        "Link init      : "
+    );
+    Serial.println(
+        readyText(
+            piezoCommInitialized
+        )
+    );
+
+    Serial.print(
+        "Connected      : "
+    );
+    Serial.println(
+        piezoStatus.connected
+            ? "YES"
+            : "NO / STALE"
+    );
+
+    Serial.print(
+        "Packets RX     : "
+    );
+    Serial.println(
+        piezoStatus.packetsReceived
+    );
+
+    Serial.print(
+        "Bad packets    : "
+    );
+    Serial.println(
+        piezoStatus.badPackets
+    );
+
+    if (piezoStatus.connected)
+    {
+        Serial.print(
+            "Packet age     : "
+        );
+        Serial.print(
+            piezoStatus.packetAgeMillis
+        );
+        Serial.println(
+            " ms"
+        );
+
+        Serial.print(
+            "Remote Fs      : "
+        );
+        Serial.print(
+            piezoStatus.remoteSamplingRateHz,
+            2
+        );
+        Serial.println(
+            " Hz"
+        );
+
+        Serial.print(
+            "Feature windows: "
+        );
+        Serial.println(
+            piezoStatus.remoteFeatureWindowCount
+        );
+
+        Serial.print(
+            "Signal quality : "
+        );
+        Serial.println(
+            piezoEvidence.signalQualityValid
+                ? "VALID"
+                : "NOT READY / REJECTED"
+        );
+
+        Serial.print(
+            "Peak RR        : "
+        );
+        if (
+            isfinite(
+                piezoEvidence.peakRespirationBPM
+            )
+        )
+        {
+            Serial.print(
+                piezoEvidence.peakRespirationBPM,
+                1
+            );
+            Serial.println(
+                " BPM"
+            );
+        }
+        else
+        {
+            Serial.println(
+                "not ready"
+            );
+        }
+
+        Serial.print(
+            "Spectral RR    : "
+        );
+        if (
+            isfinite(
+                piezoEvidence.spectralRespirationBPM
+            )
+        )
+        {
+            Serial.print(
+                piezoEvidence.spectralRespirationBPM,
+                1
+            );
+            Serial.println(
+                " BPM"
+            );
+        }
+        else
+        {
+            Serial.println(
+                "not ready"
+            );
+        }
+
+        Serial.print(
+            "Aux no-breath  : "
+        );
+        Serial.println(
+            piezoEvidence.noBreathTimerExceeded
+                ? "TIMER EXCEEDED (context only)"
+                : "NO"
+        );
+
+        Serial.print(
+            "Model          : "
+        );
+
+        if (!piezoEvidence.model.valid)
+        {
+            Serial.println(
+                "not ready"
+            );
+        }
+        else
+        {
+            if (
+                piezoEvidence.model.bothModelsAnomaly
+            )
+            {
+                Serial.println(
+                    "STRONG RESPIRATION-PATTERN ANOMALY"
+                );
+            }
+            else if (
+                piezoEvidence.model.eitherModelAnomaly
+            )
+            {
+                Serial.println(
+                    "WEAK RESPIRATION-PATTERN ANOMALY"
+                );
+            }
+            else
+            {
+                Serial.println(
+                    "NORMAL RESPIRATION PATTERN"
+                );
+            }
+
+            Serial.print(
+                "  IF decision  : "
+            );
+            Serial.println(
+                piezoEvidence.model.isolationForestScore,
+                6
+            );
+
+            Serial.print(
+                "  SVM decision : "
+            );
+            Serial.println(
+                piezoEvidence.model.oneClassSVMScore,
+                6
+            );
+        }
+
+        Serial.println(
+            "Fusion role    : respiration corroboration; never standalone emergency"
+        );
+    }
+
+
+    // ========================================================
     // FUSION
     // ========================================================
 
@@ -2164,15 +2412,15 @@ void loop()
     );
 
     Serial.println(
-        "Piezo          : separate ESP32"
+        "Piezo          : separate ESP32; UART evidence link ACTIVE"
     );
 
     Serial.println(
-        "ML inference   : C1001 ACTIVE; MLX WESAD diagnostic-only; FSR + MPU ACTIVE"
+        "ML inference   : C1001 + FSR + MPU + Piezo ACTIVE; MLX WESAD diagnostic-only"
     );
 
     Serial.println(
-        "Fusion         : active; C1001 + MLX context + FSR + MPU motion context connected"
+        "Fusion         : active; C1001 + MLX context + FSR + MPU motion context + Piezo corroboration"
     );
 
     Serial.println(

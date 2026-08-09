@@ -1,14 +1,22 @@
 {
-  "feature_count": 16,
-  "iforest_trees": 200,
-  "iforest_nodes": 24562,
-  "ocsvm_support_vectors": 35,
-  "invalid_integer_float_literals_found": 0,
-  "old_monolithic_PiezoModelData_cpp_included": false,
-  "instructions": [
-    "Delete the old PiezoModelData.cpp from your Arduino sketch folder.",
-    "Copy every file from this package into SafeSeat_Runtime_Piezo.",
-    "Keep all split PiezoModelData_*.cpp files in the same sketch folder."
-  ],
-  "validation_note": "Scientific notation such as 9.11086463e-05f is valid C++ and is not counted."
+  "step": "5.7.2",
+  "status": "current",
+  "canonical_model_export": {
+    "features": 16,
+    "iforest_trees": 300,
+    "iforest_nodes": 34558,
+    "ocsvm_support_vectors": 34,
+    "held_out_prediction_parity": "1717/1717 for IF and OCSVM"
+  },
+  "communication": {
+    "mode": "one-way UART binary packet + CRC16",
+    "piezo_tx_pin": 17,
+    "main_rx_pin": 25,
+    "baud": 115200,
+    "packet_bytes": 40,
+    "send_interval_ms": 500,
+    "main_freshness_timeout_ms": 2500
+  },
+  "fusion_policy": "Piezo both-model anomaly requires C1001 anomaly corroboration before it becomes an occupant anomaly vote. Piezo alone cannot create WARNING/EMERGENCY/camera request.",
+  "important_scaler_fix": "Preserve near-zero-but-nonzero StandardScaler scale values; only zero/non-finite values fall back to 1."
 }

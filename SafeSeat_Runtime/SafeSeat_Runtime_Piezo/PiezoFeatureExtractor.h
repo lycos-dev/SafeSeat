@@ -57,13 +57,12 @@ public:
     // Training normalization:
     //     (x - median) / (1.4826 * MAD)
     //
-    // In training this was calculated over each complete
-    // participant recording. In live deployment there is no
-    // completed recording available, so SafeSeat applies the
-    // same robust formula to the current 30-second live window.
+    // Step 5.7 retraining now applies this normalization to
+    // each complete 30-second window in BOTH Python training
+    // and live firmware. This is therefore runtime-aligned.
     //
-    // This is a deployment adaptation and must be validated
-    // against collected real Piezo data before final claims.
+    // WESAD RespiBAN -> PVDF remains a sensor-domain surrogate
+    // and still requires physical deployment validation.
     // --------------------------------------------------------
     bool robustNormalizeWindow(
         const float *input,

@@ -1,0 +1,16 @@
+{
+  "step": "5.7",
+  "checks": {
+    "runtime_rate_25_hz": true,
+    "window_750_samples": true,
+    "stride_125_samples": true,
+    "runtime_window_alignment_enabled": true,
+    "feature_count_16": true,
+    "no_subject_leakage": true,
+    "metadata_test_subjects_untouched": true,
+    "canonical_models_execute": true,
+    "affine_signal_scale_invariance": true
+  },
+  "affine_feature_max_abs_error": 1.219024881038422e-13,
+  "overall_pass": true
+}
