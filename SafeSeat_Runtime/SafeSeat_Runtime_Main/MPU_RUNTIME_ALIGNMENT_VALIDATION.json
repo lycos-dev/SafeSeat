@@ -1,0 +1,34 @@
+{
+  "step": "5.6.1",
+  "runtime_target_hz": 80.0,
+  "runtime_interval_us": 12500,
+  "window_samples": 80,
+  "stride_samples": 40,
+  "production_feature_count": 198,
+  "train_windows": 2053,
+  "test_windows": 4312,
+  "checks": {
+    "runtime_rate_80_hz": true,
+    "window_80_samples": true,
+    "stride_40_samples": true,
+    "gap_aware_resampling_enabled": true,
+    "runtime_segment_id_train": true,
+    "runtime_segment_id_test": true,
+    "all_train_windows_complete": true,
+    "all_test_windows_complete": true,
+    "train_windows_do_not_cross_source_gaps": true,
+    "test_windows_do_not_cross_source_gaps": true,
+    "metadata_runtime_aligned": true,
+    "metadata_feature_count_matches": true,
+    "feature_columns_exist_train": true,
+    "feature_columns_exist_test": true,
+    "canonical_models_execute": true
+  },
+  "PASS": true,
+  "gap_policy": {
+    "method": "gap_aware_linear_timestamp_interpolation",
+    "source_gap_multiplier": 5.0,
+    "minimum_gap_threshold_seconds": 0.05
+  },
+  "note": "Step 5.6.1 additionally verifies that no 1-second feature window crosses a source timestamp dropout. Embedded C++ parity remains deferred until MPU export."
+}

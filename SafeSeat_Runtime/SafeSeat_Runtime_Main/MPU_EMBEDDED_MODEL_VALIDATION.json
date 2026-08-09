@@ -1,0 +1,60 @@
+{
+  "step": "5.6",
+  "source_artifacts": "MPU_Step5_6_Artifacts.zip",
+  "model_contract": {
+    "runtime_rate_hz": 80.0,
+    "window_samples": 80,
+    "stride_samples": 40,
+    "feature_count": 198,
+    "isolation_forest": {
+      "trees": 400,
+      "total_nodes": 31242,
+      "contamination": 0.01,
+      "max_features": 0.75,
+      "fitted_max_samples": 256
+    },
+    "one_class_svm": {
+      "kernel": "rbf",
+      "nu": 0.05,
+      "gamma": 0.0005,
+      "support_vectors": 105
+    }
+  },
+  "runtime_domain_bridge": {
+    "startup_stationary_baseline_samples": 80,
+    "accelerometer_runtime_units": "g",
+    "accelerometer_model_units": "m/s^2 after startup stationary offset removal",
+    "gyroscope_runtime_units": "deg/s",
+    "gyroscope_model_units": "rad/s after startup stationary bias removal"
+  },
+  "feature_extractor_validation": {
+    "status": "PASS",
+    "synthetic_windows_checked": 30,
+    "maximum_absolute_feature_error": 2.46e-6
+  },
+  "embedded_prediction_parity": {
+    "test_rows": 4312,
+    "isolation_forest_prediction_matches": 4312,
+    "isolation_forest_prediction_mismatches": 0,
+    "one_class_svm_prediction_matches": 4312,
+    "one_class_svm_prediction_mismatches": 0,
+    "combined_prediction_mismatches": 0,
+    "maximum_if_decision_difference": 0.00052513,
+    "maximum_ocsvm_decision_difference": 1.612e-6,
+    "status": "PASS"
+  },
+  "host_cpp_syntax": {
+    "MPUFeatureExtractor.cpp": "PASS",
+    "MPUInference.cpp": "PASS",
+    "MPUML.cpp": "PASS",
+    "MPUModelData_Preprocessor.cpp": "PASS",
+    "MPUModelData_IF_Structure.cpp": "PASS",
+    "MPUModelData_IF_Children.cpp": "PASS",
+    "MPUModelData_IF_Thresholds.cpp": "PASS",
+    "MPUModelData_OCSVM.cpp": "PASS",
+    "Fusion.cpp": "PASS",
+    "SafeSeat_Runtime_Main.ino_stub_syntax": "PASS"
+  },
+  "arduino_esp32_full_compile": "NOT_RUN_IN_PACKAGING_ENVIRONMENT",
+  "fusion_role": "vehicle/road-motion artifact context only; MPU model anomaly never increments occupant anomalyEvidenceCount"
+}

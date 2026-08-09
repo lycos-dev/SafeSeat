@@ -1,0 +1,63 @@
+{
+  "pipeline": "SafeSeat MPU6050 runtime-aligned road-motion context",
+  "source_dataset": "Road Data",
+  "status": "final_tuned_runtime_aligned",
+  "trained_at_utc": "2026-08-09T07:44:31.233167+00:00",
+  "runtime_sampling_rate_hz": 80.0,
+  "window_seconds": 1.0,
+  "window_samples": 80,
+  "stride_samples": 40,
+  "resample_method": "gap_aware_linear_timestamp_interpolation",
+  "feature_count": 198,
+  "constant_features_excluded": true,
+  "training_strategy": "Normal-driving-only training; recording-level selection using held-out normal and Bump/Pothole recordings.",
+  "models": {
+    "isolation_forest": {
+      "n_estimators": 400,
+      "contamination": 0.01,
+      "max_samples": "auto",
+      "fitted_max_samples": 256,
+      "max_features": 0.75,
+      "random_state": 42,
+      "training_anomaly_percentage": 1.0228933268387725,
+      "testing_anomaly_percentage": 3.4322820037105752,
+      "recording_selection_metrics": {
+        "recording_roc_auc": 0.5490196078431373,
+        "recording_pr_auc": 0.833033971633498,
+        "balanced_accuracy": 0.6666666666666666,
+        "precision": 0.8947368421052632,
+        "recall": 1.0,
+        "f1": 0.9444444444444444,
+        "tuning_score": 0.7226375778756947
+      }
+    },
+    "one_class_svm": {
+      "kernel": "rbf",
+      "nu": 0.05,
+      "gamma": 0.0005,
+      "fitted_gamma": 0.0005,
+      "support_vectors": 105,
+      "training_anomaly_percentage": 4.968339016074038,
+      "testing_anomaly_percentage": 19.434137291280148,
+      "recording_selection_metrics": {
+        "recording_roc_auc": 0.627450980392157,
+        "recording_pr_auc": 0.8476733810211319,
+        "balanced_accuracy": 0.803921568627451,
+        "precision": 0.9411764705882353,
+        "recall": 0.9411764705882353,
+        "f1": 0.9411764705882353,
+        "tuning_score": 0.7805457962356751
+      }
+    }
+  },
+  "test_model_agreement_percentage": 83.99814471243042,
+  "test_both_models_anomaly_percentage": 3.4322820037105752,
+  "test_either_model_anomaly_percentage": 19.434137291280148,
+  "deployment_role": "Vehicle/seat motion context and artifact gating for SafeSeat Fusion. MPU anomaly evidence is not occupant medical anomaly evidence.",
+  "canonical_files": {
+    "preprocessor": "C:\\Users\\Lycos Blanza\\Downloads\\SAFESEAT\\SafeSeat_ML\\models\\MPU6050\\mpu6050_preprocessor.joblib",
+    "isolation_forest": "C:\\Users\\Lycos Blanza\\Downloads\\SAFESEAT\\SafeSeat_ML\\models\\MPU6050\\isolation_forest.joblib",
+    "one_class_svm": "C:\\Users\\Lycos Blanza\\Downloads\\SAFESEAT\\SafeSeat_ML\\models\\MPU6050\\one_class_svm.joblib",
+    "feature_columns": "C:\\Users\\Lycos Blanza\\Downloads\\SAFESEAT\\SafeSeat_ML\\models\\MPU6050\\feature_columns.json"
+  }
+}

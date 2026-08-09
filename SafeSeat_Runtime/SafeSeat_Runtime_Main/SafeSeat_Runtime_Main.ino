@@ -11,6 +11,7 @@
 #include "FSR.h"
 #include "FSRML.h"
 #include "MPU.h"
+#include "MPUML.h"
 #include "Fusion.h"
 
 
@@ -26,6 +27,7 @@ MLXContext mlxContext;
 FSRSensor fsr;
 FSRML fsrML;
 MPUSensor mpu;
+MPUML mpuML;
 FusionEngine fusion;
 
 
@@ -222,7 +224,7 @@ void setup()
     );
 
     Serial.println(
-        " Step 5.5 - FSR Embedded ML + Fusion"
+        " Step 5.6 - MPU6050 Embedded ML + Fusion"
     );
 
     Serial.println(
@@ -454,6 +456,21 @@ void setup()
 
 
     // ========================================================
+    // MPU6050 EMBEDDED ML - STEP 5.6
+    //
+    // Road Data training used calibrated acceleration in m/s^2
+    // with stationary offsets removed and gyro in rad/s.
+    // MPUML learns a one-second stationary startup baseline from
+    // this real MPU6050 before collecting model windows.
+    //
+    // The model result is road/vehicle-motion context only.
+    // It is never counted as occupant medical anomaly evidence.
+    // ========================================================
+
+    mpuML.begin();
+
+
+    // ========================================================
     // START C1001 UART TASK ON CORE 0
     // ========================================================
 
@@ -597,6 +614,13 @@ void loop()
 
     const MPUReading &m =
         mpu.getReading();
+
+    mpuML.update(
+        m
+    );
+
+    const MPUMLReading &mml =
+        mpuML.getReading();
 
 
     FusionInput fusionInput;
@@ -753,6 +777,38 @@ void loop()
 
     fusionInput.mpu.reading =
         m;
+
+    // Step 5.6 MPU model evidence is road/vehicle-motion
+    // artifact context. Fusion must never treat it as an
+    // independent occupant-health anomaly vote.
+    fusionInput.mpu.model.available =
+        mml.modelAvailable;
+
+    fusionInput.mpu.model.valid =
+        mml.valid;
+
+    fusionInput.mpu.model.isolationForestAnomaly =
+        mml.isolationForestAnomaly;
+
+    fusionInput.mpu.model.oneClassSVMAnomaly =
+        mml.oneClassSVMAnomaly;
+
+    fusionInput.mpu.model.bothModelsAnomaly =
+        mml.bothModelsAnomaly;
+
+    fusionInput.mpu.model.eitherModelAnomaly =
+        mml.eitherModelAnomaly;
+
+    fusionInput.mpu.model.isolationForestScore =
+        mml.isolationForestDecision;
+
+    fusionInput.mpu.model.oneClassSVMScore =
+        mml.oneClassSVMDecision;
+
+    fusionInput.mpu.model.confidence =
+        mml.valid
+            ? 1.0f
+            : 0.0f;
 
     fusion.update(
         fusionInput
@@ -1881,6 +1937,132 @@ void loop()
     }
 
 
+    Serial.println();
+    Serial.println(
+        "MPU ML (ROAD/MOTION CONTEXT):"
+    );
+
+    Serial.print(
+        "  Status       : "
+    );
+    Serial.println(
+        mpuML.getStatusText()
+    );
+
+    Serial.print(
+        "  Baseline     : "
+    );
+
+    if (
+        mml.stationaryBaselineReady
+    )
+    {
+        Serial.println(
+            "READY"
+        );
+    }
+    else
+    {
+        Serial.print(
+            mml.baselineSamplesCollected
+        );
+        Serial.print(
+            " / "
+        );
+        Serial.println(
+            mml.baselineSamplesRequired
+        );
+    }
+
+    Serial.print(
+        "  Window       : "
+    );
+    Serial.print(
+        mml.windowSamplesCollected
+    );
+    Serial.print(
+        " / "
+    );
+    Serial.println(
+        mml.windowSamplesRequired
+    );
+
+    Serial.print(
+        "  Next infer   : "
+    );
+    Serial.print(
+        mml.samplesUntilNextInference
+    );
+    Serial.println(
+        " sample(s)"
+    );
+
+    Serial.print(
+        "  Windows      : "
+    );
+    Serial.println(
+        mml.windowsEvaluated
+    );
+
+    if (
+        mml.valid
+    )
+    {
+        Serial.print(
+            "  IF decision  : "
+        );
+        Serial.println(
+            mml.isolationForestDecision,
+            6
+        );
+
+        Serial.print(
+            "  SVM decision : "
+        );
+        Serial.println(
+            mml.oneClassSVMDecision,
+            6
+        );
+
+        Serial.print(
+            "  Context      : "
+        );
+
+        if (
+            mml.bothModelsAnomaly
+        )
+        {
+            Serial.println(
+                "STRONG ROAD/MOTION ANOMALY"
+            );
+        }
+        else if (
+            mml.eitherModelAnomaly
+        )
+        {
+            Serial.println(
+                "WEAK ROAD/MOTION ANOMALY"
+            );
+        }
+        else
+        {
+            Serial.println(
+                "NORMAL ROAD MOTION"
+            );
+        }
+
+        Serial.println(
+            "  Fusion role  : ARTIFACT CONTEXT ONLY"
+        );
+    }
+    else
+    {
+        Serial.println(
+            "  Model result : not ready"
+        );
+    }
+
+
     // ========================================================
     // FUSION
     // ========================================================
@@ -1986,11 +2168,11 @@ void loop()
     );
 
     Serial.println(
-        "ML inference   : C1001 ACTIVE; MLX WESAD diagnostic-only; FSR/MPU pending"
+        "ML inference   : C1001 ACTIVE; MLX WESAD diagnostic-only; FSR + MPU ACTIVE"
     );
 
     Serial.println(
-        "Fusion         : active; C1001 model + MLX contextual evidence connected"
+        "Fusion         : active; C1001 + MLX context + FSR + MPU motion context connected"
     );
 
     Serial.println(

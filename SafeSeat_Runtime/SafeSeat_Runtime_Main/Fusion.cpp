@@ -436,8 +436,50 @@ void FusionEngine::update(
 
 
     // --------------------------------------------------------
-    // Motion: context and artifact gating only
+    // Motion: MPU6050 vehicle/road context + raw fallback
     // --------------------------------------------------------
+    //
+    // Step 5.6 adds the runtime-aligned MPU IF/OCSVM model.
+    // IMPORTANT: MPU anomaly is NOT occupant anomaly evidence.
+    // It describes vehicle/seat motion that can explain transient
+    // changes seen by pressure/vital sensors.
+    //
+    // - both MPU models anomaly -> strong road/motion context
+    // - either-only anomaly     -> weak road/motion context
+    // - instantaneous raw magnitudes remain a fast fallback
+    //   before the one-second model window is ready
+    // --------------------------------------------------------
+
+    bool mpuStrongRoadMotion = false;
+    bool mpuWeakRoadMotion = false;
+
+    if (
+        mpuUsable &&
+        hasStrongModelAnomaly(
+            input.mpu.model
+        )
+    )
+    {
+        mpuStrongRoadMotion = true;
+    }
+    else if (
+        mpuUsable &&
+        hasWeakModelAnomaly(
+            input.mpu.model
+        )
+    )
+    {
+        mpuWeakRoadMotion = true;
+    }
+
+    if (
+        mpuStrongRoadMotion ||
+        mpuWeakRoadMotion
+    )
+    {
+        // Context only. Do not increment anomalyEvidenceCount.
+        reading.evidence.supportingContextCount++;
+    }
 
     if (
         !mpuUsable
@@ -448,7 +490,7 @@ void FusionEngine::update(
     }
     else
     {
-        const bool strongVehicleMotion =
+        const bool strongInstantMotion =
             input.mpu.reading.dynamicAcceleration
             >
             0.25f
@@ -457,7 +499,7 @@ void FusionEngine::update(
             >
             35.0f;
 
-        const bool moderateVehicleMotion =
+        const bool moderateInstantMotion =
             input.mpu.reading.dynamicAcceleration
             >
             0.12f
@@ -466,28 +508,33 @@ void FusionEngine::update(
             >
             20.0f;
 
-        if (
-            strongVehicleMotion
-        )
-        {
-            reading.motion =
-                FusionMotionState::HIGH_MOTION;
-        }
-        else if (
-            moderateVehicleMotion
-        )
-        {
-            reading.motion =
-                FusionMotionState::MODERATE_MOTION;
-        }
-        else if (
+        const bool lowInstantMotion =
             input.mpu.reading.dynamicAcceleration
             >
             0.04f
             ||
             input.mpu.reading.gyroMagnitude
             >
-            8.0f
+            8.0f;
+
+        if (
+            mpuStrongRoadMotion ||
+            strongInstantMotion
+        )
+        {
+            reading.motion =
+                FusionMotionState::HIGH_MOTION;
+        }
+        else if (
+            mpuWeakRoadMotion ||
+            moderateInstantMotion
+        )
+        {
+            reading.motion =
+                FusionMotionState::MODERATE_MOTION;
+        }
+        else if (
+            lowInstantMotion
         )
         {
             reading.motion =
@@ -892,6 +939,8 @@ void FusionEngine::update(
         mpuUsable
         &&
         (
+            mpuStrongRoadMotion
+            ||
             input.mpu.reading.dynamicAcceleration
             >
             0.25f
@@ -902,6 +951,9 @@ void FusionEngine::update(
         )
     )
     {
+        // Only STRONG MPU model agreement gates escalation.
+        // An either-only/weak MPU anomaly is supporting context
+        // but is not enough by itself to suppress occupant evidence.
         motionArtifactPossible =
             true;
     }
@@ -1281,6 +1333,14 @@ void FusionEngine::update(
         (
             hasModelEvidence(
                 input.fsr.model
+            )
+                ? 1U
+                : 0U
+        )
+        +
+        (
+            hasModelEvidence(
+                input.mpu.model
             )
                 ? 1U
                 : 0U

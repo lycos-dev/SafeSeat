@@ -104,7 +104,16 @@ private:
             131.0f;
 
 
-    // Keep the runtime around 100 Hz.
+    // Acquisition request interval remains 10 ms.
+    //
+    // In the full SafeSeat main-loop workload this request has
+    // empirically yielded ~80-81 Hz actual MPU acquisition, which
+    // is the cadence used for Step 5.6 model retraining.
+    //
+    // We intentionally preserve the proven 10 ms request here
+    // instead of blindly changing it to 12.5 ms; doing so would
+    // risk pushing the real shared-loop cadence below 80 Hz.
+    // The final all-sensor test will verify Actual Fs again.
     static constexpr uint32_t
         SAMPLE_INTERVAL_US =
             10000UL;
