@@ -253,7 +253,7 @@ MPUModelSample MPUML::normalizeSample(
             baselineGyroXDps
         )
         *
-        DEG_TO_RAD;
+        DEG_TO_RAD_FACTOR;
 
     output.gyroY =
         (
@@ -261,7 +261,7 @@ MPUModelSample MPUML::normalizeSample(
             baselineGyroYDps
         )
         *
-        DEG_TO_RAD;
+        DEG_TO_RAD_FACTOR;
 
     output.gyroZ =
         (
@@ -269,7 +269,7 @@ MPUModelSample MPUML::normalizeSample(
             baselineGyroZDps
         )
         *
-        DEG_TO_RAD;
+        DEG_TO_RAD_FACTOR;
 
     return output;
 }
