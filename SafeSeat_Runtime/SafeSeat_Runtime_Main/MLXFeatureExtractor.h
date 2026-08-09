@@ -9,6 +9,7 @@
 // window = 30 seconds
 // overlap = 50%
 // stride = 60 samples
+// feature reference = per-window median-centered object temperature
 
 constexpr uint16_t MLX_ML_WINDOW_SAMPLES = 120;
 constexpr uint16_t MLX_ML_STRIDE_SAMPLES = 60;

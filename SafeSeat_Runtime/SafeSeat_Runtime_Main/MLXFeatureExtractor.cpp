@@ -1151,6 +1151,73 @@ bool MLXFeatureExtractor::extract(
         return false;
     }
 
+    // ========================================================
+    // STEP 5.4.1 TRANSFER CORRECTION
+    //
+    // Match Python training exactly:
+    // cleaned temperature -> finite median -> subtract that
+    // median from every finite sample in this 30-second window.
+    //
+    // This makes the learned feature vector invariant to a
+    // constant absolute temperature offset (e.g. WESAD wrist
+    // level versus MLX non-contact palm/forehead level).
+    // Ambient temperature is NOT subtracted here and remains
+    // separate deployment context / warm-target qualification.
+    // ========================================================
+
+    float centerValues[
+        MLX_ML_WINDOW_SAMPLES
+    ];
+
+    for (
+        uint16_t i = 0;
+        i < count;
+        i++
+    )
+    {
+        centerValues[i] =
+            valid[i];
+    }
+
+    sortValues(
+        centerValues,
+        count
+    );
+
+    float windowMedian =
+        medianSorted(
+            centerValues,
+            count
+        );
+
+    for (
+        uint16_t i = 0;
+        i < MLX_ML_WINDOW_SAMPLES;
+        i++
+    )
+    {
+        if (
+            isfinite(
+                cleaned[i]
+            )
+        )
+        {
+            cleaned[i] =
+                cleaned[i]
+                -
+                windowMedian;
+        }
+    }
+
+    count =
+        collectFinite(
+            cleaned,
+            valid
+        );
+
+    output.finiteSampleCount =
+        count;
+
     float sorted[
         MLX_ML_WINDOW_SAMPLES
     ];
@@ -1802,27 +1869,24 @@ bool MLXFeatureExtractor::extract(
         );
 
     // ========================================================
-    // EXACT FEATURE ORDER FROM feature_columns.json
+    // EXACT 38-FEATURE ORDER FROM STEP 5.4.1 feature_columns.json
+    // All statistics below are derived from the median-centered
+    // 30-second window. Raw absolute-temperature QA features are
+    // intentionally excluded from the anomaly model.
     // ========================================================
 
     output.values[0] =
-        aboveFraction;
-
-    output.values[1] =
-        belowFraction;
-
-    output.values[2] =
         changeStd;
 
-    output.values[3] =
+    output.values[1] =
         coolingFraction;
 
-    output.values[4] =
+    output.values[2] =
         static_cast<float>(
             count
         );
 
-    output.values[5] =
+    output.values[3] =
         valid[
             count
             -
@@ -1831,156 +1895,140 @@ bool MLXFeatureExtractor::extract(
         -
         valid[0];
 
-    output.values[6] =
+    output.values[4] =
         valid[0];
 
-    output.values[7] =
-        invalidFraction;
-
-    output.values[8] =
+    output.values[5] =
         q75
         -
         q25;
 
-    output.values[9] =
+    output.values[6] =
         autocorrelation(
             cleaned,
             1
         );
 
-    output.values[10] =
+    output.values[7] =
         autocorrelation(
             cleaned,
             4
         );
 
-    output.values[11] =
+    output.values[8] =
         differenceCount
         >
         0
             ? largestCoolingStep
             : 0.0f;
 
-    output.values[12] =
+    output.values[9] =
         differenceCount
         >
         0
             ? largestWarmingStep
             : 0.0f;
 
-    output.values[13] =
+    output.values[10] =
         valid[
             count
             -
             1
         ];
 
-    output.values[14] =
+    output.values[11] =
         linearResidualStd(
             cleaned
         );
 
-    output.values[15] =
-        static_cast<float>(
-            longestInvalidRun(
-                rawObjectTemperature
-            )
-        );
-
-    output.values[16] =
+    output.values[12] =
         mad;
 
-    output.values[17] =
+    output.values[13] =
         maximum;
 
-    output.values[18] =
+    output.values[14] =
         maxAbsoluteDifference;
 
-    output.values[19] =
+    output.values[15] =
         maxChangePerSecond;
 
-    output.values[20] =
+    output.values[16] =
         static_cast<float>(
             mean
         );
 
-    output.values[21] =
+    output.values[17] =
         meanAbsoluteChange;
 
-    output.values[22] =
+    output.values[18] =
         meanChangePerSecond;
 
-    output.values[23] =
-        median;
-
-    output.values[24] =
+    output.values[19] =
         minimum;
 
-    output.values[25] =
+    output.values[20] =
         missingFraction;
 
-    output.values[26] =
+    output.values[21] =
         static_cast<float>(
             coolingCount
         );
 
-    output.values[27] =
+    output.values[22] =
         static_cast<float>(
             warmingCount
         );
 
-    output.values[28] =
+    output.values[23] =
         q05;
 
-    output.values[29] =
+    output.values[24] =
         q10;
 
-    output.values[30] =
+    output.values[25] =
         q25;
 
-    output.values[31] =
+    output.values[26] =
         q75;
 
-    output.values[32] =
+    output.values[27] =
         q90;
 
-    output.values[33] =
+    output.values[28] =
         q95;
 
-    output.values[34] =
+    output.values[29] =
         maximum
         -
         minimum;
 
-    output.values[35] =
+    output.values[30] =
         rms;
 
-    output.values[36] =
+    output.values[31] =
         linearSlope(
             cleaned
         );
 
-    output.values[37] =
+    output.values[32] =
         standardDeviation;
 
-    output.values[38] =
+    output.values[33] =
         unchangedFraction;
 
-    output.values[39] =
-        validFraction;
-
-    output.values[40] =
+    output.values[34] =
         static_cast<float>(
             variance
         );
 
-    output.values[41] =
+    output.values[35] =
         warmingFraction;
 
-    output.values[42] =
+    output.values[36] =
         within02Fraction;
 
-    output.values[43] =
+    output.values[37] =
         within05Fraction;
 
     output.valid =

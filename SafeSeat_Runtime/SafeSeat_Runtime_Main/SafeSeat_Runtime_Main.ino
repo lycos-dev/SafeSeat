@@ -7,6 +7,7 @@
 #include "C1001ML.h"
 #include "MLX.h"
 #include "MLXML.h"
+#include "MLXContext.h"
 #include "FSR.h"
 #include "MPU.h"
 #include "Fusion.h"
@@ -20,6 +21,7 @@ C1001Sensor c1001;
 C1001ML c1001ML;
 MLXSensor mlx;
 MLXML mlxML;
+MLXContext mlxContext;
 FSRSensor fsr;
 MPUSensor mpu;
 FusionEngine fusion;
@@ -218,7 +220,7 @@ void setup()
     );
 
     Serial.println(
-        " Step 5.4 - C1001 + MLX Embedded ML + Fusion"
+        " Step 5.4.5 - MLX Context Fusion Finalization"
     );
 
     Serial.println(
@@ -368,6 +370,11 @@ void setup()
     // ========================================================
 
     mlxML.begin();
+
+    // Step 5.4.5 deployment-safe MLX context evidence.
+    // The WESAD model above remains diagnostic-only; Fusion
+    // consumes mlxContext instead.
+    mlxContext.begin();
 
 
     // ========================================================
@@ -557,6 +564,13 @@ void loop()
     const MLXMLReading &tml =
         mlxML.getReading();
 
+    mlxContext.update(
+        t
+    );
+
+    const MLXContextReading &tx =
+        mlxContext.getReading();
+
     const FSRReading &f =
         fsr.getReading();
 
@@ -625,6 +639,14 @@ void loop()
     fusionInput.mlx.reading =
         t;
 
+    fusionInput.mlx.context =
+        tx;
+
+    // MLX WESAD model evidence is retained for diagnostics.
+    // Step 5.4.5 Fusion intentionally ignores this model because
+    // the contact-E4 -> non-contact-MLX domain mismatch was
+    // demonstrated in Step 5.4.3.
+    //
     // MLX model evidence is produced by the sensor-specific
     // MLX ML pipeline. Ambient temperature is not model input.
     fusionInput.mlx.model.available =
@@ -1043,7 +1065,7 @@ void loop()
     Serial.println();
 
     Serial.println(
-        "MLX ML:"
+        "MLX WESAD ML (DIAGNOSTIC ONLY - NOT FUSED):"
     );
 
     Serial.print(
@@ -1053,6 +1075,36 @@ void loop()
     Serial.println(
         mlxML.getStatusText()
     );
+
+    Serial.print(
+        "  Target gate  : "
+    );
+
+    Serial.println(
+        tml.warmTargetQualified
+            ? "QUALIFIED"
+            : "NOT QUALIFIED"
+    );
+
+    if (
+        isfinite(
+            tml.targetDeltaC
+        )
+    )
+    {
+        Serial.print(
+            "  Gate delta   : "
+        );
+
+        Serial.print(
+            tml.targetDeltaC,
+            2
+        );
+
+        Serial.println(
+            " C (provisional min +2.00 C)"
+        );
+    }
 
     Serial.print(
         "  Window       : "
@@ -1148,7 +1200,7 @@ void loop()
         );
 
         Serial.print(
-            "  Fusion vote  : "
+            "  Diagnostic   : "
         );
 
         if (
@@ -1156,7 +1208,7 @@ void loop()
         )
         {
             Serial.println(
-                "STRONG ANOMALY"
+                "STRONG ANOMALY (NOT FUSED)"
             );
         }
         else if (
@@ -1164,13 +1216,13 @@ void loop()
         )
         {
             Serial.println(
-                "WEAK ANOMALY"
+                "WEAK ANOMALY (NOT FUSED)"
             );
         }
         else
         {
             Serial.println(
-                "NORMAL"
+                "NORMAL (NOT FUSED)"
             );
         }
     }
@@ -1178,6 +1230,135 @@ void loop()
     {
         Serial.println(
             "  Model result : not ready"
+        );
+    }
+
+
+    Serial.println();
+    Serial.println(
+        "MLX FUSION CONTEXT:"
+    );
+
+    Serial.print(
+        "  Status       : "
+    );
+    Serial.println(
+        mlxContext.getStatusText()
+    );
+
+    Serial.print(
+        "  Thermal gate : "
+    );
+    Serial.println(
+        tx.thermalContrastQualified
+            ? "QUALIFIED"
+            : "NOT QUALIFIED"
+    );
+
+    if (
+        isfinite(
+            tx.thermalContrastC
+        )
+    )
+    {
+        Serial.print(
+            "  Object-Ta    : "
+        );
+        Serial.print(
+            tx.thermalContrastC,
+            2
+        );
+        Serial.println(
+            " C (quality context only; NOT body temperature)"
+        );
+    }
+
+    Serial.print(
+        "  Baseline     : "
+    );
+
+    if (
+        tx.baselineReady
+        &&
+        isfinite(
+            tx.baselineObjectC
+        )
+    )
+    {
+        Serial.print(
+            tx.baselineObjectC,
+            2
+        );
+        Serial.println(
+            " C"
+        );
+    }
+    else
+    {
+        Serial.print(
+            tx.baselineSamplesCollected
+        );
+        Serial.print(
+            " / "
+        );
+        Serial.print(
+            tx.baselineSamplesRequired
+        );
+        Serial.println(
+            " filtered samples"
+        );
+    }
+
+    if (
+        tx.baselineReady
+        &&
+        isfinite(
+            tx.deviationFromBaselineC
+        )
+    )
+    {
+        Serial.print(
+            "  Deviation    : "
+        );
+        Serial.print(
+            tx.deviationFromBaselineC,
+            2
+        );
+        Serial.println(
+            " C"
+        );
+
+        Serial.println(
+            "  FDA context  : +/-1.85 C broad p99 repeated-round reference (non-medical)"
+        );
+    }
+
+    Serial.print(
+        "  Fusion role  : "
+    );
+
+    if (
+        tx.valid
+        &&
+        tx.contextChange
+    )
+    {
+        Serial.println(
+            "SUPPORTING CONTEXT CHANGE ONLY - cannot create warning alone"
+        );
+    }
+    else if (
+        tx.valid
+    )
+    {
+        Serial.println(
+            "STABLE TEMPERATURE CONTEXT"
+        );
+    }
+    else
+    {
+        Serial.println(
+            "NOT YET VALID FOR FUSION"
         );
     }
 
@@ -1618,11 +1799,11 @@ void loop()
     );
 
     Serial.println(
-        "ML inference   : C1001 + MLX ACTIVE; FSR/MPU pending"
+        "ML inference   : C1001 ACTIVE; MLX WESAD diagnostic-only; FSR/MPU pending"
     );
 
     Serial.println(
-        "Fusion         : active; C1001 + MLX model evidence connected"
+        "Fusion         : active; C1001 model + MLX contextual evidence connected"
     );
 
     Serial.println(

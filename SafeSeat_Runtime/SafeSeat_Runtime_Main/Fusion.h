@@ -4,6 +4,7 @@
 
 #include "C1001.h"
 #include "MLX.h"
+#include "MLXContext.h"
 #include "FSR.h"
 #include "MPU.h"
 
@@ -165,6 +166,8 @@ enum class FusionTemperatureState
 {
     UNKNOWN,
     INVALID,
+    NO_THERMAL_TARGET,
+    BASELINE_BUILDING,
     STABLE,
     CONTEXT_CHANGE,
     ANOMALOUS
@@ -294,6 +297,12 @@ struct MLXFusionInput
 
     MLXReading reading;
 
+    // Step 5.4.5: deployment-safe MLX context evidence.
+    // Filtered OBJECT temperature is primary; MLX Ta is
+    // context only. The old WESAD model is kept separately
+    // for diagnostics and is intentionally not fused.
+    MLXContextReading context;
+
     ModelEvidence model;
 };
 
@@ -362,6 +371,12 @@ struct FusionEvidenceSummary
     uint8_t strongAnomalyEvidenceCount = 0;
 
     uint8_t normalEvidenceCount = 0;
+
+    // Non-anomaly contextual support. Step 5.4.5 uses this for
+    // MLX session-baseline changes. It can strengthen confidence
+    // around other sensor evidence but cannot create an anomaly
+    // candidate by itself.
+    uint8_t supportingContextCount = 0;
 
     // Context suggesting a possible artifact instead of a real
     // physiological/postural event.

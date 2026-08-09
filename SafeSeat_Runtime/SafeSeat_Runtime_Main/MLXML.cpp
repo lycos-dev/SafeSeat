@@ -17,24 +17,37 @@ void MLXML::begin()
 
     Serial.println();
     Serial.println(
-        "[MLX-ML] Embedded model initialized."
+        "[MLX-ML-DIAG] WESAD surrogate model initialized (diagnostic only; NOT fused)."
     );
 
     Serial.println(
-        "[MLX-ML] Window: 30 s @ 4 Hz, stride: 15 s."
+        "[MLX-ML-DIAG] Window: 30 s @ 4 Hz, stride: 15 s."
     );
 
     Serial.println(
-        "[MLX-ML] Source: raw MLX90614 object temperature."
+        "[MLX-ML-DIAG] Source: qualified MLX90614 object temperature."
     );
 
     Serial.println(
-        "[MLX-ML] Ambient temperature remains Fusion context only."
+        "[MLX-ML-DIAG] 30-s window is median-centered before 38-feature inference.\n[MLX-ML-DIAG] MLX Ta is not model input."
     );
 
     Serial.println(
-        "[MLX-ML] Isolation Forest + One-Class SVM ready."
+        "[MLX-ML-DIAG] Thermal-contrast gate: Object-Ta >= 2.0 C (engineering gate only)."
     );
+
+    Serial.println(
+        "[MLX-ML-DIAG] Empty/background windows are NOT sent to the diagnostic model."
+    );
+
+    Serial.println(
+        "[MLX-ML-DIAG] Gate is provisional/non-medical; final seat calibration still required."
+    );
+
+    Serial.println(
+        "[MLX-ML-DIAG] Isolation Forest + One-Class SVM ready; Fusion ignores these votes."
+    );
+
 }
 
 
@@ -70,6 +83,12 @@ void MLXML::resetWindow(
 
     reading.valid =
         false;
+
+    reading.warmTargetQualified =
+        false;
+
+    reading.targetDeltaC =
+        NAN;
 
     reading.status =
         status;
@@ -336,6 +355,10 @@ void MLXML::runInference()
                     : MLXMLStatus::READY_NORMAL
             );
 
+    // Step 5.4.3 feature dumps are intentionally disabled in
+    // Step 5.4.5 so later all-sensor dashboard testing remains
+    // compact. The diagnostic model itself still runs.
+
     firstInferenceCompleted =
         true;
 
@@ -385,6 +408,59 @@ void MLXML::update(
 
         return;
     }
+
+    // ========================================================
+    // WARM-TARGET QUALIFICATION
+    //
+    // The trained WESAD model represents skin temperature. Do
+    // not ask it to classify an obvious room/background window.
+    // Ambient and Object-Ambient remain runtime/Fusion context;
+    // only raw object temperature is still fed into the model.
+    //
+    // +2 C is a provisional engineering gate based on the current
+    // bench separation. It is NOT a medical threshold and must be
+    // recalibrated on the final seat/headrest geometry.
+    // ========================================================
+
+    float targetDeltaC =
+        sensorReading.objectMinusAmbientC;
+
+    bool warmTargetQualified =
+        sensorReading.valid
+        &&
+        isfinite(
+            targetDeltaC
+        )
+        &&
+        targetDeltaC
+        >=
+        WARM_TARGET_MIN_DELTA_C;
+
+    if (
+        !warmTargetQualified
+    )
+    {
+        resetWindow(
+            MLXMLStatus::WAITING_FOR_WARM_TARGET
+        );
+
+        reading.lastProcessedPhysicalSampleCount =
+            physicalSampleCount;
+
+        reading.warmTargetQualified =
+            false;
+
+        reading.targetDeltaC =
+            targetDeltaC;
+
+        return;
+    }
+
+    reading.warmTargetQualified =
+        true;
+
+    reading.targetDeltaC =
+        targetDeltaC;
 
     float objectTemperature =
         sensorReading.rawObjectC;
@@ -466,6 +542,9 @@ MLXML::getStatusText() const
 
         case MLXMLStatus::SENSOR_UNAVAILABLE:
             return "SENSOR UNAVAILABLE";
+
+        case MLXMLStatus::WAITING_FOR_WARM_TARGET:
+            return "WAITING FOR WARM TARGET";
 
         case MLXMLStatus::COLLECTING_WINDOW:
             return "COLLECTING 30 s WINDOW";

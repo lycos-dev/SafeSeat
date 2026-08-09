@@ -3,30 +3,30 @@
 #include <Arduino.h>
 #include <stdint.h>
 
-// AUTO-GENERATED FROM THE TRAINED SAFESEAT MLX90614 MODELS.
+// AUTO-GENERATED FROM THE RETRAINED SAFESEAT MLX90614 MODELS.
+// Step 5.4.1 / 5.4.2
 //
-// Source artifacts:
-// - models/MLX90614/mlx_preprocessor.joblib
-// - models/MLX90614/isolation_forest.joblib
-// - models/MLX90614/one_class_svm.joblib
-// - models/MLX90614/feature_columns.json
+// Deployment feature reference:
+//   qualified object-temperature window
+//   -> limited interpolation
+//   -> subtract 30-second window median
+//   -> 38 relative/temporal features
+//   -> imputer + RobustScaler
+//   -> Isolation Forest + One-Class SVM
 //
-// IMPORTANT:
-// The WESAD model was trained on wearable skin-temperature
-// patterns. Runtime ML uses the MLX90614 OBJECT-temperature
-// stream only. Ambient temperature remains separate context
-// for Fusion and is not fed into these models.
+// Ambient temperature and Object-Ambient are NOT model features.
+// They remain deployment context / warm-target qualification.
 //
 // Parameters are stored as float32 for embedded inference.
 
-constexpr uint16_t MLX_MODEL_FEATURE_COUNT = 44;
+constexpr uint16_t MLX_MODEL_FEATURE_COUNT = 38;
 
 constexpr uint16_t MLX_IF_TREE_COUNT = 300;
-constexpr uint32_t MLX_IF_NODE_COUNT = 35818UL;
+constexpr uint32_t MLX_IF_NODE_COUNT = 30502UL;
 constexpr uint16_t MLX_IF_MAX_SAMPLES = 256;
 
 constexpr uint16_t MLX_OCSVM_SUPPORT_VECTOR_COUNT =
-    296;
+    297;
 
 extern const float MLX_IMPUTER_MEDIAN[MLX_MODEL_FEATURE_COUNT];
 extern const float MLX_SCALER_CENTER[MLX_MODEL_FEATURE_COUNT];

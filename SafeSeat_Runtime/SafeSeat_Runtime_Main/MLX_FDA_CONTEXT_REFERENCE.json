@@ -1,0 +1,16 @@
+{
+  "step": "5.4.5",
+  "source": "FDA Facial-and-oral temperature dataset integrated in SafeSeat_ML Step 5.4.4",
+  "primary_surface_proxy": "T_FHCC",
+  "usage": "Context only; not a medical threshold and not assumed equal to nape temperature or MLX90614 output",
+  "repeated_round_reference": {
+    "records": 2022,
+    "round_range_c_p50": 0.27,
+    "round_range_c_p90": 0.75,
+    "round_range_c_p95": 1.07,
+    "round_range_c_p99": 1.8258,
+    "runtime_context_change_marker_c": 1.85
+  },
+  "critical_domain_note": "FDA T_atm is room-air temperature, while MLX90614 readAmbientTempC() is sensor package/die temperature Ta. They are not treated as interchangeable.",
+  "fusion_policy": "MLX context change is supporting context only and cannot create WARNING/EMERGENCY by itself."
+}

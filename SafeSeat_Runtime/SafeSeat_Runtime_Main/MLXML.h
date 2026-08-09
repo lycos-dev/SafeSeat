@@ -10,6 +10,7 @@ enum class MLXMLStatus
 {
     WAITING_FOR_SAMPLE,
     SENSOR_UNAVAILABLE,
+    WAITING_FOR_WARM_TARGET,
     COLLECTING_WINDOW,
     INSUFFICIENT_VALID_DATA,
     READY_NORMAL,
@@ -22,6 +23,13 @@ struct MLXMLReading
 {
     bool modelAvailable = true;
     bool valid = false;
+
+    // True only when the MLX sees an object clearly warmer than
+    // ambient. This is a deployment/target qualification gate,
+    // not a medical threshold.
+    bool warmTargetQualified = false;
+
+    float targetDeltaC = NAN;
 
     MLXMLStatus status =
         MLXMLStatus::WAITING_FOR_SAMPLE;
@@ -85,6 +93,14 @@ private:
 
     static constexpr float
         PHYSICAL_OBJECT_MAX_C = 125.0f;
+
+    // Provisional bench/deployment gate. The current hardware log
+    // showed background near -0.7..0 C delta and a forehead target
+    // around +5..+8 C, so +2 C cleanly rejects obvious room/background
+    // windows. This MUST be revalidated with the final seat/headrest
+    // geometry. It is not a medical temperature threshold.
+    static constexpr float
+        WARM_TARGET_MIN_DELTA_C = 2.0f;
 
     MLXFeatureExtractor featureExtractor;
     MLXInference inference;

@@ -127,3 +127,31 @@ baseline validation, multi-sensor timing, and Fusion behavior.
 
 No Piezo communication, FSR ML, MPU ML, or camera communication is added
 in this step.
+
+
+STEP 5.4 TARGET-GATE PATCH
+==========================
+
+Problem observed during bench validation:
+- MLX ML began filling a WESAD skin-temperature window while the sensor
+  was pointed at room/background (~24 C), so IF and OCSVM correctly saw
+  that deployment window as far outside the learned skin-temperature
+  distribution.
+
+Patch:
+- MLX ML now requires a provisional warm-target qualification before it
+  starts/continues the 30 s / 120-sample model window.
+- Qualification: filtered Object-Ambient >= +2.0 C.
+- If the target is not qualified, the ML window is cleared and
+  ModelEvidence remains invalid/unavailable to Fusion.
+- When a warm target appears, collection starts from 0/120, preventing
+  room/background samples from contaminating the human-temperature window.
+- The trained model input is STILL raw object temperature only. Ambient and
+  Object-Ambient remain context/gating information, not trained features.
+
+IMPORTANT:
++2.0 C is a provisional engineering gate based on the current bench log,
+where background was around -0.7..0 C delta and forehead targeting reached
+about +5..+8 C. It is NOT a medical threshold and MUST be recalibrated with
+the final SafeSeat headrest geometry, distance, cabin temperature, and AC
+conditions.

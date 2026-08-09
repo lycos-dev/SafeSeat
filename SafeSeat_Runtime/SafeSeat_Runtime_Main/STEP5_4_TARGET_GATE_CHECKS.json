@@ -1,0 +1,12 @@
+{
+  "Warm_target_status_added": true,
+  "Provisional_delta_gate_C": 2.0,
+  "Gate_uses_object_minus_ambient": true,
+  "Empty_target_resets_window": true,
+  "Model_input_remains_raw_object_temperature": true,
+  "Fusion_model_valid_follows_MLX_ML_valid": true,
+  "Dashboard_target_gate_added": true,
+  "Fusion_cpp_untouched": true,
+  "C1001_ML_untouched": true,
+  "Note": "Static source patch only; Arduino toolchain compile not performed here."
+}

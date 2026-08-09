@@ -717,15 +717,30 @@ void FusionEngine::update(
 
 
     // --------------------------------------------------------
-    // MLX temperature: raw readings remain context only, but the
-    // MLX anomaly MODEL is consumed as one independent sensor
-    // vote, exactly like C1001 and FSR above. No hardcoded
-    // temperature thresholds are used for anomaly decisions.
+    // MLX temperature - Step 5.4.5
+    // --------------------------------------------------------
+    //
+    // IMPORTANT:
+    // The WESAD-derived MLX IF/OCSVM is NOT consumed here.
+    // Step 5.4.3 demonstrated that its E4-contact feature
+    // distribution does not transfer safely to a non-contact
+    // MLX90614. The model remains available for diagnostics only.
+    //
+    // Fusion instead consumes MLXContextReading:
+    // - filtered OBJECT temperature is the primary signal
+    // - MLX Ta is context only
+    // - Object-Ta is a thermal-contrast quality gate only
+    // - a 30-second filtered-object baseline is established
+    // - +/-1.85 C is a broad FDA repeated-round p99 context
+    //   marker, NOT a medical abnormal-temperature threshold
+    //
+    // A context change NEVER creates anomalyEvidenceCount by
+    // itself. It is supporting context only until real headrest/
+    // nape MLX data can calibrate a deployment-domain model.
     // --------------------------------------------------------
 
-    bool mlxStrongAnomaly = false;
-    bool mlxWeakAnomaly = false;
-    bool mlxNormalContext = false;
+    bool mlxStableContext = false;
+    bool mlxContextChanged = false;
 
     if (
         !mlxAvailable
@@ -749,67 +764,60 @@ void FusionEngine::update(
         reading.temperature =
             FusionTemperatureState::INVALID;
     }
+    else if (
+        !input.mlx.context.thermalContrastQualified
+    )
+    {
+        reading.temperature =
+            FusionTemperatureState::NO_THERMAL_TARGET;
+    }
+    else if (
+        !input.mlx.context.baselineReady
+    )
+    {
+        reading.temperature =
+            FusionTemperatureState::BASELINE_BUILDING;
+    }
+    else if (
+        input.mlx.context.valid
+        &&
+        input.mlx.context.contextChange
+    )
+    {
+        reading.temperature =
+            FusionTemperatureState::CONTEXT_CHANGE;
+
+        mlxContextChanged =
+            true;
+    }
+    else if (
+        input.mlx.context.valid
+    )
+    {
+        reading.temperature =
+            FusionTemperatureState::STABLE;
+
+        mlxStableContext =
+            true;
+    }
     else
     {
-        if (
-            hasStrongModelAnomaly(
-                input.mlx.model
-            )
-        )
-        {
-            mlxStrongAnomaly =
-                true;
-        }
-        else if (
-            hasWeakModelAnomaly(
-                input.mlx.model
-            )
-        )
-        {
-            mlxWeakAnomaly =
-                true;
-        }
-        else if (
-            hasModelEvidence(
-                input.mlx.model
-            )
-            &&
-            !input.mlx.model.bothModelsAnomaly
-            &&
-            !input.mlx.model.eitherModelAnomaly
-        )
-        {
-            mlxNormalContext =
-                true;
-        }
-
         reading.temperature =
-            mlxStrongAnomaly
-            ||
-            mlxWeakAnomaly
-                ? FusionTemperatureState::ANOMALOUS
-                : FusionTemperatureState::STABLE;
+            FusionTemperatureState::UNKNOWN;
     }
 
 
     if (
-        mlxNormalContext
+        mlxStableContext
     )
     {
         reading.evidence.normalEvidenceCount++;
     }
     else if (
-        mlxStrongAnomaly
+        mlxContextChanged
     )
     {
-        reading.evidence.anomalyEvidenceCount++;
-        reading.evidence.strongAnomalyEvidenceCount++;
-    }
-    else if (
-        mlxWeakAnomaly
-    )
-    {
-        reading.evidence.anomalyEvidenceCount++;
+        reading.evidence.supportingContextCount++;
     }
 
 
@@ -1253,14 +1261,7 @@ void FusionEngine::update(
                 ? 1U
                 : 0U
         )
-        +
-        (
-            hasModelEvidence(
-                input.mlx.model
-            )
-                ? 1U
-                : 0U
-        );
+;
 
     reading.confidence =
         clamp01(
@@ -1284,6 +1285,12 @@ void FusionEngine::update(
                 reading.evidence.multiSensorAgreement
                 ? 0.06f
                 : 0.0f
+            )
+            +
+            0.02f
+            *
+            static_cast<float>(
+                reading.evidence.supportingContextCount
             )
             +
             (
@@ -1541,6 +1548,14 @@ FusionEngine::getTemperatureText(
 
         case FusionTemperatureState::INVALID:
             return "INVALID";
+
+
+        case FusionTemperatureState::NO_THERMAL_TARGET:
+            return "NO THERMAL TARGET";
+
+
+        case FusionTemperatureState::BASELINE_BUILDING:
+            return "BASELINE BUILDING";
 
 
         case FusionTemperatureState::STABLE:
