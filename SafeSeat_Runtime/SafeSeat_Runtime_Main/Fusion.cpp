@@ -590,7 +590,12 @@ void FusionEngine::update(
 
 
     // --------------------------------------------------------
-    // FSR / pressure: context only; model evidence later
+    // FSR / pressure - Step 5.5 embedded anomaly evidence
+    //
+    // FSR model input is scale-invariant pressure distribution,
+    // not raw ADC magnitude. Raw contact/asymmetry fields remain
+    // contextual diagnostics and do not become independent
+    // anomaly votes by themselves.
     // --------------------------------------------------------
 
     bool fsrStrongAnomaly = false;
@@ -615,11 +620,19 @@ void FusionEngine::update(
         reading.pressure =
             FusionPressureState::EMPTY;
 
+        // Empty-seat agreement is normal occupancy context. The
+        // FSR anomaly model itself is intentionally not run on
+        // empty pressure windows.
         fsrNormalContext =
             true;
     }
     else
     {
+        const bool modelEvidenceReady =
+            hasModelEvidence(
+                input.fsr.model
+            );
+
         const bool contactLoss =
             input.fsr.reading.backrestTotal
             <
@@ -685,12 +698,23 @@ void FusionEngine::update(
             reading.pressure =
                 FusionPressureState::ANOMALOUS;
         }
-        else
+        else if (
+            modelEvidenceReady
+        )
         {
             reading.pressure =
                 FusionPressureState::NORMAL;
+
             fsrNormalContext =
                 true;
+        }
+        else
+        {
+            // Occupied pressure is present, but the 23-frame
+            // model window is still collecting or invalid.
+            // Do not call this NORMAL until model evidence exists.
+            reading.pressure =
+                FusionPressureState::UNKNOWN;
         }
     }
 

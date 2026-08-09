@@ -213,8 +213,12 @@ private:
     // ========================================================
     // RUNTIME SAMPLE TIMING
     //
-    // Keep ~12.5 Hz to remain close to the ChairPose-derived
-    // feature-engineering rate (~12.65 Hz).
+    // The frame scheduler becomes eligible to start a new frame
+    // after this interval, but one completed frame requires nine
+    // cooperative channel reads. On the proven combined runtime
+    // the effective completed-frame cadence is ~4.5 Hz.
+    //
+    // Step 5.5 retrains the FSR model to that observed cadence.
     // ========================================================
 
     static constexpr unsigned long

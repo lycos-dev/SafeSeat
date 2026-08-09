@@ -9,6 +9,7 @@
 #include "MLXML.h"
 #include "MLXContext.h"
 #include "FSR.h"
+#include "FSRML.h"
 #include "MPU.h"
 #include "Fusion.h"
 
@@ -23,6 +24,7 @@ MLXSensor mlx;
 MLXML mlxML;
 MLXContext mlxContext;
 FSRSensor fsr;
+FSRML fsrML;
 MPUSensor mpu;
 FusionEngine fusion;
 
@@ -220,7 +222,7 @@ void setup()
     );
 
     Serial.println(
-        " Step 5.4.5 - MLX Context Fusion Finalization"
+        " Step 5.5 - FSR Embedded ML + Fusion"
     );
 
     Serial.println(
@@ -425,6 +427,17 @@ void setup()
 
 
     // ========================================================
+    // FSR EMBEDDED ML - STEP 5.5
+    //
+    // Consumes completed calibrated FSR frames. Each frame is
+    // normalized to nine pressure shares; absolute pressure
+    // magnitude is intentionally excluded from the model.
+    // ========================================================
+
+    fsrML.begin();
+
+
+    // ========================================================
     // RUNTIME TIMING STARTS NOW
     //
     // FSR calibration intentionally blocks setup for several
@@ -574,6 +587,14 @@ void loop()
     const FSRReading &f =
         fsr.getReading();
 
+    fsrML.update(
+        f,
+        c.present
+    );
+
+    const FSRMLReading &fml =
+        fsrML.getReading();
+
     const MPUReading &m =
         mpu.getReading();
 
@@ -690,6 +711,37 @@ void loop()
 
     fusionInput.fsr.reading =
         f;
+
+    // Step 5.5 FSR model evidence. The model operates on
+    // scale-invariant 9-sensor pressure-share features.
+    fusionInput.fsr.model.available =
+        fml.modelAvailable;
+
+    fusionInput.fsr.model.valid =
+        fml.valid;
+
+    fusionInput.fsr.model.isolationForestAnomaly =
+        fml.isolationForestAnomaly;
+
+    fusionInput.fsr.model.oneClassSVMAnomaly =
+        fml.oneClassSVMAnomaly;
+
+    fusionInput.fsr.model.bothModelsAnomaly =
+        fml.bothModelsAnomaly;
+
+    fusionInput.fsr.model.eitherModelAnomaly =
+        fml.eitherModelAnomaly;
+
+    fusionInput.fsr.model.isolationForestScore =
+        fml.isolationForestDecision;
+
+    fusionInput.fsr.model.oneClassSVMScore =
+        fml.oneClassSVMDecision;
+
+    fusionInput.fsr.model.confidence =
+        fml.valid
+            ? 1.0f
+            : 0.0f;
 
     fusionInput.mpu.health =
         mapSensorHealth(
@@ -1527,6 +1579,141 @@ void loop()
     {
         Serial.println(
             "Pressure data  : unavailable"
+        );
+    }
+
+
+
+    // ========================================================
+    // FSR EMBEDDED ML - STEP 5.5
+    // ========================================================
+
+    Serial.println();
+    Serial.println(
+        "FSR ML:"
+    );
+
+    Serial.print(
+        "  Status       : "
+    );
+
+    Serial.println(
+        fsrML.getStatusText()
+    );
+
+    Serial.print(
+        "  Window       : "
+    );
+
+    Serial.print(
+        fml.windowSamplesCollected
+    );
+
+    Serial.print(
+        " / "
+    );
+
+    Serial.println(
+        fml.windowSamplesRequired
+    );
+
+    Serial.print(
+        "  Next infer   : "
+    );
+
+    Serial.print(
+        fml.samplesUntilNextInference
+    );
+
+    Serial.println(
+        " frame(s)"
+    );
+
+    Serial.print(
+        "  Windows      : "
+    );
+
+    Serial.println(
+        fml.windowsEvaluated
+    );
+
+    Serial.println(
+        "  Input        : 9-sensor pressure shares (absolute scale removed)"
+    );
+
+    if (
+        fml.valid
+    )
+    {
+        Serial.print(
+            "  IF decision  : "
+        );
+
+        Serial.print(
+            fml.isolationForestDecision,
+            6
+        );
+
+        Serial.print(
+            " -> "
+        );
+
+        Serial.println(
+            fml.isolationForestAnomaly
+                ? "ANOMALY"
+                : "NORMAL"
+        );
+
+        Serial.print(
+            "  SVM decision : "
+        );
+
+        Serial.print(
+            fml.oneClassSVMDecision,
+            6
+        );
+
+        Serial.print(
+            " -> "
+        );
+
+        Serial.println(
+            fml.oneClassSVMAnomaly
+                ? "ANOMALY"
+                : "NORMAL"
+        );
+
+        Serial.print(
+            "  Fused result : "
+        );
+
+        if (
+            fml.bothModelsAnomaly
+        )
+        {
+            Serial.println(
+                "STRONG ANOMALY"
+            );
+        }
+        else if (
+            fml.eitherModelAnomaly
+        )
+        {
+            Serial.println(
+                "WEAK ANOMALY"
+            );
+        }
+        else
+        {
+            Serial.println(
+                "NORMAL"
+            );
+        }
+    }
+    else
+    {
+        Serial.println(
+            "  Model result : not ready"
         );
     }
 

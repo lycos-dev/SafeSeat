@@ -1,0 +1,45 @@
+{
+  "step": "5.5",
+  "source_artifacts": {
+    "fsr_scaler_sha256": "71010bd0f1873673dc60cd7116131c18f1808f2a3169592e3c1f5e33b89d4ca7",
+    "fsr_isolation_forest_sha256": "1bdcd0518a4ce4eb0753be00b2b7cba690c08be81b88758a5ad9e1c109fdf54f",
+    "fsr_one_class_svm_sha256": "e9706598f5b6bb51dcdda3ce884e696f07062c06d57c0f65d4d43df53ebaf5ab",
+    "feature_manifest_sha256": "d47987db75df8ac38cb4bc8698881768b6a661b30534c543ec847be4791cef5c",
+    "test_features_sha256": "63ed6beed5309434e7d08f77192d225e12ae149fdf8eda5e870364eeccbad83b",
+    "final_test_predictions_sha256": "435970ccbddfe18a59e776d16f3486847609e582a2095d408fe50be3f5cfbef5"
+  },
+  "model": {
+    "feature_count": 93,
+    "window_samples": 23,
+    "stride_samples": 5,
+    "target_sampling_rate_hz": 4.5,
+    "if_trees": 200,
+    "if_nodes": 25614,
+    "if_max_samples": 256,
+    "if_offset": -0.5881503939076841,
+    "ocsvm_support_vectors": 66,
+    "ocsvm_gamma": 0.005,
+    "ocsvm_intercept": -5.7698694268052595
+  },
+  "full_held_out_feature_vector_parity": {
+    "windows": 1540,
+    "isolation_forest_prediction_matches": 1540,
+    "isolation_forest_prediction_match_rate": 1.0,
+    "one_class_svm_prediction_matches": 1540,
+    "one_class_svm_prediction_match_rate": 1.0,
+    "max_abs_if_decision_difference": 1.1865753046791383e-08,
+    "max_abs_svm_decision_difference": 6.675867290084625e-07
+  },
+  "compiled_cpp_checks": {
+    "feature_extractor_windows": 25,
+    "feature_extractor_max_abs_error": 8.71213592379e-08,
+    "feature_extractor_values_over_2e-6": 0,
+    "inference_cases": 120,
+    "inference_max_abs_if_decision_difference": 1.07490605306e-08,
+    "inference_max_abs_svm_decision_difference": 6.06240872614e-07,
+    "inference_if_prediction_mismatches": 0,
+    "inference_svm_prediction_mismatches": 0,
+    "fsrml_cpp_syntax": "PASS"
+  },
+  "arduino_esp32_compile": "NOT RUN HERE - user should verify in Arduino IDE"
+}
