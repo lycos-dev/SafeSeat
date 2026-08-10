@@ -177,6 +177,10 @@ void FusionEngine::begin()
     previousLevel =
         FusionLevel::WATCH;
 
+    lastCameraRequestId = 0;
+    lastCameraResultId = 0;
+    cameraAbnormalLatched = false;
+
 
     Serial.println();
     Serial.println(
@@ -1355,28 +1359,64 @@ void FusionEngine::update(
     FusionLevel effectiveLevel =
         FusionLevel::WATCH;
 
-    const bool cameraConfirmedAbnormal =
-        input.camera.available
-        &&
-        input.camera.connected
-        &&
-        input.camera.resultValid
-        &&
-        input.camera.postureAbnormal;
+    // --------------------------------------------------------
+    // Camera transaction semantics - Step 5.9.4
+    //
+    // A normal camera result must be consumed only once; holding
+    // the same UPRIGHT packet across many Fusion updates would
+    // otherwise keep resetting the emergency persistence timer.
+    // An abnormal result is latched only while the underlying
+    // strong multisensor candidate remains active, so EMERGENCY
+    // does not disappear merely because the one result packet is
+    // no longer marked fresh.
+    // --------------------------------------------------------
 
-    // CameraFusionEvidence.postureNormal: an authoritative,
-    // valid camera verification that clears/rejects the current
-    // emergency candidate. Camera remains unavailable for now,
-    // so in practice this stays false until real camera
-    // communication is integrated - it is not faked here.
-    const bool cameraConfirmedNormal =
+    const bool cameraResultUsable =
         input.camera.available
-        &&
-        input.camera.connected
-        &&
-        input.camera.resultValid
-        &&
-        input.camera.postureNormal;
+        && input.camera.connected
+        && input.camera.resultValid
+        && input.camera.requestId != 0
+        && input.camera.resultId != 0;
+
+    const bool newCameraResult =
+        cameraResultUsable
+        && (
+            input.camera.requestId != lastCameraRequestId
+            || input.camera.resultId != lastCameraResultId
+        );
+
+    bool cameraConfirmedNormal = false;
+
+    if (newCameraResult)
+    {
+        lastCameraRequestId = input.camera.requestId;
+        lastCameraResultId = input.camera.resultId;
+
+        if (input.camera.postureAbnormal)
+        {
+            cameraAbnormalLatched = true;
+        }
+        else if (input.camera.postureNormal)
+        {
+            cameraAbnormalLatched = false;
+            cameraConfirmedNormal = persistentEmergencyCandidate;
+
+            // Restart strong-candidate persistence after one
+            // authoritative UPRIGHT verification. If the sensor
+            // concern remains, it must persist again before a new
+            // camera request can be issued.
+            emergencyCandidateStartMillis = 0UL;
+        }
+    }
+
+    if (!strongCandidate)
+    {
+        cameraAbnormalLatched = false;
+    }
+
+    const bool cameraConfirmedAbnormal =
+        cameraAbnormalLatched
+        && persistentEmergencyCandidate;
 
     if (
         cameraConfirmedAbnormal

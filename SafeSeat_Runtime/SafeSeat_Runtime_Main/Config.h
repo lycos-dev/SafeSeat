@@ -113,3 +113,14 @@ constexpr uint8_t SAFESEAT_ESPNOW_DEFAULT_CHANNEL = 6;
 constexpr unsigned long SAFESEAT_ESPNOW_HUB_BEACON_INTERVAL_MS = 250UL;
 constexpr unsigned long PIEZO_COMM_FRESHNESS_TIMEOUT_MS = 2500UL;
 constexpr unsigned long C1001_COMM_FRESHNESS_TIMEOUT_MS = 2500UL;
+
+// ============================================================
+// ESP32-CAM VERIFICATION LINK - STEP 5.9.4
+// ============================================================
+
+constexpr unsigned long CAMERA_COMM_FRESHNESS_TIMEOUT_MS = 3000UL;
+constexpr unsigned long CAMERA_RESULT_FRESHNESS_TIMEOUT_MS = 5000UL;
+constexpr unsigned long CAMERA_TRIGGER_RETRY_MS = 500UL;
+constexpr unsigned long CAMERA_REQUEST_TIMEOUT_MS = 12000UL;
+constexpr uint8_t CAMERA_VERIFY_FRAME_COUNT = 3;
+constexpr uint8_t CAMERA_VERIFY_MIN_VALID_FRAMES = 2;

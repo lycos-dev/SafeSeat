@@ -20,7 +20,7 @@
 // - Sensor-specific ML remains inside each sensor pipeline.
 // - Fusion receives only the RESULTS of those models.
 // - C1001 and Piezo arrive as remote evidence over ESP-NOW.
-// - Camera remains a verification placeholder until its link is integrated.
+// - Camera verification is received from the ESP32-CAM over ESP-NOW.
 // ============================================================
 
 
@@ -250,10 +250,10 @@ struct PiezoFusionEvidence
 
 
 // ============================================================
-// CAMERA VERIFICATION PLACEHOLDER
+// CAMERA VERIFICATION - STEP 5.9.4
 //
-// Fusion requests camera verification.
-// The ESP32-CAM remains a separate verification subsystem.
+// Fusion requests verification from the separate ESP32-CAM.
+// Main accepts only transaction-matched, fresh ESP-NOW results.
 // ============================================================
 
 struct CameraFusionEvidence
@@ -269,8 +269,16 @@ struct CameraFusionEvidence
     bool postureNormal = false;
     bool postureAbnormal = false;
 
-    // Optional future class confidence.
+    // Model softmax/consensus confidence from the camera node.
     float confidence = 0.0f;
+
+    // Transaction identity. resultId increments at the camera node
+    // and lets Fusion process a normal result exactly once while
+    // latching an abnormal result only for the current strong
+    // emergency candidate.
+    uint32_t requestId = 0;
+    uint32_t resultId = 0;
+    uint8_t postureClass = 255;
 
     unsigned long lastUpdateMillis = 0;
 };
@@ -338,8 +346,9 @@ struct MPUFusionInput
 // This is the single object Fusion.cpp will evaluate.
 //
 // Local Main Hub sensors: MLX90614, FSR array, MPU6050.
-// Remote ESP-NOW sensor nodes: C1001 (Step 5.8), Piezo (Step 5.7.3).
-// Camera remains separate until its verification link is integrated.
+// Remote ESP-NOW nodes: C1001, Piezo, and ESP32-CAM.
+// Camera is verification-only and never creates the underlying
+// strong emergency candidate by itself.
 // ============================================================
 
 struct FusionInput
@@ -548,4 +557,9 @@ private:
 
     FusionLevel previousLevel =
         FusionLevel::WATCH;
+
+    // Camera transaction state - Step 5.9.4.
+    uint32_t lastCameraRequestId = 0;
+    uint32_t lastCameraResultId = 0;
+    bool cameraAbnormalLatched = false;
 };

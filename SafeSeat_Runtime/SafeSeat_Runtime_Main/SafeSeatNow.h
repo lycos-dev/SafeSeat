@@ -6,6 +6,7 @@
 
 #include "PiezoProtocol.h"
 #include "C1001Protocol.h"
+#include "CameraProtocol.h"
 #include "SafeSeatNowProtocol.h"
 
 struct SafeSeatNowStatus
@@ -16,6 +17,10 @@ struct SafeSeatNowStatus
     uint32_t hubBeaconSendErrors = 0;
     uint32_t piezoPacketsQueued = 0;
     uint32_t c1001PacketsQueued = 0;
+    uint32_t cameraStatusPacketsQueued = 0;
+    uint32_t cameraResultPacketsQueued = 0;
+    uint32_t cameraTriggersSent = 0;
+    uint32_t cameraTriggerSendErrors = 0;
     uint32_t unknownPacketsIgnored = 0;
 };
 
@@ -37,6 +42,20 @@ public:
         uint8_t sourceMac[6]
     );
 
+    bool takeLatestCameraStatus(
+        CameraStatusPacket &packet,
+        uint8_t sourceMac[6]
+    );
+
+    bool takeLatestCameraResult(
+        CameraResultPacket &packet,
+        uint8_t sourceMac[6]
+    );
+
+    bool sendCameraTrigger(
+        const CameraTriggerPacket &packet
+    );
+
     const SafeSeatNowStatus& getStatus() const { return status; }
 
 private:
@@ -55,6 +74,14 @@ private:
     volatile bool pendingC1001Ready = false;
     C1001WirePacket pendingC1001Packet{};
     uint8_t pendingC1001Mac[6]{};
+
+    volatile bool pendingCameraStatusReady = false;
+    CameraStatusPacket pendingCameraStatus{};
+    uint8_t pendingCameraStatusMac[6]{};
+
+    volatile bool pendingCameraResultReady = false;
+    CameraResultPacket pendingCameraResult{};
+    uint8_t pendingCameraResultMac[6]{};
 
     bool ensureBroadcastPeer();
     void sendHubBeacon();

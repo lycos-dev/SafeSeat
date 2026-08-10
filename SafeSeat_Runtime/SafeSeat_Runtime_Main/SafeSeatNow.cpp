@@ -67,6 +67,8 @@ bool SafeSeatNow::begin()
     lastBeaconMillis = 0;
     pendingPiezoReady = false;
     pendingC1001Ready = false;
+    pendingCameraStatusReady = false;
+    pendingCameraResultReady = false;
 
     return true;
 }
@@ -199,6 +201,49 @@ void SafeSeatNow::onReceive(
         }
     }
 
+
+    if (
+        magic == CAMERA_STATUS_MAGIC
+        && len == static_cast<int>(sizeof(CameraStatusPacket))
+    )
+    {
+        CameraStatusPacket packet;
+        memcpy(&packet, data, sizeof(packet));
+
+        if (
+            packet.version == CAMERA_WIRE_VERSION
+            && packet.packetSize == sizeof(CameraStatusPacket)
+        )
+        {
+            pendingCameraStatus = packet;
+            memcpy(pendingCameraStatusMac, info->src_addr, 6);
+            pendingCameraStatusReady = true;
+            status.cameraStatusPacketsQueued++;
+            return;
+        }
+    }
+
+    if (
+        magic == CAMERA_RESULT_MAGIC
+        && len == static_cast<int>(sizeof(CameraResultPacket))
+    )
+    {
+        CameraResultPacket packet;
+        memcpy(&packet, data, sizeof(packet));
+
+        if (
+            packet.version == CAMERA_WIRE_VERSION
+            && packet.packetSize == sizeof(CameraResultPacket)
+        )
+        {
+            pendingCameraResult = packet;
+            memcpy(pendingCameraResultMac, info->src_addr, 6);
+            pendingCameraResultReady = true;
+            status.cameraResultPacketsQueued++;
+            return;
+        }
+    }
+
     status.unknownPacketsIgnored++;
 }
 
@@ -232,4 +277,62 @@ bool SafeSeatNow::takeLatestC1001Packet(
     memcpy(sourceMac, pendingC1001Mac, 6);
     pendingC1001Ready = false;
     return true;
+}
+
+
+bool SafeSeatNow::takeLatestCameraStatus(
+    CameraStatusPacket &packet,
+    uint8_t sourceMac[6]
+)
+{
+    if (!pendingCameraStatusReady)
+    {
+        return false;
+    }
+
+    packet = pendingCameraStatus;
+    memcpy(sourceMac, pendingCameraStatusMac, 6);
+    pendingCameraStatusReady = false;
+    return true;
+}
+
+bool SafeSeatNow::takeLatestCameraResult(
+    CameraResultPacket &packet,
+    uint8_t sourceMac[6]
+)
+{
+    if (!pendingCameraResultReady)
+    {
+        return false;
+    }
+
+    packet = pendingCameraResult;
+    memcpy(sourceMac, pendingCameraResultMac, 6);
+    pendingCameraResultReady = false;
+    return true;
+}
+
+bool SafeSeatNow::sendCameraTrigger(
+    const CameraTriggerPacket &packet
+)
+{
+    if (!status.initialized)
+    {
+        return false;
+    }
+
+    const esp_err_t result = esp_now_send(
+        BROADCAST_MAC,
+        reinterpret_cast<const uint8_t *>(&packet),
+        sizeof(packet)
+    );
+
+    if (result == ESP_OK)
+    {
+        status.cameraTriggersSent++;
+        return true;
+    }
+
+    status.cameraTriggerSendErrors++;
+    return false;
 }

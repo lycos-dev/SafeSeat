@@ -14,6 +14,7 @@
 #include "MPUML.h"
 #include "Fusion.h"
 #include "PiezoComm.h"
+#include "CameraComm.h"
 
 
 // ============================================================
@@ -30,6 +31,7 @@ MPUSensor mpu;
 MPUML mpuML;
 FusionEngine fusion;
 PiezoComm piezoComm;
+CameraComm cameraComm;
 
 
 // ============================================================
@@ -45,6 +47,7 @@ bool mlxInitialized = false;
 bool fsrInitialized = false;
 bool mpuInitialized = false;
 bool piezoCommInitialized = false;
+bool cameraCommInitialized = false;
 
 
 // ============================================================
@@ -167,6 +170,15 @@ void printInitializationSummary()
     Serial.println(
         readyText(
             piezoCommInitialized
+        )
+    );
+
+    Serial.print(
+        "CameraLink: "
+    );
+    Serial.println(
+        readyText(
+            cameraCommInitialized
         )
     );
 
@@ -458,6 +470,28 @@ void setup()
     );
 
 
+    // ========================================================
+    // ESP32-CAM VERIFICATION LINK - STEP 5.9.4
+    //
+    // The camera is a separate ESP32-CAM node. It remains idle
+    // until Fusion creates a persistent strong candidate.
+    // ========================================================
+
+    Serial.println();
+    Serial.println(
+        "[MAIN] Starting ESP32-CAM verification link..."
+    );
+
+    cameraCommInitialized =
+        cameraComm.begin();
+
+    Serial.println(
+        cameraCommInitialized
+            ? "[MAIN] Camera ESP-NOW transport ready; waiting for camera heartbeat."
+            : "[MAIN] WARNING: Camera ESP-NOW link failed."
+    );
+
+
     printInitializationSummary();
 
     fusion.begin();
@@ -490,6 +524,13 @@ void loop()
     )
     {
         piezoComm.update();
+    }
+
+    if (
+        cameraCommInitialized
+    )
+    {
+        cameraComm.update();
     }
 
     if (
@@ -739,9 +780,28 @@ void loop()
     fusionInput.piezo =
         piezoComm.getFusionEvidence();
 
+    // Step 5.9.4 ESP32-CAM evidence. Camera output is verification
+    // only: UPRIGHT can reject one persistent strong candidate;
+    // any leaning class can confirm it. Transaction IDs prevent
+    // stale camera results from affecting later candidates.
+    fusionInput.camera =
+        cameraComm.getFusionEvidence();
+
     fusion.update(
         fusionInput
     );
+
+    const FusionReading &fusionReading =
+        fusion.getReading();
+
+    // Trigger/cancel the camera transaction AFTER Fusion computes
+    // whether verification is actually required.
+    if (cameraCommInitialized)
+    {
+        cameraComm.serviceVerificationRequest(
+            fusionReading.triggerCamera
+        );
+    }
 
 
     // ========================================================
@@ -766,14 +826,17 @@ void loop()
         now;
 
 
-    const FusionReading &fusionReading =
-        fusion.getReading();
-
     const PiezoRemoteStatus &piezoStatus =
         piezoComm.getStatus();
 
     const PiezoFusionEvidence &piezoEvidence =
         fusionInput.piezo;
+
+    const CameraRemoteStatus &cameraStatus =
+        cameraComm.getStatus();
+
+    const CameraFusionEvidence &cameraEvidence =
+        fusionInput.camera;
 
     Serial.println();
     Serial.println(
@@ -2197,6 +2260,75 @@ void loop()
 
 
     // ========================================================
+    // ESP32-CAM VERIFICATION - STEP 5.9.4
+    // ========================================================
+
+    Serial.println();
+    Serial.println(
+        "----------- ESP32-CAM VERIFICATION --------"
+    );
+
+    Serial.print("Transport      : ");
+    Serial.println(cameraCommInitialized ? "ESP-NOW" : "UNAVAILABLE");
+    Serial.print("Connected      : ");
+    Serial.println(cameraStatus.connected ? "YES" : "NO / WAITING");
+    Serial.print("Model ready    : ");
+    Serial.println(cameraStatus.modelReady ? "YES" : "NO");
+    Serial.print("Camera selftest: ");
+    Serial.println(cameraStatus.cameraReady ? "PASS" : "NOT READY");
+    Serial.print("PSRAM          : ");
+    Serial.println(cameraStatus.psramReady ? "READY" : "NOT READY");
+    Serial.print("Remote busy    : ");
+    Serial.println(cameraStatus.busy ? "YES - VERIFYING" : "NO / IDLE");
+    Serial.print("Status RX      : ");
+    Serial.println(cameraStatus.statusPacketsReceived);
+    Serial.print("Results RX     : ");
+    Serial.println(cameraStatus.resultPacketsReceived);
+    Serial.print("Request active : ");
+    Serial.println(cameraStatus.requestActive ? "YES" : "NO");
+
+    if (cameraStatus.requestActive)
+    {
+        Serial.print("Request ID     : ");
+        Serial.println(cameraStatus.activeRequestId);
+        Serial.print("Request age    : ");
+        Serial.print(cameraStatus.requestAgeMillis);
+        Serial.println(" ms");
+    }
+
+    if (cameraStatus.lastResultRequestId != 0)
+    {
+        Serial.print("Last posture   : ");
+        Serial.println(cameraPostureText(cameraStatus.lastPosture));
+        Serial.print("Confidence     : ");
+        Serial.print(cameraStatus.lastConfidence * 100.0f, 1);
+        Serial.println("%");
+        Serial.print("Valid frames   : ");
+        Serial.println(cameraStatus.lastValidFrames);
+        Serial.print("Verify time    : ");
+        Serial.print(cameraStatus.lastRemoteInferenceMillis);
+        Serial.println(" ms");
+        Serial.print("Fusion result  : ");
+        if (cameraEvidence.resultValid)
+        {
+            Serial.println(
+                cameraEvidence.postureNormal
+                    ? "UPRIGHT / NORMAL VERIFICATION"
+                    : "LEANING / ABNORMAL VERIFICATION"
+            );
+        }
+        else
+        {
+            Serial.println("no fresh accepted result");
+        }
+    }
+    else
+    {
+        Serial.println("Last result    : none yet");
+    }
+
+
+    // ========================================================
     // UPCOMING SYSTEM LAYERS
     // ========================================================
 
@@ -2214,11 +2346,11 @@ void loop()
     );
 
     Serial.println(
-        "Fusion         : active; remote C1001 + MLX context + FSR + MPU motion context + Piezo corroboration"
+        "Fusion         : active; C1001 + MLX context + FSR + MPU context + Piezo + camera verification"
     );
 
     Serial.println(
-        "Camera         : separate ESP32-CAM"
+        "Camera         : ESP32-CAM INT8 verifier + ESP-NOW trigger/result ACTIVE"
     );
 
     Serial.println(

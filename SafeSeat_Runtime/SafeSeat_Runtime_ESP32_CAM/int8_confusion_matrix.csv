@@ -1,0 +1,6 @@
+actual\predicted,leaning_backward,leaning_left,leaning_right,upright,leaning_forward
+leaning_backward,72,0,0,2,0
+leaning_left,1,69,1,5,13
+leaning_right,5,0,68,4,0
+upright,10,3,0,110,1
+leaning_forward,0,9,3,12,98
