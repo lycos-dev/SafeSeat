@@ -19,7 +19,7 @@
 // - No Isolation Forest / OCSVM implementation lives here.
 // - Sensor-specific ML remains inside each sensor pipeline.
 // - Fusion receives only the RESULTS of those models.
-// - Piezo arrives as remote model evidence over ESP-NOW.
+// - C1001 and Piezo arrive as remote evidence over ESP-NOW.
 // - Camera remains a verification placeholder until its link is integrated.
 // ============================================================
 
@@ -337,8 +337,8 @@ struct MPUFusionInput
 //
 // This is the single object Fusion.cpp will evaluate.
 //
-// Main Hub sensors are already present.
-// Piezo communication is integrated in Step 5.7.2.
+// Local Main Hub sensors: MLX90614, FSR array, MPU6050.
+// Remote ESP-NOW sensor nodes: C1001 (Step 5.8), Piezo (Step 5.7.3).
 // Camera remains separate until its verification link is integrated.
 // ============================================================
 

@@ -7,14 +7,13 @@
 // SAFESEAT ESP-NOW SHARED TRANSPORT
 //
 // The Main Hub periodically broadcasts this small beacon on its
-// CURRENT Wi-Fi channel. Remote SafeSeat nodes (Piezo now,
-// ESP32-CAM later) can scan channels until they hear the hub and
-// then remain on that channel.
+// CURRENT Wi-Fi channel. Remote SafeSeat nodes (C1001, Piezo,
+// and later ESP32-CAM) can scan channels until they hear the hub
+// and then remain on that channel.
 //
-// This matters because ESP-NOW and normal Wi-Fi share the ESP32
-// radio/channel. If the Main Hub later joins a Wi-Fi network and
-// its channel changes, a remote node can rediscover it without a
-// hard-coded MAC address.
+// This allows ESP-NOW sensor nodes to follow the Main Hub even
+// when a future frontend/server Wi-Fi connection moves the Main
+// Hub onto the router's 2.4 GHz channel.
 // ============================================================
 
 constexpr uint16_t SAFESEAT_HUB_BEACON_MAGIC = 0x5348u; // "SH"

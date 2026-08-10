@@ -23,19 +23,10 @@ bool SafeSeatNow::begin()
         return true;
     }
 
-    // ESP-NOW needs an active Wi-Fi interface.  The Main Hub uses
-    // STA because the future frontend/server Wi-Fi path will also
-    // use the station interface.  If that Wi-Fi connection later
-    // changes channel, our broadcast peer uses channel 0 (current
-    // channel) and the remote Piezo scanner can rediscover it.
     WiFi.mode(WIFI_STA);
 
-    unsigned long waitStart = millis();
-    while (
-        !WiFi.STA.started()
-        &&
-        millis() - waitStart < 2000UL
-    )
+    const unsigned long waitStart = millis();
+    while (!WiFi.STA.started() && millis() - waitStart < 2000UL)
     {
         delay(10);
     }
@@ -45,10 +36,6 @@ bool SafeSeatNow::begin()
         return false;
     }
 
-    // No infrastructure Wi-Fi is configured in Step 5.7.3 yet.
-    // Use a deterministic local channel for now.  When the future
-    // frontend Wi-Fi joins an AP, the AP's channel becomes the
-    // Main Hub channel and the Piezo will automatically rescan.
     if (WiFi.status() != WL_CONNECTED)
     {
         WiFi.setChannel(
@@ -64,13 +51,7 @@ bool SafeSeatNow::begin()
 
     activeInstance = this;
 
-    if (
-        esp_now_register_recv_cb(
-            &SafeSeatNow::onReceiveStatic
-        )
-        !=
-        ESP_OK
-    )
+    if (esp_now_register_recv_cb(&SafeSeatNow::onReceiveStatic) != ESP_OK)
     {
         return false;
     }
@@ -85,6 +66,7 @@ bool SafeSeatNow::begin()
     status.channel = WiFi.channel();
     lastBeaconMillis = 0;
     pendingPiezoReady = false;
+    pendingC1001Ready = false;
 
     return true;
 }
@@ -98,16 +80,12 @@ bool SafeSeatNow::ensureBroadcastPeer()
 
     esp_now_peer_info_t peer{};
     memcpy(peer.peer_addr, BROADCAST_MAC, 6);
-    peer.channel = 0; // always use the local device's current channel
+    peer.channel = 0;
     peer.ifidx = WIFI_IF_STA;
     peer.encrypt = false;
 
     const esp_err_t result = esp_now_add_peer(&peer);
-
-    return
-        result == ESP_OK
-        ||
-        result == ESP_ERR_ESPNOW_EXIST;
+    return result == ESP_OK || result == ESP_ERR_ESPNOW_EXIST;
 }
 
 void SafeSeatNow::update()
@@ -120,12 +98,7 @@ void SafeSeatNow::update()
     status.channel = WiFi.channel();
 
     const unsigned long now = millis();
-
-    if (
-        now - lastBeaconMillis
-        >=
-        SAFESEAT_ESPNOW_HUB_BEACON_INTERVAL_MS
-    )
+    if (now - lastBeaconMillis >= SAFESEAT_ESPNOW_HUB_BEACON_INTERVAL_MS)
     {
         lastBeaconMillis = now;
         sendHubBeacon();
@@ -163,11 +136,7 @@ void SafeSeatNow::onReceiveStatic(
 {
     if (activeInstance != nullptr)
     {
-        activeInstance->onReceive(
-            info,
-            data,
-            len
-        );
+        activeInstance->onReceive(info, data, len);
     }
 }
 
@@ -177,49 +146,60 @@ void SafeSeatNow::onReceive(
     int len
 )
 {
-    // ESP-NOW callbacks execute in a high-priority Wi-Fi task.
-    // Do only the tiny packet copy here; parsing/Fusion happens
-    // later from the normal Arduino loop.
-    if (
-        info == nullptr
-        ||
-        data == nullptr
-        ||
-        len != static_cast<int>(sizeof(PiezoWirePacket))
-    )
+    if (info == nullptr || data == nullptr || len < 4)
     {
         return;
     }
 
-    const PiezoWirePacket *packet =
-        reinterpret_cast<const PiezoWirePacket *>(data);
+    // The first 16 bits are a sensor-specific magic value for all
+    // current SafeSeat node packets. Copy it without assuming
+    // alignment inside the Wi-Fi callback buffer.
+    uint16_t magic = 0;
+    memcpy(&magic, data, sizeof(magic));
 
     if (
-        packet->magic != PIEZO_WIRE_MAGIC
-        ||
-        packet->version != PIEZO_WIRE_VERSION
-        ||
-        packet->packetSize != sizeof(PiezoWirePacket)
+        magic == PIEZO_WIRE_MAGIC
+        && len == static_cast<int>(sizeof(PiezoWirePacket))
     )
     {
-        return;
+        PiezoWirePacket packet;
+        memcpy(&packet, data, sizeof(packet));
+
+        if (
+            packet.version == PIEZO_WIRE_VERSION
+            && packet.packetSize == sizeof(PiezoWirePacket)
+        )
+        {
+            pendingPiezoPacket = packet;
+            memcpy(pendingPiezoMac, info->src_addr, 6);
+            pendingPiezoReady = true;
+            status.piezoPacketsQueued++;
+            return;
+        }
     }
 
-    memcpy(
-        &pendingPiezoPacket,
-        data,
-        sizeof(PiezoWirePacket)
-    );
+    if (
+        magic == C1001_WIRE_MAGIC
+        && len == static_cast<int>(sizeof(C1001WirePacket))
+    )
+    {
+        C1001WirePacket packet;
+        memcpy(&packet, data, sizeof(packet));
 
-    memcpy(
-        pendingPiezoMac,
-        info->src_addr,
-        6
-    );
+        if (
+            packet.version == C1001_WIRE_VERSION
+            && packet.packetSize == sizeof(C1001WirePacket)
+        )
+        {
+            pendingC1001Packet = packet;
+            memcpy(pendingC1001Mac, info->src_addr, 6);
+            pendingC1001Ready = true;
+            status.c1001PacketsQueued++;
+            return;
+        }
+    }
 
-    // Written last so the normal loop only observes complete data.
-    pendingPiezoReady = true;
-    status.piezoPacketsQueued++;
+    status.unknownPacketsIgnored++;
 }
 
 bool SafeSeatNow::takeLatestPiezoPacket(
@@ -232,13 +212,24 @@ bool SafeSeatNow::takeLatestPiezoPacket(
         return false;
     }
 
-    // The Piezo transmits at only 2 Hz.  Copying the 40-byte latest
-    // packet in the loop is intentionally lightweight.  CRC is
-    // validated by PiezoComm after this copy, so a pathological
-    // concurrent overwrite is rejected rather than fused.
     packet = pendingPiezoPacket;
     memcpy(sourceMac, pendingPiezoMac, 6);
     pendingPiezoReady = false;
+    return true;
+}
 
+bool SafeSeatNow::takeLatestC1001Packet(
+    C1001WirePacket &packet,
+    uint8_t sourceMac[6]
+)
+{
+    if (!pendingC1001Ready)
+    {
+        return false;
+    }
+
+    packet = pendingC1001Packet;
+    memcpy(sourceMac, pendingC1001Mac, 6);
+    pendingC1001Ready = false;
     return true;
 }

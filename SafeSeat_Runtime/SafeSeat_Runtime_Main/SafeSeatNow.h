@@ -5,6 +5,7 @@
 #include <esp_now.h>
 
 #include "PiezoProtocol.h"
+#include "C1001Protocol.h"
 #include "SafeSeatNowProtocol.h"
 
 struct SafeSeatNowStatus
@@ -14,6 +15,8 @@ struct SafeSeatNowStatus
     uint32_t hubBeaconsSent = 0;
     uint32_t hubBeaconSendErrors = 0;
     uint32_t piezoPacketsQueued = 0;
+    uint32_t c1001PacketsQueued = 0;
+    uint32_t unknownPacketsIgnored = 0;
 };
 
 class SafeSeatNow
@@ -29,10 +32,12 @@ public:
         uint8_t sourceMac[6]
     );
 
-    const SafeSeatNowStatus& getStatus() const
-    {
-        return status;
-    }
+    bool takeLatestC1001Packet(
+        C1001WirePacket &packet,
+        uint8_t sourceMac[6]
+    );
+
+    const SafeSeatNowStatus& getStatus() const { return status; }
 
 private:
     SafeSeatNow() = default;
@@ -46,6 +51,10 @@ private:
     volatile bool pendingPiezoReady = false;
     PiezoWirePacket pendingPiezoPacket{};
     uint8_t pendingPiezoMac[6]{};
+
+    volatile bool pendingC1001Ready = false;
+    C1001WirePacket pendingC1001Packet{};
+    uint8_t pendingC1001Mac[6]{};
 
     bool ensureBroadcastPeer();
     void sendHubBeacon();

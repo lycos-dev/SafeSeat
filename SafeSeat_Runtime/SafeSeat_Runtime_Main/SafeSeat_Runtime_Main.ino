@@ -4,7 +4,7 @@
 #include "Config.h"
 
 #include "C1001.h"
-#include "C1001ML.h"
+#include "C1001Comm.h"
 #include "MLX.h"
 #include "MLXML.h"
 #include "MLXContext.h"
@@ -20,8 +20,7 @@
 // SENSOR OBJECTS
 // ============================================================
 
-C1001Sensor c1001;
-C1001ML c1001ML;
+C1001Comm c1001Comm;
 MLXSensor mlx;
 MLXML mlxML;
 MLXContext mlxContext;
@@ -41,7 +40,7 @@ PiezoComm piezoComm;
 // initialization.
 // ============================================================
 
-bool c1001Initialized = false;
+bool c1001CommInitialized = false;
 bool mlxInitialized = false;
 bool fsrInitialized = false;
 bool mpuInitialized = false;
@@ -49,48 +48,11 @@ bool piezoCommInitialized = false;
 
 
 // ============================================================
-// C1001 BACKGROUND TASK
+// REMOTE C1001
 //
-// DFRobot C1001 library queries are comparatively slow and
-// were starving the I2C acquisition loop.
-//
-// ESP32 Arduino loop() normally runs on core 1. C1001 UART work
-// is moved to core 0 so FSR + MPU timing can continue.
-//
-// C1001's own update() still enforces its existing 1 Hz sample
-// interval and all existing warm-up/filter logic is unchanged.
+// Step 5.8 moves M1A (C1001 + C1001 ML) to its own ESP32.
+// The Main Hub receives its current evidence over ESP-NOW.
 // ============================================================
-
-TaskHandle_t c1001TaskHandle =
-    nullptr;
-
-
-void c1001Task(
-    void *parameter
-)
-{
-    (void) parameter;
-
-
-    while (
-        true
-    )
-    {
-        if (
-            c1001Initialized
-        )
-        {
-            c1001.update();
-        }
-
-
-        vTaskDelay(
-            pdMS_TO_TICKS(
-                10
-            )
-        );
-    }
-}
 
 
 // ============================================================
@@ -164,11 +126,11 @@ void printInitializationSummary()
     );
 
     Serial.print(
-        "C1001    : "
+        "C1001Link: "
     );
     Serial.println(
         readyText(
-            c1001Initialized
+            c1001CommInitialized
         )
     );
 
@@ -236,7 +198,7 @@ void setup()
     );
 
     Serial.println(
-        " Step 5.7.2 - Piezo Communication + Full Sensor Fusion"
+        " Step 5.8 - Remote C1001 + Wireless Sensor Fusion"
     );
 
     Serial.println(
@@ -328,34 +290,26 @@ void setup()
 
 
     // ========================================================
-    // C1001
+    // REMOTE C1001 LINK - STEP 5.8
+    //
+    // M1A is now a dashboard module containing its own C1001,
+    // dedicated ESP32, filtering, and trained IF + OCSVM model.
+    // Main Hub receives only the current sensor/model evidence.
     // ========================================================
 
     Serial.println();
     Serial.println(
-        "[MAIN] Starting C1001..."
+        "[MAIN] Starting remote C1001 evidence link..."
     );
 
-    c1001Initialized =
-        c1001.begin();
+    c1001CommInitialized =
+        c1001Comm.begin();
 
     Serial.println(
-        c1001Initialized
-            ? "[MAIN] C1001 ready."
-            : "[MAIN] WARNING: C1001 failed."
+        c1001CommInitialized
+            ? "[MAIN] ESP-NOW ready; waiting for C1001 node."
+            : "[MAIN] WARNING: C1001 ESP-NOW link failed."
     );
-
-
-    // ========================================================
-    // C1001 EMBEDDED ML
-    //
-    // Model parameters are compiled into flash. The ML layer
-    // waits for a warmed-up occupant session and then builds the
-    // exact 30-second / 15-second-stride feature windows used
-    // during training.
-    // ========================================================
-
-    c1001ML.begin();
 
 
     // ========================================================
@@ -504,45 +458,6 @@ void setup()
     );
 
 
-    // ========================================================
-    // START C1001 UART TASK ON CORE 0
-    // ========================================================
-
-    if (
-        c1001Initialized
-    )
-    {
-        BaseType_t taskResult =
-            xTaskCreatePinnedToCore(
-                c1001Task,
-                "SafeSeat_C1001",
-                4096,
-                nullptr,
-                1,
-                &c1001TaskHandle,
-                0
-            );
-
-
-        if (
-            taskResult
-            ==
-            pdPASS
-        )
-        {
-            Serial.println(
-                "[MAIN] C1001 background task started on core 0."
-            );
-        }
-        else
-        {
-            Serial.println(
-                "[MAIN] WARNING: C1001 background task creation failed."
-            );
-        }
-    }
-
-
     printInitializationSummary();
 
     fusion.begin();
@@ -564,6 +479,13 @@ void loop()
     // ========================================================
 
     if (
+        c1001CommInitialized
+    )
+    {
+        c1001Comm.update();
+    }
+
+    if (
         piezoCommInitialized
     )
     {
@@ -577,9 +499,6 @@ void loop()
         mpu.update();
     }
 
-    // C1001 updates on core 0 in c1001Task().
-    // Do not run its blocking UART queries on the I2C loop.
-
     if (
         mlxInitialized
     )
@@ -587,10 +506,22 @@ void loop()
         mlx.update();
     }
 
+    const C1001RemoteStatus &c1001Remote =
+        c1001Comm.getStatus();
+
+    const C1001Reading &c =
+        c1001Comm.getReading();
+
+    const ModelEvidence &cml =
+        c1001Comm.getModelEvidence();
+
+    // Only fresh remote C1001 presence is used as independent
+    // occupancy context. FSR still retains its own calibrated
+    // occupied/back-contact gates if the remote node is absent.
     bool occupantPresent =
-        c1001Initialized
+        c1001Remote.connected
         &&
-        c1001.getReading().present;
+        c.present;
 
     if (
         fsrInitialized
@@ -611,19 +542,8 @@ void loop()
     }
 
 
-    // Take one C1001 value snapshot for this main-loop pass.
-    // C1001 is updated on core 0; using a local copy avoids
-    // repeatedly dereferencing changing fields while building
-    // the ML/Fusion inputs.
-    const C1001Reading c =
-        c1001.getReading();
-
-    c1001ML.update(
-        c
-    );
-
-    const C1001MLReading &cml =
-        c1001ML.getReading();
+    // C1001 acquisition + ML now run on the remote M1A node.
+    // c / cml above are fresh ESP-NOW evidence snapshots.
 
     const MLXReading &t =
         mlx.getReading();
@@ -647,7 +567,7 @@ void loop()
 
     fsrML.update(
         f,
-        c.present
+        occupantPresent
     );
 
     const FSRMLReading &fml =
@@ -668,49 +588,11 @@ void loop()
     fusionInput.timestampMillis =
         millis();
 
-    fusionInput.c1001.health =
-        mapSensorHealth(
-            c1001Initialized,
-            c.connected,
-            c.trustedVitalsAvailable,
-            c.status
-            ==
-            C1001Status::WARMING_UP
-        );
-
-    fusionInput.c1001.reading =
-        c;
-
-    // C1001 model evidence is produced by the sensor-specific
-    // C1001 ML pipeline. Fusion receives only the results.
-    fusionInput.c1001.model.available =
-        cml.modelAvailable;
-
-    fusionInput.c1001.model.valid =
-        cml.valid;
-
-    fusionInput.c1001.model.isolationForestAnomaly =
-        cml.isolationForestAnomaly;
-
-    fusionInput.c1001.model.oneClassSVMAnomaly =
-        cml.oneClassSVMAnomaly;
-
-    fusionInput.c1001.model.bothModelsAnomaly =
-        cml.bothModelsAnomaly;
-
-    fusionInput.c1001.model.eitherModelAnomaly =
-        cml.eitherModelAnomaly;
-
-    fusionInput.c1001.model.isolationForestScore =
-        cml.isolationForestDecision;
-
-    fusionInput.c1001.model.oneClassSVMScore =
-        cml.oneClassSVMDecision;
-
-    fusionInput.c1001.model.confidence =
-        cml.valid
-            ? 1.0f
-            : 0.0f;
+    // Remote C1001 node already performed acquisition, filtering,
+    // warm-up logic, feature extraction, IF, and OCSVM inference.
+    // Fusion receives the exact same C1001FusionInput contract.
+    fusionInput.c1001 =
+        c1001Comm.getFusionInput();
 
     fusionInput.mlx.health =
         mapSensorHealth(
@@ -908,238 +790,116 @@ void loop()
 
 
     // ========================================================
-    // C1001
+    // C1001 REMOTE NODE
     // ========================================================
 
     Serial.println();
     Serial.println(
-        "--------------- C1001 -------------------"
+        "----------- C1001 REMOTE NODE ------------"
     );
 
-    Serial.print(
-        "Init           : "
-    );
+    Serial.print("Link init      : ");
+    Serial.println(readyText(c1001CommInitialized));
 
-    Serial.println(
-        readyText(
-            c1001Initialized
-        )
-    );
+    Serial.print("Connected      : ");
+    Serial.println(c1001Remote.connected ? "YES" : "NO");
 
-    Serial.print(
-        "Status         : "
-    );
+    Serial.print("Packets RX     : ");
+    Serial.println(c1001Remote.packetsReceived);
 
-    Serial.println(
-        c1001.getStatusText()
-    );
+    Serial.print("Bad packets    : ");
+    Serial.println(c1001Remote.badPackets);
 
-    Serial.print(
-        "Presence       : "
-    );
+    Serial.print("Packet age     : ");
+    Serial.print(c1001Remote.packetAgeMillis);
+    Serial.println(" ms");
 
-    Serial.println(
-        c.present
-            ? "YES"
-            : "NO"
-    );
+    Serial.print("Wi-Fi channel  : ");
+    Serial.println(c1001Remote.linkChannel);
 
-    Serial.print(
-        "MoveRange      : "
-    );
-
-    Serial.println(
-        c.moveRange
-    );
-
-    Serial.print(
-        "Raw RR / HR    : "
-    );
-
-    Serial.print(
-        c.rawRespiration
-    );
-
-    Serial.print(
-        " / "
-    );
-
-    Serial.println(
-        c.rawHeartRate
-    );
-
-    if (
-        c.status
-        ==
-        C1001Status::WARMING_UP
-    )
+    if (c1001Remote.connected)
     {
-        Serial.print(
-            "Warm-up left   : "
-        );
-
-        Serial.print(
-            c.warmupRemainingSeconds
-        );
-
-        Serial.println(
-            " s"
-        );
-    }
-
-    if (
-        c1001.hasTrustedVitals()
-    )
-    {
-        Serial.print(
-            "Filtered RR    : "
-        );
-
-        Serial.print(
-            c.filteredRespiration,
-            1
-        );
-
-        Serial.println(
-            " BPM"
-        );
-
-        Serial.print(
-            "Filtered HR    : "
-        );
-
-        Serial.print(
-            c.filteredHeartRate,
-            1
-        );
-
-        Serial.println(
-            " BPM"
-        );
-    }
-    else
-    {
-        Serial.println(
-            "Filtered vitals: not ready"
-        );
-    }
-
-
-    Serial.println();
-    Serial.println(
-        "C1001 ML:"
-    );
-
-    Serial.print(
-        "  Status       : "
-    );
-
-    Serial.println(
-        c1001ML.getStatusText()
-    );
-
-    Serial.print(
-        "  Window       : "
-    );
-
-    Serial.print(
-        cml.windowSamplesCollected
-    );
-
-    Serial.print(
-        " / "
-    );
-
-    Serial.println(
-        cml.windowSamplesRequired
-    );
-
-    Serial.print(
-        "  Next infer   : "
-    );
-
-    Serial.print(
-        cml.samplesUntilNextInference
-    );
-
-    Serial.println(
-        " sample(s)"
-    );
-
-    Serial.print(
-        "  Windows      : "
-    );
-
-    Serial.println(
-        cml.windowsEvaluated
-    );
-
-    if (
-        cml.valid
-    )
-    {
-        Serial.print(
-            "  IF decision  : "
-        );
-
-        Serial.print(
-            cml.isolationForestDecision,
-            6
-        );
-
-        Serial.println(
-            cml.isolationForestAnomaly
-                ? "  [ANOMALY]"
-                : "  [NORMAL]"
-        );
-
-        Serial.print(
-            "  SVM decision : "
-        );
-
-        Serial.print(
-            cml.oneClassSVMDecision,
-            6
-        );
-
-        Serial.println(
-            cml.oneClassSVMAnomaly
-                ? "  [ANOMALY]"
-                : "  [NORMAL]"
-        );
-
-        Serial.print(
-            "  Fusion vote  : "
-        );
-
-        if (
-            cml.bothModelsAnomaly
-        )
+        Serial.print("Node MAC       : ");
+        for (uint8_t i = 0; i < 6; i++)
         {
-            Serial.println(
-                "STRONG ANOMALY"
-            );
+            if (i > 0) Serial.print(':');
+            if (c1001Remote.sourceMac[i] < 16) Serial.print('0');
+            Serial.print(c1001Remote.sourceMac[i], HEX);
         }
-        else if (
-            cml.eitherModelAnomaly
-        )
+        Serial.println();
+
+        Serial.print("Sensor status  : ");
+        Serial.println(c1001StatusText(c.status));
+
+        Serial.print("Presence       : ");
+        Serial.println(c.present ? "YES" : "NO");
+
+        Serial.print("MoveRange      : ");
+        Serial.println(c.moveRange);
+
+        Serial.print("Raw RR / HR    : ");
+        Serial.print(c.rawRespiration);
+        Serial.print(" / ");
+        Serial.println(c.rawHeartRate);
+
+        if (c.status == C1001Status::WARMING_UP)
         {
-            Serial.println(
-                "WEAK ANOMALY"
-            );
+            Serial.print("Warm-up left   : ");
+            Serial.print(c.warmupRemainingSeconds);
+            Serial.println(" s");
+        }
+
+        if (c.trustedVitalsAvailable)
+        {
+            Serial.print("Filtered RR    : ");
+            Serial.print(c.filteredRespiration, 1);
+            Serial.println(" BPM");
+
+            Serial.print("Filtered HR    : ");
+            Serial.print(c.filteredHeartRate, 1);
+            Serial.println(" BPM");
         }
         else
         {
-            Serial.println(
-                "NORMAL"
-            );
+            Serial.println("Filtered vitals: not ready");
+        }
+
+        Serial.println();
+        Serial.println("C1001 ML (REMOTE):");
+        Serial.print("  Window       : ");
+        Serial.print(c1001Remote.remoteWindowSamplesCollected);
+        Serial.print(" / ");
+        Serial.print(c1001Remote.remoteWindowSamplesRequired);
+        Serial.println();
+        Serial.print("  Next infer   : ");
+        Serial.print(c1001Remote.remoteSamplesUntilNextInference);
+        Serial.println(" sample(s)");
+        Serial.print("  Windows      : ");
+        Serial.println(c1001Remote.remoteWindowsEvaluated);
+
+        if (cml.valid)
+        {
+            Serial.print("  IF decision  : ");
+            Serial.print(cml.isolationForestScore, 6);
+            Serial.println(cml.isolationForestAnomaly ? " [ANOMALY]" : " [NORMAL]");
+
+            Serial.print("  SVM decision : ");
+            Serial.print(cml.oneClassSVMScore, 6);
+            Serial.println(cml.oneClassSVMAnomaly ? " [ANOMALY]" : " [NORMAL]");
+
+            Serial.print("  Fusion vote  : ");
+            if (cml.bothModelsAnomaly) Serial.println("STRONG ANOMALY");
+            else if (cml.eitherModelAnomaly) Serial.println("WEAK ANOMALY");
+            else Serial.println("NORMAL");
+        }
+        else
+        {
+            Serial.println("  Model result : not ready");
         }
     }
     else
     {
-        Serial.println(
-            "  Model result : not ready"
-        );
+        Serial.println("Remote C1001   : unavailable / waiting for node");
     }
 
 
@@ -2450,11 +2210,11 @@ void loop()
     );
 
     Serial.println(
-        "ML inference   : C1001 + FSR + MPU + Piezo ACTIVE; MLX WESAD diagnostic-only"
+        "ML inference   : C1001 REMOTE + FSR + MPU + Piezo ACTIVE; MLX WESAD diagnostic-only"
     );
 
     Serial.println(
-        "Fusion         : active; C1001 + MLX context + FSR + MPU motion context + Piezo corroboration"
+        "Fusion         : active; remote C1001 + MLX context + FSR + MPU motion context + Piezo corroboration"
     );
 
     Serial.println(

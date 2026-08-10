@@ -52,12 +52,12 @@ constexpr uint8_t MAIN_ADC_RESOLUTION_BITS = 12;
 
 
 // ============================================================
-// C1001
+// REMOTE C1001
+//
+// Step 5.8: C1001 is no longer wired to this Main Hub.
+// Acquisition + filtering + ML run on a dedicated ESP32 node.
+// Main receives its evidence over ESP-NOW.
 // ============================================================
-
-constexpr uint8_t C1001_RX_PIN = 16;
-constexpr uint8_t C1001_TX_PIN = 17;
-
 
 // ============================================================
 // ADS1115
@@ -99,9 +99,10 @@ constexpr bool ENABLE_DEBUG_SERIAL = true;
 // ============================================================
 // SAFESEAT ESP-NOW REMOTE LINK - STEP 5.7.3
 //
-// Main Hub broadcasts a small channel beacon and receives Piezo
-// evidence wirelessly.  No Piezo/Main UART or common-ground
-// communication wiring is required.
+// Main Hub broadcasts a small channel beacon and receives remote
+// Piezo + C1001 evidence wirelessly. No sensor-node UART or common-
+// ground communication wiring is required between those nodes and
+// the Main Hub.
 //
 // Channel 6 is the local default before frontend Wi-Fi exists.
 // A later infrastructure Wi-Fi connection may move the Main Hub
@@ -111,3 +112,4 @@ constexpr bool ENABLE_DEBUG_SERIAL = true;
 constexpr uint8_t SAFESEAT_ESPNOW_DEFAULT_CHANNEL = 6;
 constexpr unsigned long SAFESEAT_ESPNOW_HUB_BEACON_INTERVAL_MS = 250UL;
 constexpr unsigned long PIEZO_COMM_FRESHNESS_TIMEOUT_MS = 2500UL;
+constexpr unsigned long C1001_COMM_FRESHNESS_TIMEOUT_MS = 2500UL;

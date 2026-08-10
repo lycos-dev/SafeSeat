@@ -1,0 +1,23 @@
+{
+  "step": "5.8",
+  "c1001_architecture": "dedicated_esp32_espnow_to_main",
+  "c1001_model_implementation_bit_identical_to_step5_7_3_source": true,
+  "main_local_c1001_model_source_removed": true,
+  "main_local_c1001_hardware_source_removed": true,
+  "fusion_cpp_bit_identical": true,
+  "c1001_protocol_headers_identical": true,
+  "safeseat_now_protocol_identical_all_nodes": true,
+  "piezo_runtime_functional_files_unchanged": true,
+  "hub_beacon_bytes": 8,
+  "piezo_packet_bytes": 40,
+  "c1001_packet_bytes": 62,
+  "c1001_tx_interval_ms": 500,
+  "c1001_freshness_timeout_ms": 2500,
+  "host_protocol_crc_test": "PASS",
+  "host_main_safeseatnow_syntax": "PASS",
+  "host_main_c1001comm_syntax": "PASS",
+  "host_main_ino_syntax": "PASS",
+  "host_c1001_node_comm_syntax": "PASS",
+  "host_c1001_node_ino_syntax": "PASS",
+  "arduino_esp32_verify": "PENDING_USER"
+}
