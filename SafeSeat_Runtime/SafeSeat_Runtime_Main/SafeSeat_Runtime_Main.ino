@@ -17,6 +17,8 @@
 #include "CameraComm.h"
 #include "SafeSeatAccessPoint.h"
 #include "NetworkConfig.h"
+#include "SafeSeatTelemetry.h"
+#include "SafeSeatApi.h"
 
 
 // ============================================================
@@ -35,6 +37,8 @@ FusionEngine fusion;
 PiezoComm piezoComm;
 CameraComm cameraComm;
 SafeSeatAccessPoint safeSeatAccessPoint;
+SafeSeatTelemetry safeSeatTelemetry;
+SafeSeatApi safeSeatApi;
 
 
 // ============================================================
@@ -52,6 +56,7 @@ bool mpuInitialized = false;
 bool piezoCommInitialized = false;
 bool cameraCommInitialized = false;
 bool safeSeatAccessPointInitialized = false;
+bool safeSeatApiInitialized = false;
 
 
 // ============================================================
@@ -195,6 +200,15 @@ void printInitializationSummary()
         )
     );
 
+    Serial.print(
+        "Local API : "
+    );
+    Serial.println(
+        readyText(
+            safeSeatApiInitialized
+        )
+    );
+
     Serial.println();
 }
 
@@ -223,7 +237,7 @@ void setup()
     );
 
     Serial.println(
-        " Step 5.9.6 - SafeSeat SoftAP + ESP-NOW Fusion"
+        " Step 5.9.8 - Local Telemetry API + SoftAP + ESP-NOW"
     );
 
     Serial.println(
@@ -320,7 +334,8 @@ void setup()
     // Main Hub is the only device that creates the SafeSeat AP.
     // The ESP32-S3 camera and phone join this network. C1001 and
     // Piezo continue to use ESP-NOW through the station interface.
-    // No backend/API is introduced in this step.
+    // Step 5.9.8 adds a read-only local telemetry/API layer on
+    // top of this existing network.
     // ========================================================
 
     Serial.println();
@@ -529,9 +544,34 @@ void setup()
     );
 
 
-    printInitializationSummary();
-
     fusion.begin();
+
+
+    // ========================================================
+    // LOCAL TELEMETRY / API - STEP 5.9.8
+    //
+    // This is intentionally read-only and backend-agnostic.
+    // It exposes the latest Main Hub/Fusion state to a phone or
+    // future frontend connected to the SafeSeat Wi-Fi network.
+    // No endpoint can trigger/cancel camera verification or alter
+    // the Fusion decision.
+    // ========================================================
+
+    if (safeSeatAccessPointInitialized)
+    {
+        safeSeatApiInitialized =
+            safeSeatApi.begin(
+                &safeSeatTelemetry
+            );
+    }
+    else
+    {
+        Serial.println(
+            "[API] WARNING: SafeSeat AP unavailable; local API not started."
+        );
+    }
+
+    printInitializationSummary();
 }
 
 
@@ -843,6 +883,32 @@ void loop()
         cameraComm.serviceVerificationRequest(
             fusionReading.triggerCamera
         );
+    }
+
+
+    // ========================================================
+    // FRONTEND-READY TELEMETRY SNAPSHOT - STEP 5.9.8
+    //
+    // Capture AFTER Fusion and camera-request servicing so the
+    // API sees the latest authoritative system state and current
+    // camera transaction status. This copy is read-only.
+    // ========================================================
+
+    safeSeatTelemetry.capture(
+        fusionInput,
+        fusionReading,
+        c1001Comm.getStatus(),
+        piezoComm.getStatus(),
+        cameraComm.getStatus(),
+        safeSeatAccessPoint.getStatus()
+    );
+
+    // IMPORTANT: service HTTP clients before the Serial dashboard
+    // rate-limit return below. The API therefore remains responsive
+    // even when no dashboard print is due this loop iteration.
+    if (safeSeatApiInitialized)
+    {
+        safeSeatApi.update();
     }
 
 

@@ -24,8 +24,8 @@ constexpr uint8_t SAFESEAT_AP_CHANNEL = SAFESEAT_ESPNOW_DEFAULT_CHANNEL;
 constexpr uint8_t SAFESEAT_AP_MAX_CLIENTS = 4;
 constexpr bool SAFESEAT_AP_HIDDEN = false;
 
-// Explicit local address keeps the future frontend/API target stable.
-// No HTTP/API endpoints are added in Step 5.9.6; that comes later.
+// Explicit local address keeps the frontend/API target stable.
+// Step 5.9.8 exposes the read-only API at this Main Hub address.
 constexpr uint8_t SAFESEAT_AP_IP_A = 192;
 constexpr uint8_t SAFESEAT_AP_IP_B = 168;
 constexpr uint8_t SAFESEAT_AP_IP_C = 4;
