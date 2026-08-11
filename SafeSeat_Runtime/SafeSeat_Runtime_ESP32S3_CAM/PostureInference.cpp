@@ -41,7 +41,7 @@ bool PostureInference::begin()
     psramAvailable = psramFound();
     if (!psramAvailable)
     {
-        Serial.println("[CAM-ML] ERROR: PSRAM not detected. INT8 camera inference requires PSRAM.");
+        Serial.println("[CAM-ML] ERROR: PSRAM not detected. INT8 ESP32-S3 camera inference requires PSRAM.");
         return false;
     }
 
@@ -54,7 +54,7 @@ bool PostureInference::begin()
 
     rgbBuffer = static_cast<uint8_t *>(
         heap_caps_malloc(
-            CAMERA_SOURCE_WIDTH * CAMERA_SOURCE_HEIGHT * 3,
+            CAMERA_RGB_BUFFER_BYTES,
             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
         )
     );
@@ -204,8 +204,11 @@ bool PostureInference::prepareInput(camera_fb_t *frame)
     const int srcW = frame->width;
     const int srcH = frame->height;
 
-    if (srcW <= 0 || srcH <= 0)
+    if (srcW <= 0 || srcH <= 0
+        || srcW > CAMERA_RGB_BUFFER_MAX_WIDTH
+        || srcH > CAMERA_RGB_BUFFER_MAX_HEIGHT)
     {
+        Serial.println("[CAM-ML] ERROR: capture dimensions exceed RGB buffer safety limit.");
         return false;
     }
 

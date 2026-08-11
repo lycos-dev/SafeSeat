@@ -13,17 +13,7 @@ const uint8_t CameraComm::BROADCAST_MAC[6] = {
 bool CameraComm::begin()
 {
     WiFi.mode(WIFI_STA);
-
-    const unsigned long waitStart = millis();
-    while (!WiFi.STA.started() && millis() - waitStart < 2000UL)
-    {
-        delay(10);
-    }
-
-    if (!WiFi.STA.started())
-    {
-        return false;
-    }
+    delay(50);
 
     setChannel(SAFESEAT_ESPNOW_DEFAULT_CHANNEL);
 
@@ -46,12 +36,13 @@ bool CameraComm::begin()
 
     status = CameraNodeLinkStatus{};
     status.initialized = true;
-    status.channel = WiFi.channel();
+    status.channel = SAFESEAT_ESPNOW_DEFAULT_CHANNEL;
     nextScanChannel = SAFESEAT_ESPNOW_DEFAULT_CHANNEL;
     lastScanStepMillis = millis();
     lastStatusMillis = 0;
     pendingTriggerReady = false;
     lastAcceptedTriggerId = 0;
+    stationChannelManaged = false;
     return true;
 }
 
@@ -64,7 +55,7 @@ bool CameraComm::ensureBroadcastPeer()
 
     esp_now_peer_info_t peer{};
     memcpy(peer.peer_addr, BROADCAST_MAC, 6);
-    peer.channel = 0;
+    peer.channel = 0;               // current Wi-Fi channel
     peer.ifidx = WIFI_IF_STA;
     peer.encrypt = false;
 
@@ -80,13 +71,33 @@ void CameraComm::setChannel(uint8_t channel)
         return;
     }
 
-    esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
-    status.channel = channel;
+    // Never force a channel while STA association/connection owns it.
+    if (stationChannelManaged)
+    {
+        return;
+    }
+
+    if (esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE) == ESP_OK)
+    {
+        status.channel = channel;
+    }
 }
 
 void CameraComm::serviceChannelDiscovery()
 {
     const unsigned long now = millis();
+
+    // When the S3 is associating with or connected to the SafeSeat AP,
+    // Wi-Fi owns the radio channel.  ESP-NOW automatically operates on
+    // that same channel, so manual scanning must stop.
+    if (stationChannelManaged)
+    {
+        if (WiFi.status() == WL_CONNECTED && WiFi.channel() > 0)
+        {
+            status.channel = WiFi.channel();
+        }
+        return;
+    }
 
     if (status.hubLocked
         && now - status.lastHubBeaconMillis <= SAFESEAT_ESPNOW_BEACON_STALE_MS)
@@ -123,6 +134,8 @@ void CameraComm::update(
     bool cameraReady,
     bool psramReady,
     bool busy,
+    bool wifiConnected,
+    bool stationOwnsChannel,
     unsigned long lastInferenceMillis,
     uint32_t lastHandledRequestId
 )
@@ -131,6 +144,10 @@ void CameraComm::update(
     {
         return;
     }
+
+    stationChannelManaged = stationOwnsChannel;
+    status.stationOwnsChannel = stationOwnsChannel;
+    status.wifiConnected = wifiConnected;
 
     serviceChannelDiscovery();
 
@@ -160,7 +177,7 @@ void CameraComm::sendStatus(
 {
     CameraStatusPacket packet;
     packet.sequence = ++statusSequence;
-    packet.channel = WiFi.channel();
+    packet.channel = status.channel;
     packet.lastInferenceMillis = lastInferenceMillis;
     packet.freeHeapBytes = ESP.getFreeHeap();
     packet.lastHandledRequestId = lastHandledRequestId;
@@ -273,7 +290,10 @@ void CameraComm::onReceive(
         status.hubBeaconsReceived++;
         memcpy(status.hubMac, info->src_addr, 6);
 
-        if (WiFi.channel() != beacon.channel)
+        // If not associated/associating with the SafeSeat AP, follow
+        // the Hub beacon exactly as in Step 5.9.4.  If Wi-Fi owns the
+        // channel, do not fight the station connection.
+        if (!stationChannelManaged && status.channel != beacon.channel)
         {
             setChannel(beacon.channel);
         }

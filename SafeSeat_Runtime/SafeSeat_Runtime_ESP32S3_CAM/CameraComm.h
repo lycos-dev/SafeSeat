@@ -10,6 +10,8 @@ struct CameraNodeLinkStatus
 {
     bool initialized = false;
     bool hubLocked = false;
+    bool wifiConnected = false;
+    bool stationOwnsChannel = false;
     uint8_t channel = 0;
     uint32_t hubBeaconsReceived = 0;
     uint32_t statusPacketsSent = 0;
@@ -30,6 +32,8 @@ public:
         bool cameraReady,
         bool psramReady,
         bool busy,
+        bool wifiConnected,
+        bool stationOwnsChannel,
         unsigned long lastInferenceMillis,
         uint32_t lastHandledRequestId
     );
@@ -53,6 +57,7 @@ private:
     unsigned long lastStatusMillis = 0;
     unsigned long lastScanStepMillis = 0;
     uint8_t nextScanChannel = 0;
+    volatile bool stationChannelManaged = false;
 
     bool ensureBroadcastPeer();
     void setChannel(uint8_t channel);
