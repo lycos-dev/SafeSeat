@@ -23,7 +23,13 @@ bool SafeSeatNow::begin()
         return true;
     }
 
-    WiFi.mode(WIFI_STA);
+    // Step 5.9.6: preserve the Main Hub SoftAP while keeping the
+    // station interface available for ESP-NOW. Re-entering WIFI_STA
+    // here would disable the SafeSeat AP.
+    if (WiFi.getMode() != WIFI_AP_STA)
+    {
+        WiFi.mode(WIFI_AP_STA);
+    }
 
     const unsigned long waitStart = millis();
     while (!WiFi.STA.started() && millis() - waitStart < 2000UL)
@@ -36,7 +42,12 @@ bool SafeSeatNow::begin()
         return false;
     }
 
-    if (WiFi.status() != WL_CONNECTED)
+    // If the SafeSeat SoftAP is running, it is the channel authority.
+    // Do not retune the radio underneath it. If the AP failed to start,
+    // retain the old standalone ESP-NOW fallback channel.
+    const bool softApRunning = WiFi.softAPSSID().length() > 0;
+
+    if (!softApRunning && WiFi.status() != WL_CONNECTED)
     {
         WiFi.setChannel(
             SAFESEAT_ESPNOW_DEFAULT_CHANNEL,

@@ -15,6 +15,8 @@
 #include "Fusion.h"
 #include "PiezoComm.h"
 #include "CameraComm.h"
+#include "SafeSeatAccessPoint.h"
+#include "NetworkConfig.h"
 
 
 // ============================================================
@@ -32,6 +34,7 @@ MPUML mpuML;
 FusionEngine fusion;
 PiezoComm piezoComm;
 CameraComm cameraComm;
+SafeSeatAccessPoint safeSeatAccessPoint;
 
 
 // ============================================================
@@ -48,6 +51,7 @@ bool fsrInitialized = false;
 bool mpuInitialized = false;
 bool piezoCommInitialized = false;
 bool cameraCommInitialized = false;
+bool safeSeatAccessPointInitialized = false;
 
 
 // ============================================================
@@ -182,6 +186,15 @@ void printInitializationSummary()
         )
     );
 
+    Serial.print(
+        "SafeSeatAP: "
+    );
+    Serial.println(
+        readyText(
+            safeSeatAccessPointInitialized
+        )
+    );
+
     Serial.println();
 }
 
@@ -210,7 +223,7 @@ void setup()
     );
 
     Serial.println(
-        " Step 5.8 - Remote C1001 + Wireless Sensor Fusion"
+        " Step 5.9.6 - SafeSeat SoftAP + ESP-NOW Fusion"
     );
 
     Serial.println(
@@ -298,6 +311,30 @@ void setup()
 
     Serial.println(
         "[MAIN] ADC ready: 12-bit, 11 dB attenuation."
+    );
+
+
+    // ========================================================
+    // SAFESEAT LOCAL WI-FI ACCESS POINT - STEP 5.9.6
+    //
+    // Main Hub is the only device that creates the SafeSeat AP.
+    // The ESP32-S3 camera and phone join this network. C1001 and
+    // Piezo continue to use ESP-NOW through the station interface.
+    // No backend/API is introduced in this step.
+    // ========================================================
+
+    Serial.println();
+    Serial.println(
+        "[MAIN] Starting SafeSeat local Wi-Fi network..."
+    );
+
+    safeSeatAccessPointInitialized =
+        safeSeatAccessPoint.begin();
+
+    Serial.println(
+        safeSeatAccessPointInitialized
+            ? "[MAIN] SafeSeat Wi-Fi AP ready."
+            : "[MAIN] WARNING: SafeSeat Wi-Fi AP failed."
     );
 
 
@@ -471,15 +508,15 @@ void setup()
 
 
     // ========================================================
-    // ESP32-CAM VERIFICATION LINK - STEP 5.9.4
+    // ESP32-S3 CAMERA VERIFICATION LINK - STEP 5.9.5
     //
-    // The camera is a separate ESP32-CAM node. It remains idle
+    // The camera is a separate ESP32-S3 WROOM camera node. It remains idle
     // until Fusion creates a persistent strong candidate.
     // ========================================================
 
     Serial.println();
     Serial.println(
-        "[MAIN] Starting ESP32-CAM verification link..."
+        "[MAIN] Starting ESP32-S3 camera verification link..."
     );
 
     cameraCommInitialized =
@@ -504,6 +541,11 @@ void setup()
 
 void loop()
 {
+    if (safeSeatAccessPointInitialized)
+    {
+        safeSeatAccessPoint.update();
+    }
+
     // ========================================================
     // UPDATE ONLY MODULES THAT ACTUALLY INITIALIZED
     //
@@ -1937,6 +1979,42 @@ void loop()
             "  Model result : not ready"
         );
     }
+
+
+    // ========================================================
+    // SAFESEAT LOCAL NETWORK - STEP 5.9.6
+    // ========================================================
+
+    Serial.println();
+    Serial.println(
+        "------------- NETWORK -----------------"
+    );
+
+    const SafeSeatAccessPointStatus &apStatus =
+        safeSeatAccessPoint.getStatus();
+
+    Serial.print("SafeSeat AP    : ");
+    Serial.println(
+        apStatus.running
+            ? "ONLINE"
+            : "OFFLINE"
+    );
+
+    Serial.print("SSID           : ");
+    Serial.println(SAFESEAT_AP_SSID);
+
+    Serial.print("IP             : ");
+    Serial.println(apStatus.ipAddress);
+
+    Serial.print("Channel        : ");
+    Serial.println(apStatus.channel);
+
+    Serial.print("Wi-Fi clients  : ");
+    Serial.println(apStatus.connectedClients);
+
+    Serial.println(
+        "Role           : local phone/camera network; no Internet required"
+    );
 
 
     // ========================================================

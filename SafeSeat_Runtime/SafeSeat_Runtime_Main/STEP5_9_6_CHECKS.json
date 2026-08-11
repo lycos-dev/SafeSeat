@@ -1,0 +1,25 @@
+{
+  "step": "5.9.6",
+  "title": "Main Hub SafeSeat SoftAP + existing ESP-NOW",
+  "structural_validation": {
+    "Fusion.cpp_preserved": true,
+    "Fusion.h_preserved": true,
+    "CameraProtocol.h_preserved": true,
+    "C1001Protocol.h_preserved": true,
+    "PiezoProtocol.h_preserved": true,
+    "camera_ssid_matches": true,
+    "camera_password_matches": true,
+    "main_ap_sta_mode": true,
+    "softap_channel_6": true,
+    "safeseatnow_preserves_ap": true,
+    "no_backend_api": true,
+    "SafeSeatAccessPoint.cpp_brace_balance": true,
+    "SafeSeatAccessPoint.h_brace_balance": true,
+    "NetworkConfig.h_brace_balance": true,
+    "SafeSeatNow.cpp_brace_balance": true,
+    "SafeSeat_Runtime_Main.ino_brace_balance": true
+  },
+  "overall_structural_validation": "PASS",
+  "arduino_verify": "PENDING USER",
+  "hardware_network_test": "PENDING USER"
+}
