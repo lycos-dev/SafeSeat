@@ -1,0 +1,18 @@
+SafeSeat Piezo Step 5.9.8.3 - CLEAN deterministic runtime
+=========================================================
+
+IMPORTANT:
+Delete or rename your existing SafeSeat_Runtime_Piezo folder before extracting this package.
+Arduino compiles every .cpp file inside the sketch folder, even if the new sketch no longer includes it.
+
+Legacy Piezo ML files that must NOT remain beside this runtime:
+  - PiezoSignalProcessor.cpp
+  - PiezoSignalProcessor.h
+  - PiezoFeatureExtractor.cpp
+  - PiezoFeatureExtractor.h
+  - PiezoModel.cpp
+  - PiezoModel.h
+  - PiezoModelData.cpp
+  - PiezoModelData.h
+
+This package intentionally contains only the deterministic respiration-support runtime.
