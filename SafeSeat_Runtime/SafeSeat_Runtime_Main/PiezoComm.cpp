@@ -11,7 +11,8 @@ bool PiezoComm::begin()
     const bool wirelessReady =
         SafeSeatNow::instance().begin();
 
-    status.initialized = wirelessReady;
+    status.initialized =
+        wirelessReady;
 
     return wirelessReady;
 }
@@ -44,7 +45,8 @@ void PiezoComm::update()
         );
     }
 
-    const unsigned long now = millis();
+    const unsigned long now =
+        millis();
 
     if (packetReceived)
     {
@@ -77,22 +79,34 @@ void PiezoComm::processPacket(
         return;
     }
 
-    latestPacket = packet;
-    packetReceived = true;
+    latestPacket =
+        packet;
+
+    packetReceived =
+        true;
 
     status.packetsReceived++;
+
     status.lastSequence =
         latestPacket.sequence;
 
-    status.lastPacketMillis = millis();
-    status.packetAgeMillis = 0;
-    status.connected = true;
+    status.lastPacketMillis =
+        millis();
+
+    status.packetAgeMillis =
+        0;
+
+    status.connected =
+        true;
 
     status.remoteSamplingRateHz =
         latestPacket.actualSamplingRateHz;
 
-    status.remoteFeatureWindowCount =
-        latestPacket.featureWindowCount;
+    status.remoteBreathCount =
+        latestPacket.totalBreaths;
+
+    status.remoteSampleCount =
+        latestPacket.sampleCount;
 
     memcpy(
         status.sourceMac,
@@ -135,7 +149,9 @@ bool PiezoComm::packetIsValid(
     return
         packet.checksum
         ==
-        piezoPacketChecksum(packet);
+        piezoPacketChecksum(
+            packet
+        );
 }
 
 PiezoFusionEvidence
@@ -173,34 +189,32 @@ PiezoComm::getFusionEvidence() const
         !=
         0;
 
-    evidence.signalQualityValid =
+    evidence.signalUsable =
         (
             flags
             &
-            PIEZO_FLAG_SIGNAL_QUALITY_VALID
+            PIEZO_FLAG_SIGNAL_USABLE
         )
         !=
         0;
 
-    if (
-        flags
-        &
-        PIEZO_FLAG_PEAK_RR_VALID
-    )
-    {
-        evidence.peakRespirationBPM =
-            latestPacket.peakRespirationBPM;
-    }
+    evidence.breathTrackingReady =
+        (
+            flags
+            &
+            PIEZO_FLAG_BREATH_TRACKING_READY
+        )
+        !=
+        0;
 
-    if (
-        flags
-        &
-        PIEZO_FLAG_SPECTRAL_RR_VALID
-    )
-    {
-        evidence.spectralRespirationBPM =
-            latestPacket.spectralRespirationBPM;
-    }
+    evidence.breathDetectedRecently =
+        (
+            flags
+            &
+            PIEZO_FLAG_BREATH_DETECTED_RECENT
+        )
+        !=
+        0;
 
     evidence.noBreathTimerExceeded =
         (
@@ -211,64 +225,24 @@ PiezoComm::getFusionEvidence() const
         !=
         0;
 
-    evidence.model.available = true;
-
-    evidence.model.valid =
-        (
-            flags
-            &
-            PIEZO_FLAG_MODEL_VALID
-        )
-        !=
-        0;
-
-    if (evidence.model.valid)
+    if (
+        flags
+        &
+        PIEZO_FLAG_RR_VALID
+    )
     {
-        evidence.model.isolationForestAnomaly =
-            (
-                flags
-                &
-                PIEZO_FLAG_IF_ANOMALY
-            )
-            !=
-            0;
-
-        evidence.model.oneClassSVMAnomaly =
-            (
-                flags
-                &
-                PIEZO_FLAG_SVM_ANOMALY
-            )
-            !=
-            0;
-
-        evidence.model.bothModelsAnomaly =
-            (
-                flags
-                &
-                PIEZO_FLAG_BOTH_ANOMALY
-            )
-            !=
-            0;
-
-        evidence.model.eitherModelAnomaly =
-            (
-                flags
-                &
-                PIEZO_FLAG_EITHER_ANOMALY
-            )
-            !=
-            0;
-
-        evidence.model.isolationForestScore =
-            latestPacket.isolationForestDecision;
-
-        evidence.model.oneClassSVMScore =
-            latestPacket.oneClassSVMDecision;
-
-        // No score-to-probability conversion is invented.
-        evidence.model.confidence = 1.0f;
+        evidence.respirationBPM =
+            latestPacket.respirationBPM;
     }
+
+    evidence.respirationWave =
+        latestPacket.respirationWave;
+
+    evidence.totalBreaths =
+        latestPacket.totalBreaths;
+
+    evidence.noBreathDurationMs =
+        latestPacket.noBreathDurationMs;
 
     return evidence;
 }

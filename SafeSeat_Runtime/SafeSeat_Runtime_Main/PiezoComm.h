@@ -19,7 +19,8 @@ struct PiezoRemoteStatus
     unsigned long packetAgeMillis = 0;
 
     float remoteSamplingRateHz = 0.0f;
-    uint32_t remoteFeatureWindowCount = 0;
+    uint32_t remoteBreathCount = 0;
+    uint32_t remoteSampleCount = 0;
 
     uint8_t linkChannel = 0;
     uint8_t sourceMac[6]{};

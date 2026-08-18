@@ -7,9 +7,6 @@
 #include "PiezoProtocol.h"
 #include "SafeSeatNowProtocol.h"
 #include "PiezoSensor.h"
-#include "PiezoSignalProcessor.h"
-#include "PiezoFeatureExtractor.h"
-#include "PiezoInference.h"
 
 class PiezoComm
 {
@@ -19,14 +16,7 @@ public:
     bool begin();
 
     void update(
-        const PiezoReading &reading,
-        bool signalWindowAligned,
-        const PiezoSignalQuality &signalQuality,
-        bool featureVectorReady,
-        bool inferenceReady,
-        const PiezoFeatures &features,
-        const PiezoInferenceResult &inference,
-        unsigned long featureWindowCount
+        const PiezoReading &reading
     );
 
     unsigned long getPacketsSent() const

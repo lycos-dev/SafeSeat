@@ -6,30 +6,26 @@
 #include "SafeSeatNowProtocol.h"
 
 // ============================================================
-// SAFESEAT PIEZO -> MAIN HUB EVIDENCE PROTOCOL
+// SAFESEAT PIEZO -> MAIN HUB RESPIRATION SUPPORT PROTOCOL
+// STEP 5.9.8.2
 //
-// Transport in Step 5.7.3: ESP-NOW broadcast.
-// The packet carries already-computed Piezo evidence only.
-// The Main Hub does not run the Piezo model itself.
+// The Piezo node no longer sends IF/OCSVM model evidence.
+// It sends deterministic mechanical-respiration support only.
+// Transport remains ESP-NOW broadcast.
 // ============================================================
 
 constexpr uint16_t PIEZO_WIRE_MAGIC = 0x5350u; // "SP"
-constexpr uint8_t PIEZO_WIRE_VERSION = 1u;
+constexpr uint8_t PIEZO_WIRE_VERSION = 2u;
 constexpr uint8_t PIEZO_WIRE_PACKET_SIZE = 40u;
 
 enum PiezoWireFlags : uint16_t
 {
-    PIEZO_FLAG_SENSOR_VALID          = 1u << 0,
-    PIEZO_FLAG_SIGNAL_QUALITY_VALID  = 1u << 1,
-    PIEZO_FLAG_MODEL_VALID           = 1u << 2,
-    PIEZO_FLAG_IF_ANOMALY            = 1u << 3,
-    PIEZO_FLAG_SVM_ANOMALY           = 1u << 4,
-    PIEZO_FLAG_BOTH_ANOMALY          = 1u << 5,
-    PIEZO_FLAG_EITHER_ANOMALY        = 1u << 6,
-    PIEZO_FLAG_NO_BREATH_TIMER       = 1u << 7,
-    PIEZO_FLAG_FEATURE_READY         = 1u << 8,
-    PIEZO_FLAG_SPECTRAL_RR_VALID     = 1u << 9,
-    PIEZO_FLAG_PEAK_RR_VALID         = 1u << 10
+    PIEZO_FLAG_SENSOR_VALID             = 1u << 0,
+    PIEZO_FLAG_SIGNAL_USABLE            = 1u << 1,
+    PIEZO_FLAG_BREATH_TRACKING_READY    = 1u << 2,
+    PIEZO_FLAG_RR_VALID                 = 1u << 3,
+    PIEZO_FLAG_NO_BREATH_TIMER          = 1u << 4,
+    PIEZO_FLAG_BREATH_DETECTED_RECENT   = 1u << 5
 };
 
 struct __attribute__((packed)) PiezoWirePacket
@@ -42,13 +38,13 @@ struct __attribute__((packed)) PiezoWirePacket
     uint32_t senderMillis = 0;
     uint16_t flags = 0;
 
-    float peakRespirationBPM = 0.0f;
-    float spectralRespirationBPM = 0.0f;
-    float isolationForestDecision = 0.0f;
-    float oneClassSVMDecision = 0.0f;
+    float respirationBPM = 0.0f;
+    float respirationWave = 0.0f;
     float actualSamplingRateHz = 0.0f;
 
-    uint32_t featureWindowCount = 0;
+    uint32_t totalBreaths = 0;
+    uint32_t noBreathDurationMs = 0;
+    uint32_t sampleCount = 0;
 
     uint16_t checksum = 0;
 };

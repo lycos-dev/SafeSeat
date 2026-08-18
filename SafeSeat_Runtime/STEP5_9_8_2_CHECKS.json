@@ -1,0 +1,17 @@
+{
+  "step": "5.9.8.2",
+  "change": "piezo_deterministic_respiration_support",
+  "piezo_protocol_version": 2,
+  "piezo_packet_size_bytes": 40,
+  "piezo_if_ocsvm_deployed": false,
+  "piezo_standalone_warning_or_emergency": false,
+  "c1001_primary_respiration_source": true,
+  "main_piezo_protocol_matches_node": true,
+  "obsolete_piezo_ml_runtime_files_removed": true,
+  "main_no_piezo_model_member_references": true,
+  "camera_protocol_preserved": true,
+  "c1001_protocol_preserved": true,
+  "api_arduino_string_overload_fix_preserved": true,
+  "host_piezo_protocol_static_assert": "PASS",
+  "arduino_verify": "PENDING_USER"
+}

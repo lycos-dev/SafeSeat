@@ -250,14 +250,7 @@ void PiezoComm::onReceive(
 }
 
 void PiezoComm::update(
-    const PiezoReading &reading,
-    bool signalWindowAligned,
-    const PiezoSignalQuality &signalQuality,
-    bool featureVectorReady,
-    bool inferenceReady,
-    const PiezoFeatures &features,
-    const PiezoInferenceResult &inference,
-    unsigned long featureWindowCount
+    const PiezoReading &reading
 )
 {
     if (!initialized)
@@ -267,7 +260,8 @@ void PiezoComm::update(
 
     maintainHubChannel();
 
-    const unsigned long now = millis();
+    const unsigned long now =
+        millis();
 
     if (
         now - lastSendMillis
@@ -278,30 +272,36 @@ void PiezoComm::update(
         return;
     }
 
-    lastSendMillis = now;
+    lastSendMillis =
+        now;
 
     PiezoWirePacket packet;
-    packet.sequence = ++sequence;
-    packet.senderMillis = now;
-    packet.flags = 0;
+
+    packet.sequence =
+        ++sequence;
+
+    packet.senderMillis =
+        now;
+
+    packet.flags =
+        0;
 
     if (reading.valid)
     {
-        packet.flags |= PIEZO_FLAG_SENSOR_VALID;
+        packet.flags |=
+            PIEZO_FLAG_SENSOR_VALID;
     }
 
-    if (
-        signalWindowAligned
-        &&
-        signalQuality.valid
-    )
+    if (reading.signalUsable)
     {
-        packet.flags |= PIEZO_FLAG_SIGNAL_QUALITY_VALID;
+        packet.flags |=
+            PIEZO_FLAG_SIGNAL_USABLE;
     }
 
-    if (featureVectorReady)
+    if (reading.breathTrackingReady)
     {
-        packet.flags |= PIEZO_FLAG_FEATURE_READY;
+        packet.flags |=
+            PIEZO_FLAG_BREATH_TRACKING_READY;
     }
 
     if (
@@ -310,100 +310,71 @@ void PiezoComm::update(
         )
     )
     {
-        packet.flags |= PIEZO_FLAG_PEAK_RR_VALID;
-        packet.peakRespirationBPM =
+        packet.flags |=
+            PIEZO_FLAG_RR_VALID;
+
+        packet.respirationBPM =
             reading.estimatedRespirationBPM;
     }
     else
     {
-        packet.peakRespirationBPM = NAN;
-    }
-
-    if (
-        featureVectorReady
-        &&
-        isfinite(
-            features.respirationBPM
-        )
-    )
-    {
-        packet.flags |= PIEZO_FLAG_SPECTRAL_RR_VALID;
-        packet.spectralRespirationBPM =
-            features.respirationBPM;
-    }
-    else
-    {
-        packet.spectralRespirationBPM = NAN;
+        packet.respirationBPM =
+            NAN;
     }
 
     if (reading.noBreathTimerExceeded)
     {
-        packet.flags |= PIEZO_FLAG_NO_BREATH_TIMER;
+        packet.flags |=
+            PIEZO_FLAG_NO_BREATH_TIMER;
     }
 
-    if (
-        inferenceReady
-        &&
-        inference.valid
-        &&
-        signalWindowAligned
-        &&
-        signalQuality.valid
-    )
+    if (reading.breathDetectedRecently)
     {
-        packet.flags |= PIEZO_FLAG_MODEL_VALID;
-
-        if (inference.isolationForestAnomaly)
-        {
-            packet.flags |= PIEZO_FLAG_IF_ANOMALY;
-        }
-
-        if (inference.oneClassSVMAnomaly)
-        {
-            packet.flags |= PIEZO_FLAG_SVM_ANOMALY;
-        }
-
-        if (inference.bothModelsAnomaly)
-        {
-            packet.flags |= PIEZO_FLAG_BOTH_ANOMALY;
-        }
-
-        if (inference.eitherModelAnomaly)
-        {
-            packet.flags |= PIEZO_FLAG_EITHER_ANOMALY;
-        }
-
-        packet.isolationForestDecision =
-            inference.isolationForestDecision;
-
-        packet.oneClassSVMDecision =
-            inference.oneClassSVMDecision;
+        packet.flags |=
+            PIEZO_FLAG_BREATH_DETECTED_RECENT;
     }
-    else
-    {
-        packet.isolationForestDecision = NAN;
-        packet.oneClassSVMDecision = NAN;
-    }
+
+    packet.respirationWave =
+        reading.respirationWave;
 
     packet.actualSamplingRateHz =
         reading.actualSamplingRateHz;
 
-    packet.featureWindowCount =
+    packet.totalBreaths =
         static_cast<uint32_t>(
-            featureWindowCount
+            reading.totalBreaths
         );
 
-    packet.checksum = 0;
+    packet.noBreathDurationMs =
+        static_cast<uint32_t>(
+            reading.noBreathDurationMs
+        );
+
+    packet.sampleCount =
+        static_cast<uint32_t>(
+            reading.sampleCount
+        );
+
     packet.checksum =
-        piezoPacketChecksum(packet);
+        0;
 
-    const esp_err_t result = esp_now_send(
-        BROADCAST_MAC,
-        reinterpret_cast<const uint8_t *>(&packet),
-        sizeof(packet)
-    );
+    packet.checksum =
+        piezoPacketChecksum(
+            packet
+        );
 
-    if (result == ESP_OK)
+    const esp_err_t result =
+        esp_now_send(
+            BROADCAST_MAC,
+            reinterpret_cast<const uint8_t *>(&packet),
+            sizeof(packet)
+        );
+
+    if (
+        result
+        ==
+        ESP_OK
+    )
     {
         packetsSent++;
     }

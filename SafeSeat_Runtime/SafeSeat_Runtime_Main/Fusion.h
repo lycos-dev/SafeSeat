@@ -19,8 +19,8 @@
 // - No Isolation Forest / OCSVM implementation lives here.
 // - Sensor-specific ML remains inside each sensor pipeline.
 // - Fusion receives only the RESULTS of those models.
-// - C1001 and Piezo arrive as remote evidence over ESP-NOW.
-// - Camera verification is received from the ESP32-CAM over ESP-NOW.
+// - C1001 and deterministic Piezo support arrive over ESP-NOW.
+// - Camera verification is received from the ESP32-S3 camera over ESP-NOW.
 // ============================================================
 
 
@@ -236,14 +236,18 @@ struct PiezoFusionEvidence
     bool connected = false;
     bool valid = false;
 
-    bool signalQualityValid = false;
-
-    float peakRespirationBPM = NAN;
-    float spectralRespirationBPM = NAN;
-
+    // Deterministic PVDF respiration-support state.
+    // No Piezo IF/OCSVM model is deployed in the final runtime.
+    bool signalUsable = false;
+    bool breathTrackingReady = false;
+    bool breathDetectedRecently = false;
     bool noBreathTimerExceeded = false;
 
-    ModelEvidence model;
+    float respirationBPM = NAN;
+    float respirationWave = 0.0f;
+
+    uint32_t totalBreaths = 0;
+    uint32_t noBreathDurationMs = 0;
 
     unsigned long lastUpdateMillis = 0;
 };
@@ -346,7 +350,7 @@ struct MPUFusionInput
 // This is the single object Fusion.cpp will evaluate.
 //
 // Local Main Hub sensors: MLX90614, FSR array, MPU6050.
-// Remote ESP-NOW nodes: C1001, Piezo, and ESP32-CAM.
+// Remote ESP-NOW nodes: C1001, deterministic Piezo support, and ESP32-S3 camera.
 // Camera is verification-only and never creates the underlying
 // strong emergency candidate by itself.
 // ============================================================

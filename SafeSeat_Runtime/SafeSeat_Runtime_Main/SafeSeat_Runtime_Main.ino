@@ -237,7 +237,7 @@ void setup()
     );
 
     Serial.println(
-        " Step 5.9.8 - Local Telemetry API + SoftAP + ESP-NOW"
+        " Step 5.9.8.2 - Deterministic Piezo + API + SoftAP + ESP-NOW"
     );
 
     Serial.println(
@@ -501,10 +501,11 @@ void setup()
 
 
     // ========================================================
-    // PIEZO REMOTE ESP-NOW - STEP 5.7.3
+    // PIEZO REMOTE ESP-NOW - STEP 5.9.8.2
     //
-    // Wireless evidence from the separate seatbelt ESP32.
-    // No Piezo/Main signal wire or common-ground link is required.
+    // Wireless deterministic respiration support from the separate
+    // seatbelt ESP32. No Piezo ML model is deployed. No Piezo/Main
+    // signal wire or common-ground link is required.
     // ========================================================
 
     Serial.println();
@@ -856,9 +857,9 @@ void loop()
             ? 1.0f
             : 0.0f;
 
-    // Step 5.7.3 remote Piezo evidence. The separate Piezo ESP32
-    // performs its own 25 Hz preprocessing + IF/OCSVM inference.
-    // Main Hub receives only model/signal evidence over ESP-NOW.
+    // Step 5.9.8.2 remote Piezo support. The separate Piezo ESP32
+    // performs 25 Hz deterministic signal processing and breath-event
+    // tracking. No IF/OCSVM is deployed on the Piezo node.
     fusionInput.piezo =
         piezoComm.getFusionEvidence();
 
@@ -2084,7 +2085,7 @@ void loop()
 
 
     // ========================================================
-    // PIEZO REMOTE - STEP 5.7.3
+    // PIEZO REMOTE - STEP 5.9.8.2
     // ========================================================
 
     Serial.println();
@@ -2182,132 +2183,90 @@ void loop()
         );
 
         Serial.print(
-            "Feature windows: "
+            "Breath events  : "
         );
         Serial.println(
-            piezoStatus.remoteFeatureWindowCount
+            piezoStatus.remoteBreathCount
         );
 
         Serial.print(
-            "Signal quality : "
+            "Signal usable  : "
         );
         Serial.println(
-            piezoEvidence.signalQualityValid
-                ? "VALID"
-                : "NOT READY / REJECTED"
+            piezoEvidence.signalUsable
+                ? "YES"
+                : "STARTING / INVALID"
         );
 
         Serial.print(
-            "Peak RR        : "
-        );
-        if (
-            isfinite(
-                piezoEvidence.peakRespirationBPM
-            )
-        )
-        {
-            Serial.print(
-                piezoEvidence.peakRespirationBPM,
-                1
-            );
-            Serial.println(
-                " BPM"
-            );
-        }
-        else
-        {
-            Serial.println(
-                "not ready"
-            );
-        }
-
-        Serial.print(
-            "Spectral RR    : "
-        );
-        if (
-            isfinite(
-                piezoEvidence.spectralRespirationBPM
-            )
-        )
-        {
-            Serial.print(
-                piezoEvidence.spectralRespirationBPM,
-                1
-            );
-            Serial.println(
-                " BPM"
-            );
-        }
-        else
-        {
-            Serial.println(
-                "not ready"
-            );
-        }
-
-        Serial.print(
-            "Aux no-breath  : "
+            "Tracking ready : "
         );
         Serial.println(
-            piezoEvidence.noBreathTimerExceeded
-                ? "TIMER EXCEEDED (context only)"
+            piezoEvidence.breathTrackingReady
+                ? "YES"
                 : "NO"
         );
 
         Serial.print(
-            "Model          : "
+            "Respiration RR : "
         );
-
-        if (!piezoEvidence.model.valid)
+        if (
+            isfinite(
+                piezoEvidence.respirationBPM
+            )
+        )
+        {
+            Serial.print(
+                piezoEvidence.respirationBPM,
+                1
+            );
+            Serial.println(
+                " BPM"
+            );
+        }
+        else
         {
             Serial.println(
                 "not ready"
             );
         }
-        else
-        {
-            if (
-                piezoEvidence.model.bothModelsAnomaly
-            )
-            {
-                Serial.println(
-                    "STRONG RESPIRATION-PATTERN ANOMALY"
-                );
-            }
-            else if (
-                piezoEvidence.model.eitherModelAnomaly
-            )
-            {
-                Serial.println(
-                    "WEAK RESPIRATION-PATTERN ANOMALY"
-                );
-            }
-            else
-            {
-                Serial.println(
-                    "NORMAL RESPIRATION PATTERN"
-                );
-            }
 
-            Serial.print(
-                "  IF decision  : "
-            );
-            Serial.println(
-                piezoEvidence.model.isolationForestScore,
-                6
-            );
+        Serial.print(
+            "Resp waveform  : "
+        );
+        Serial.println(
+            piezoEvidence.respirationWave,
+            2
+        );
 
-            Serial.print(
-                "  SVM decision : "
-            );
-            Serial.println(
-                piezoEvidence.model.oneClassSVMScore,
-                6
-            );
-        }
+        Serial.print(
+            "Last event age : "
+        );
+        Serial.print(
+            piezoEvidence.noBreathDurationMs
+            /
+            1000.0f,
+            1
+        );
+        Serial.println(
+            " sec"
+        );
+
+        Serial.print(
+            "No-breath support: "
+        );
+        Serial.println(
+            piezoEvidence.noBreathTimerExceeded
+                ? "ACTIVE (CORROBORATION ONLY)"
+                : "NO"
+        );
 
         Serial.println(
-            "Fusion role    : respiration corroboration; never standalone emergency"
+            "Model          : NOT DEPLOYED"
+        );
+
+        Serial.println(
+            "Fusion role    : deterministic respiration corroboration; never standalone emergency"
         );
     }
 
