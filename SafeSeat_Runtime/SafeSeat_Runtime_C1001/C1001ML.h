@@ -12,7 +12,7 @@ enum class C1001MLStatus
     WAITING_FOR_OCCUPANT,
     WAITING_FOR_WARMUP,
     INVALID_SAMPLE,
-    MOTION_RESET,
+    MOTION_HOLD,
     COLLECTING_WINDOW,
     READY_NORMAL,
     READY_WEAK_ANOMALY,
@@ -36,6 +36,11 @@ struct C1001MLReading
         C1001_ML_WINDOW_SAMPLES;
 
     uint32_t windowsEvaluated = 0;
+
+    // Number of 1 Hz HR/RR samples held because C1001 radar
+    // motion context indicated a likely artifact. Holding a
+    // sample does NOT erase the existing ML window.
+    uint32_t motionSamplesHeld = 0;
 
     uint32_t lastProcessedSampleSequence = 0;
 
@@ -108,7 +113,7 @@ private:
         float respiration[C1001_ML_WINDOW_SAMPLES]
     ) const;
 
-    bool shouldRejectForMotion(
+    bool shouldHoldForMotion(
         const C1001Reading &sensorReading
     ) const;
 

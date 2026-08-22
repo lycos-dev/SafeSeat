@@ -27,6 +27,10 @@ void C1001ML::begin()
     Serial.println(
         "[C1001-ML] Isolation Forest + One-Class SVM ready."
     );
+
+    Serial.println(
+        "[C1001-ML] MoveRange is context only; motion samples are held, window preserved."
+    );
 }
 
 
@@ -35,8 +39,9 @@ void C1001ML::begin()
 //
 // Resetting the window also invalidates the previous model
 // result. This prevents stale C1001 evidence from surviving an
-// occupant change, invalid sensor sample, or motion-artifact
-// interval.
+// occupant change or invalid sensor sample.
+// Motion-artifact samples are handled separately as non-destructive
+// HOLD events so already-collected HR/RR samples survive.
 // ============================================================
 
 void C1001ML::resetWindow(
@@ -97,34 +102,46 @@ void C1001ML::resetWindow(
 
     reading.eitherModelAnomaly =
         false;
+
+    reading.motionSamplesHeld =
+        0;
 }
 
 
 // ============================================================
-// MOTION REJECTION
+// MOTION SAMPLE HOLD — NON-DESTRUCTIVE
 //
-// The C1001 model was trained on physiological HR/RR windows,
-// not on radar movement artifacts.
+// MoveRange is NOT an ML input feature.
 //
-// Strong/moderate motion and recovery periods therefore reset
-// the model window instead of feeding contaminated samples into
-// the anomaly models.
+// Live validation showed isolated MoveRange spikes up to 100 while
+// the participant was effectively stationary. Therefore:
+//
+// - Moderate MoveRange (<30) does NOT block the HR/RR ML sample.
+// - Strong MoveRange (>=30) holds/skips that one sample.
+// - A confirmed sensor motion-artifact/recovery interval also holds
+//   samples.
+// - Crucially, the existing 30-s ML window is PRESERVED.
+//
+// This protects the BIDMC-aligned HR/RR model from obvious radar
+// contamination without allowing one noisy movement estimate to
+// erase up to 29 seconds of valid physiology.
 // ============================================================
 
-bool C1001ML::shouldRejectForMotion(
+bool C1001ML::shouldHoldForMotion(
     const C1001Reading &sensorReading
 ) const
 {
+    const bool strongMoveRange =
+        sensorReading.moveRange >= 30;
+
     return
+        strongMoveRange
+        ||
         sensorReading.motionArtifactActive
         ||
         sensorReading.status
         ==
         C1001Status::STRONG_MOTION
-        ||
-        sensorReading.status
-        ==
-        C1001Status::MODERATE_MOTION
         ||
         sensorReading.status
         ==
@@ -430,14 +447,44 @@ void C1001ML::update(
     }
 
     if (
-        shouldRejectForMotion(
+        shouldHoldForMotion(
             sensorReading
         )
     )
     {
-        resetWindow(
-            C1001MLStatus::MOTION_RESET
-        );
+        // Current sample is not fed into the HR/RR model, but the
+        // already-collected window is intentionally preserved.
+        reading.valid =
+            false;
+
+        reading.status =
+            C1001MLStatus::MOTION_HOLD;
+
+        reading.motionSamplesHeld++;
+
+        reading.windowSamplesCollected =
+            windowCount;
+
+        // Do not clear windowCount/writeIndex/stride progress.
+        // Do not expose stale anomaly evidence while this sample
+        // is being held.
+        reading.isolationForestDecision =
+            NAN;
+
+        reading.oneClassSVMDecision =
+            NAN;
+
+        reading.isolationForestAnomaly =
+            false;
+
+        reading.oneClassSVMAnomaly =
+            false;
+
+        reading.bothModelsAnomaly =
+            false;
+
+        reading.eitherModelAnomaly =
+            false;
 
         reading.lastProcessedSampleSequence =
             sensorReading.sampleSequence;
@@ -562,8 +609,8 @@ C1001ML::getStatusText() const
         case C1001MLStatus::INVALID_SAMPLE:
             return "RESET - INVALID SENSOR SAMPLE";
 
-        case C1001MLStatus::MOTION_RESET:
-            return "RESET - MOTION ARTIFACT";
+        case C1001MLStatus::MOTION_HOLD:
+            return "HOLD - MOTION SAMPLE (WINDOW PRESERVED)";
 
         case C1001MLStatus::COLLECTING_WINDOW:
             return "COLLECTING 30 s WINDOW";

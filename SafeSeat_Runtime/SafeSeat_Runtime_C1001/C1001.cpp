@@ -245,6 +245,8 @@ void C1001Sensor::resetAllFilters()
 
     motionArtifactActive = false;
 
+    strongMotionConfirmCount = 0;
+
     stableRecoveryCount = 0;
 
 
@@ -987,65 +989,120 @@ void C1001Sensor::update()
 
 
     // --------------------------------------------------------
-    // Motion level
+    // Motion context / artifact handling
+    //
+    // Live C1001 validation (2026-08-22) showed that MoveRange
+    // can produce isolated high spikes even when the participant
+    // is effectively stationary. MoveRange is therefore treated
+    // as radar QUALITY/CONTEXT, not as a direct ML feature.
+    //
+    // Policy:
+    // - Moderate 15..29: keep collecting HR/RR.
+    // - First isolated strong sample >=30: hold this sensor-filter
+    //   sample only; do NOT enter full recovery.
+    // - Two consecutive strong samples >=30: confirm sustained
+    //   strong motion and enter the existing recovery state.
+    //
+    // The C1001ML layer has an additional protection: motion-held
+    // samples preserve the existing ML window instead of erasing it.
     // --------------------------------------------------------
 
-    bool strongMotion =
+    const bool strongMotionSample =
         moveRange >=
         STRONG_MOTION_RANGE;
 
-
-    bool moderateMotion =
-        moveRange >=
-        MODERATE_MOTION_RANGE
-        &&
-        moveRange <
-        STRONG_MOTION_RANGE;
-
-
-    bool lowMotion =
+    const bool lowMotion =
         moveRange <
         MODERATE_MOTION_RANGE;
 
 
+    if (strongMotionSample)
+    {
+        if (
+            strongMotionConfirmCount
+            <
+            STRONG_MOTION_CONFIRM_SAMPLES
+        )
+        {
+            strongMotionConfirmCount++;
+        }
+    }
+    else
+    {
+        strongMotionConfirmCount =
+            0;
+    }
+
+
+    const bool confirmedStrongMotion =
+        strongMotionConfirmCount
+        >=
+        STRONG_MOTION_CONFIRM_SAMPLES;
+
+
     // --------------------------------------------------------
-    // STRONG MOTION
+    // CONFIRMED SUSTAINED STRONG MOTION
     // --------------------------------------------------------
 
-    if (strongMotion)
+    if (confirmedStrongMotion)
     {
         motionArtifactActive =
             true;
 
-
         stableRecoveryCount =
             0;
 
+        rrCandidateCount =
+            0;
 
-        rrCandidateCount = 0;
-
-        hrCandidateCount = 0;
-
+        hrCandidateCount =
+            0;
 
         reading.motionArtifactActive =
             true;
 
-
         reading.recoveryStableCount =
             0;
-
 
         reading.status =
             C1001Status::
                 STRONG_MOTION;
-
 
         return;
     }
 
 
     // --------------------------------------------------------
-    // RECOVERY
+    // ISOLATED STRONG RADAR SPIKE
+    //
+    // Hold this one filtered-sensor sample, but do not activate
+    // the full motion-artifact/recovery state. The ML layer will
+    // independently hold the same sample while preserving its
+    // already-collected HR/RR window.
+    // --------------------------------------------------------
+
+    if (
+        strongMotionSample
+        &&
+        !motionArtifactActive
+    )
+    {
+        reading.motionArtifactActive =
+            false;
+
+        reading.recoveryStableCount =
+            0;
+
+        reading.status =
+            C1001Status::
+                HOLDING_LAST_VALUE;
+
+        return;
+    }
+
+
+    // --------------------------------------------------------
+    // RECOVERY AFTER *CONFIRMED* SUSTAINED MOTION
     // --------------------------------------------------------
 
     if (motionArtifactActive)
@@ -1054,10 +1111,8 @@ void C1001Sensor::update()
         {
             stableRecoveryCount++;
 
-
             reading.recoveryStableCount =
                 stableRecoveryCount;
-
 
             if (
                 stableRecoveryCount >=
@@ -1067,26 +1122,23 @@ void C1001Sensor::update()
                 motionArtifactActive =
                     false;
 
+                strongMotionConfirmCount =
+                    0;
 
                 stableRecoveryCount =
                     0;
 
-
                 reading.motionArtifactActive =
                     false;
-
 
                 reading.recoveryStableCount =
                     0;
 
-
                 clearMedianBuffers();
-
 
                 reading.status =
                     C1001Status::
                         COLLECTING_FILTER_SAMPLES;
-
 
                 return;
             }
@@ -1096,20 +1148,16 @@ void C1001Sensor::update()
             stableRecoveryCount =
                 0;
 
-
             reading.recoveryStableCount =
                 0;
         }
 
-
         reading.motionArtifactActive =
             true;
-
 
         reading.status =
             C1001Status::
                 MOTION_RECOVERY;
-
 
         return;
     }
@@ -1118,20 +1166,10 @@ void C1001Sensor::update()
     // --------------------------------------------------------
     // MODERATE MOTION
     //
-    // Do not contaminate median buffers.
-    // Hold previous trusted values.
+    // Do NOT reject the physiological sample solely because
+    // MoveRange is 15..29. The raw MoveRange is still retained
+    // for diagnostics and later MPU/fusion context.
     // --------------------------------------------------------
-
-    if (moderateMotion)
-    {
-        reading.status =
-            C1001Status::
-                MODERATE_MOTION;
-
-
-        return;
-    }
-
 
     // --------------------------------------------------------
     // CLEAN SAMPLE

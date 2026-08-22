@@ -1,0 +1,18 @@
+{
+  "step": "5.9.8.4",
+  "final_nodes": [
+    "SafeSeat_Runtime_Main",
+    "SafeSeat_Runtime_C1001",
+    "SafeSeat_Runtime_ESP32S3_CAM"
+  ],
+  "piezo_node_in_bundle": false,
+  "main_piezo_source_files": false,
+  "main_piezo_protocol": false,
+  "main_piezo_fusion_field": false,
+  "main_piezo_api_field": false,
+  "main_piezo_espnow_handler": false,
+  "main_api_string_hotfix_preserved": true,
+  "c1001_runtime_logic_changed": false,
+  "camera_runtime_logic_changed": false,
+  "arduino_verify_main": "PENDING_USER"
+}

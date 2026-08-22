@@ -1,1466 +1,906 @@
 #include "FSR.h"
-#include "Config.h"
 
-#include <Wire.h>
 #include <math.h>
 
-
 // ============================================================
-// SENSOR LABELS
-//
-// Match the proven combined sketch terminology.
+// SAFESEAT FSR ARRAY - IMPLEMENTATION
 // ============================================================
 
-const char*
-FSRSensor::SENSOR_LABELS[NUM_FSR] =
+namespace
 {
-    "BackLeftTop",
-    "BackLeftMiddle",
-    "BackLeftBottom",
+    static float clamp01(float value)
+    {
+        if (value < 0.0f) return 0.0f;
+        if (value > 1.0f) return 1.0f;
+        return value;
+    }
 
-    "BackRightTop",
-    "BackRightMiddle",
-    "BackRightBottom",
+    static float safeBalance(float left, float right)
+    {
+        const float total = left + right;
+        if (total < 1.0f)
+        {
+            return 0.0f;
+        }
+        return (left - right) / total;
+    }
+}
 
-    "CushionLeft",
-    "CushionCenter",
-    "CushionRight"
-};
-
-
-// ============================================================
-// CONSTRUCTOR
-// ============================================================
 
 FSRSensor::FSRSensor()
 {
 }
 
 
-// ============================================================
-// INITIALIZATION
-//
-// Step 3 restores the exact successful hardware pattern:
-//
-// ads1.begin(0x48)
-// ads1.setGain(GAIN_ONE)
-//
-// ads2.begin(0x49)
-// ads2.setGain(GAIN_ONE)
-//
-// No forced 860 SPS data rate.
-// No extra negative-value rejection.
-//
-// Wire and ESP32 ADC are already initialized ONCE by Main.
-// ============================================================
+bool FSRSensor::i2cProbe(uint8_t address)
+{
+    Wire.beginTransmission(address);
+    return Wire.endTransmission() == 0;
+}
+
+
+bool FSRSensor::initADS1()
+{
+    bool ok = ads1.begin(ADS1_ADDRESS, &Wire);
+
+    if (ok)
+    {
+        ads1.setGain(GAIN_TWOTHIRDS);
+    }
+
+    reading.ads1Connected = ok;
+    return ok;
+}
+
+
+bool FSRSensor::initADS2()
+{
+    bool ok = ads2.begin(ADS2_ADDRESS, &Wire);
+
+    if (ok)
+    {
+        ads2.setGain(GAIN_TWOTHIRDS);
+    }
+
+    reading.ads2Connected = ok;
+    return ok;
+}
+
 
 bool FSRSensor::begin()
 {
-    reading =
-        FSRReading{};
-
-
-    reading.status =
-        FSRStatus::CALIBRATING;
-
+    setStatus(FSRStatus::UNINITIALIZED);
 
     Serial.println();
+    Serial.println("[FSR] Initializing validated 9-channel array...");
+
+    pinMode(CUSHION_RIGHT_GPIO, INPUT);
+
+    const bool ads1OK = initADS1();
+    const bool ads2OK = initADS2();
+
     Serial.println(
-        "[FSR] Initializing from proven combined sketch..."
+        ads1OK
+            ? "ADS1115 #1 Ready - electrical FSR1..FSR4"
+            : "ADS1115 #1 FAILED at 0x48"
     );
 
+    Serial.println(
+        ads2OK
+            ? "ADS1115 #2 Ready - electrical FSR5/6 + Cushion FSR1/2"
+            : "ADS1115 #2 FAILED at 0x49"
+    );
 
-    // --------------------------------------------------------
-    // ADS1115 #1
-    //
-    // A0 = Backrest FSR1 / BackLeftTop
-    // A1 = Backrest FSR2 / BackLeftMiddle
-    // A2 = Backrest FSR3 / BackLeftBottom
-    // A3 = Backrest FSR4 / BackRightTop
-    // --------------------------------------------------------
+    Serial.println("GPIO34 Ready - Cushion FSR3");
 
-    if (
-        !ads1.begin(
-            ADS1115_1_ADDRESS
-        )
-    )
+    initialized = ads1OK && ads2OK;
+    reading.connected = initialized;
+
+    // Keep Main Hub alive even when calibration fails because the
+    // hardware can still be diagnosed and recovered without changing
+    // unrelated MLX/MPU/C1001 runtime code.
+    if (!initialized)
     {
-        reading.connected =
-            false;
-
-
-        reading.status =
-            FSRStatus::DISCONNECTED;
-
+        setStatus(FSRStatus::DEGRADED);
+        reading.valid = false;
 
         Serial.println(
-            "ADS1115 #1 (0x48) NOT FOUND!"
+            "[FSR] WARNING: one or both ADS1115 devices are unavailable."
+        );
+        Serial.println(
+            "[FSR] Runtime will continue health checks/recovery attempts."
         );
 
-
-        return false;
+        // Return true so the earlier Main Hub keeps calling update().
+        // Fusion still sees connected=false / valid=false.
+        return true;
     }
 
+    setStatus(FSRStatus::CALIBRATING);
 
-    ads1.setGain(
-        GAIN_ONE
-    );
+    baselineReady = calibrateEmptySeat();
+    reading.baselineValid = baselineReady;
 
-
-    // 860 SPS is required so a 5-sample median across all
-    // channels can support the ~12.5 Hz full-frame target.
-    // The earlier calibration failure was caused by whole-frame
-    // negative-value rejection, not by this data rate.
-    ads1.setDataRate(
-        RATE_ADS1115_860SPS
-    );
-
-
-    Serial.println(
-        "ADS1115 #1 Ready - Backrest FSR1 to FSR4"
-    );
-
-
-    // --------------------------------------------------------
-    // ADS1115 #2
-    //
-    // A0 = Backrest FSR5 / BackRightMiddle
-    // A1 = Backrest FSR6 / BackRightBottom
-    // A2 = Cushion FSR1 / CushionLeft
-    // A3 = Cushion FSR2 / CushionCenter
-    // --------------------------------------------------------
-
-    if (
-        !ads2.begin(
-            ADS1115_2_ADDRESS
-        )
-    )
+    if (!baselineReady)
     {
-        reading.connected =
-            false;
-
-
-        reading.status =
-            FSRStatus::DISCONNECTED;
-
+        setStatus(FSRStatus::CALIBRATION_FAILED);
+        reading.valid = false;
 
         Serial.println(
-            "ADS1115 #2 (0x49) NOT FOUND!"
+            "[FSR] Calibration rejected. Keep the seat EMPTY and restart,"
         );
-
-
-        return false;
-    }
-
-
-    ads2.setGain(
-        GAIN_ONE
-    );
-
-
-    ads2.setDataRate(
-        RATE_ADS1115_860SPS
-    );
-
-
-    Serial.println(
-        "ADS1115 #2 Ready - Backrest FSR5/6 + Cushion Left/Center"
-    );
-
-
-    Serial.println(
-        "GPIO34 Ready - Cushion Right"
-    );
-
-
-    reading.connected =
-        true;
-
-
-    if (
-        !calibrateEmptySeat()
-    )
-    {
-        reading.calibrated =
-            false;
-
-
-        reading.valid =
-            false;
-
-
-        reading.status =
-            FSRStatus::INVALID_READING;
-
-
         Serial.println(
-            "[FSR] ERROR: empty-seat calibration failed."
+            "[FSR] or call fsr.forceRecalibration() from a maintenance path."
         );
 
-
-        return false;
+        return true;
     }
 
+    setStatus(FSRStatus::READING);
+    reading.valid = false;  // becomes true after first completed frame
 
-    reading.status =
-        FSRStatus::READY;
-
-
+    Serial.println();
+    Serial.println("[FSR] Runtime module ready.");
     Serial.println(
-        "[FSR] Runtime module ready."
+        "[FSR] Logical/model mapping corrected for validated mirrored backrest."
     );
-
+    Serial.println(
+        "[FSR] Electrical FSR4-6 -> physical LEFT; FSR1-3 -> physical RIGHT."
+    );
+    Serial.println(
+        "[FSR] ADS1115 and GPIO34 pressure are normalized before aggregation."
+    );
 
     return true;
 }
 
 
-// ============================================================
-// MEDIAN ADS1115 READ
-//
-// Exact proven 5-read median behavior.
-// ============================================================
-
-int16_t FSRSensor::readMedianADS(
-    Adafruit_ADS1115& module,
-    uint8_t channel
-)
+bool FSRSensor::acquireElectricalRaw(float out[FSR_COUNT])
 {
-    int16_t samples[
-        MEDIAN_SAMPLES
-    ];
+    bool ads1OK = reading.ads1Connected;
+    bool ads2OK = reading.ads2Connected;
 
-
-    for (
-        int i = 0;
-        i < MEDIAN_SAMPLES;
-        i++
-    )
+    if (ads1OK)
     {
-        samples[i] =
-            module.readADC_SingleEnded(
-                channel
-            );
-
-
-        delayMicroseconds(
-            250
-        );
-    }
-
-
-    for (
-        int i = 0;
-        i < MEDIAN_SAMPLES - 1;
-        i++
-    )
-    {
-        for (
-            int j = i + 1;
-            j < MEDIAN_SAMPLES;
-            j++
-        )
-        {
-            if (
-                samples[j]
-                <
-                samples[i]
-            )
-            {
-                int16_t temporary =
-                    samples[i];
-
-
-                samples[i] =
-                    samples[j];
-
-
-                samples[j] =
-                    temporary;
-            }
-        }
-    }
-
-
-    return samples[
-        MEDIAN_SAMPLES / 2
-    ];
-}
-
-
-// ============================================================
-// MEDIAN ESP32 ADC READ
-// ============================================================
-
-int16_t FSRSensor::readMedianNative(
-    uint8_t pin
-)
-{
-    int16_t samples[
-        MEDIAN_SAMPLES
-    ];
-
-
-    for (
-        int i = 0;
-        i < MEDIAN_SAMPLES;
-        i++
-    )
-    {
-        samples[i] =
-            analogRead(
-                pin
-            );
-
-
-        delayMicroseconds(
-            250
-        );
-    }
-
-
-    for (
-        int i = 0;
-        i < MEDIAN_SAMPLES - 1;
-        i++
-    )
-    {
-        for (
-            int j = i + 1;
-            j < MEDIAN_SAMPLES;
-            j++
-        )
-        {
-            if (
-                samples[j]
-                <
-                samples[i]
-            )
-            {
-                int16_t temporary =
-                    samples[i];
-
-
-                samples[i] =
-                    samples[j];
-
-
-                samples[j] =
-                    temporary;
-            }
-        }
-    }
-
-
-    return samples[
-        MEDIAN_SAMPLES / 2
-    ];
-}
-
-
-// ============================================================
-// READ ALL NINE FSRs
-//
-// IMPORTANT FIX:
-//
-// The failed Runtime_Main version rejected any negative ADS1115
-// sample. The proven combined sketch did NOT do that.
-//
-// ADS1115 single-ended channels near zero can still return a
-// tiny negative code from ADC offset/noise. That must not make
-// the entire 9-sensor calibration fail.
-//
-// Therefore this routine intentionally mirrors the proven code
-// and simply returns the median readings.
-// ============================================================
-
-void FSRSensor::readAllSensors(
-    int16_t destination[]
-)
-{
-    destination[
-        BACKREST_FSR1
-    ] =
-        readMedianADS(
-            ads1,
-            0
-        );
-
-
-    destination[
-        BACKREST_FSR2
-    ] =
-        readMedianADS(
-            ads1,
-            1
-        );
-
-
-    destination[
-        BACKREST_FSR3
-    ] =
-        readMedianADS(
-            ads1,
-            2
-        );
-
-
-    destination[
-        BACKREST_FSR4
-    ] =
-        readMedianADS(
-            ads1,
-            3
-        );
-
-
-    destination[
-        BACKREST_FSR5
-    ] =
-        readMedianADS(
-            ads2,
-            0
-        );
-
-
-    destination[
-        BACKREST_FSR6
-    ] =
-        readMedianADS(
-            ads2,
-            1
-        );
-
-
-    destination[
-        CUSHION_FSR1
-    ] =
-        readMedianADS(
-            ads2,
-            2
-        );
-
-
-    destination[
-        CUSHION_FSR2
-    ] =
-        readMedianADS(
-            ads2,
-            3
-        );
-
-
-    destination[
-        CUSHION_FSR3
-    ] =
-        readMedianNative(
-            CUSHION_FSR3_PIN
-        );
-}
-
-
-// ============================================================
-// READ ONE SENSOR
-//
-// Used by the Step 4.5 cooperative scheduler so the MPU can run
-// between FSR channel acquisitions.
-// ============================================================
-
-int16_t FSRSensor::readOneSensor(
-    uint8_t index
-)
-{
-    switch (
-        index
-    )
-    {
-        case BACKREST_FSR1:
-            return readMedianADS(
-                ads1,
-                0
-            );
-
-        case BACKREST_FSR2:
-            return readMedianADS(
-                ads1,
-                1
-            );
-
-        case BACKREST_FSR3:
-            return readMedianADS(
-                ads1,
-                2
-            );
-
-        case BACKREST_FSR4:
-            return readMedianADS(
-                ads1,
-                3
-            );
-
-        case BACKREST_FSR5:
-            return readMedianADS(
-                ads2,
-                0
-            );
-
-        case BACKREST_FSR6:
-            return readMedianADS(
-                ads2,
-                1
-            );
-
-        case CUSHION_FSR1:
-            return readMedianADS(
-                ads2,
-                2
-            );
-
-        case CUSHION_FSR2:
-            return readMedianADS(
-                ads2,
-                3
-            );
-
-        case CUSHION_FSR3:
-            return readMedianNative(
-                CUSHION_FSR3_PIN
-            );
-
-        default:
-            return 0;
-    }
-}
-
-
-// ============================================================
-// COMPLETE SCHEDULED FRAME
-// ============================================================
-
-void FSRSensor::completeScheduledFrame()
-{
-    for (
-        int i = 0;
-        i < NUM_FSR;
-        i++
-    )
-    {
-        reading.raw[i] =
-            pendingRaw[i];
-
-
-        reading.filtered[i] =
-            applyAdaptiveFilter(
-                pendingRaw[i],
-                reading.filtered[i]
-            );
-
-
-        reading.pressure[i] =
-            calculatePressureDelta(
-                reading.filtered[i],
-                reading.baseline[i]
-            );
-    }
-
-
-    calculatePressureFeatures();
-
-
-    updateEmptySeatBaseline();
-
-
-    // Recalculate after possible baseline movement.
-    calculatePressureFeatures();
-
-
-    unsigned long completedNow =
-        millis();
-
-
-    if (
-        previousCompletedSample
-        >
-        0
-    )
-    {
-        unsigned long delta =
-            completedNow
-            -
-            previousCompletedSample;
-
-
-        if (
-            delta
-            >
-            0
-        )
-        {
-            reading.actualSamplingRateHz =
-                1000.0f
-                /
-                static_cast<float>(
-                    delta
-                );
-        }
-    }
-
-
-    previousCompletedSample =
-        completedNow;
-
-
-    reading.lastSampleMillis =
-        completedNow;
-
-
-    reading.valid =
-        true;
-
-
-    reading.status =
-        FSRStatus::READY;
-}
-
-
-// ============================================================
-// ADAPTIVE FILTER
-//
-// Exact proven response:
-// - ignore <15 ADC jitter
-// - faster release than application
-// ============================================================
-
-float FSRSensor::applyAdaptiveFilter(
-    int16_t raw,
-    float previousFiltered
-)
-{
-    float difference =
-        fabs(
-            static_cast<float>(
-                raw
-            )
-            -
-            previousFiltered
-        );
-
-
-    if (
-        difference
-        <
-        15.0f
-    )
-    {
-        return previousFiltered;
-    }
-
-
-    float alpha;
-
-
-    if (
-        raw
-        <
-        previousFiltered
-    )
-    {
-        if (
-            difference
-            >
-            5000.0f
-        )
-        {
-            alpha =
-                0.95f;
-        }
-        else if (
-            difference
-            >
-            1000.0f
-        )
-        {
-            alpha =
-                0.85f;
-        }
-        else
-        {
-            alpha =
-                0.65f;
-        }
+        out[0] = static_cast<float>(ads1.readADC_SingleEnded(0));
+        out[1] = static_cast<float>(ads1.readADC_SingleEnded(1));
+        out[2] = static_cast<float>(ads1.readADC_SingleEnded(2));
+        out[3] = static_cast<float>(ads1.readADC_SingleEnded(3));
     }
     else
     {
-        if (
-            difference
-            >
-            5000.0f
-        )
+        out[0] = out[1] = out[2] = out[3] = 0.0f;
+    }
+
+    if (ads2OK)
+    {
+        out[4] = static_cast<float>(ads2.readADC_SingleEnded(0));
+        out[5] = static_cast<float>(ads2.readADC_SingleEnded(1));
+        out[6] = static_cast<float>(ads2.readADC_SingleEnded(2));
+        out[7] = static_cast<float>(ads2.readADC_SingleEnded(3));
+    }
+    else
+    {
+        out[4] = out[5] = out[6] = out[7] = 0.0f;
+    }
+
+    out[8] = static_cast<float>(analogRead(CUSHION_RIGHT_GPIO));
+
+    for (int i = 0; i < FSR_COUNT; ++i)
+    {
+        if (!isfinite(out[i]))
         {
-            alpha =
-                0.90f;
-        }
-        else if (
-            difference
-            >
-            1000.0f
-        )
-        {
-            alpha =
-                0.70f;
-        }
-        else
-        {
-            alpha =
-                0.40f;
+            return false;
         }
     }
 
-
-    return (
-        alpha
-        *
-        static_cast<float>(
-            raw
-        )
-    )
-    +
-    (
-        1.0f
-        -
-        alpha
-    )
-    *
-    previousFiltered;
+    return ads1OK && ads2OK;
 }
 
 
-// ============================================================
-// EMPTY-SEAT CALIBRATION
-//
-// Exact proven pattern:
-// - wait 3 seconds
-// - 20 rounds
-// - each round uses 5-read median per sensor
-// - 50 ms between rounds
-// ============================================================
+void FSRSensor::mapElectricalToLogical(
+    const float electrical[FSR_COUNT],
+    float logical[FSR_COUNT]
+) const
+{
+    // --------------------------------------------------------
+    // BACKREST MIRROR CORRECTION
+    //
+    // Validated physical installation:
+    //   electrical FSR4 = physical LEFT top
+    //   electrical FSR5 = physical LEFT middle
+    //   electrical FSR6 = physical LEFT bottom
+    //
+    //   electrical FSR1 = physical RIGHT top
+    //   electrical FSR2 = physical RIGHT middle
+    //   electrical FSR3 = physical RIGHT bottom
+    //
+    // Model/design order:
+    //   FSR1-3 = LEFT top/middle/bottom
+    //   FSR4-6 = RIGHT top/middle/bottom
+    // --------------------------------------------------------
+
+    logical[BACKREST_FSR1] = electrical[3];  // ADS1 A3, electrical FSR4
+    logical[BACKREST_FSR2] = electrical[4];  // ADS2 A0, electrical FSR5
+    logical[BACKREST_FSR3] = electrical[5];  // ADS2 A1, electrical FSR6
+
+    logical[BACKREST_FSR4] = electrical[0];  // ADS1 A0, electrical FSR1
+    logical[BACKREST_FSR5] = electrical[1];  // ADS1 A1, electrical FSR2
+    logical[BACKREST_FSR6] = electrical[2];  // ADS1 A2, electrical FSR3
+
+    // Cushion physical order was validated directly and is unchanged.
+    logical[CUSHION_FSR1] = electrical[6];   // ADS2 A2, left
+    logical[CUSHION_FSR2] = electrical[7];   // ADS2 A3, center
+    logical[CUSHION_FSR3] = electrical[8];   // GPIO34, right
+}
+
 
 bool FSRSensor::calibrateEmptySeat()
 {
-    reading.status =
-        FSRStatus::CALIBRATING;
-
-
     Serial.println();
-    Serial.println(
-        "========================================"
-    );
+    Serial.println("========================================");
+    Serial.println(" FSR EMPTY-SEAT CALIBRATION");
+    Serial.println("========================================");
+    Serial.println("Keep the backrest and cushion EMPTY.");
+    Serial.println("Calibration begins in 3 seconds...");
 
-    Serial.println(
-        " FSR EMPTY-SEAT CALIBRATION"
-    );
+    delay(CALIBRATION_SETTLE_MS);
 
-    Serial.println(
-        "========================================"
-    );
+    float sums[FSR_COUNT] = {0};
+    int accepted = 0;
 
-    Serial.println(
-        "Keep the backrest and cushion EMPTY."
-    );
-
-    Serial.println(
-        "Calibration begins in 3 seconds..."
-    );
-
-
-    delay(
-        CALIBRATION_DELAY_MS
-    );
-
-
-    float totals[
-        NUM_FSR
-    ] = {0};
-
-
-    for (
-        int round = 0;
-        round < CALIBRATION_ROUNDS;
-        round++
-    )
+    for (int sample = 0; sample < CALIBRATION_SAMPLES; ++sample)
     {
-        int16_t values[
-            NUM_FSR
-        ];
+        float electrical[FSR_COUNT] = {0};
 
-
-        readAllSensors(
-            values
-        );
-
-
-        for (
-            int i = 0;
-            i < NUM_FSR;
-            i++
-        )
+        if (acquireElectricalRaw(electrical))
         {
-            totals[i] +=
-                static_cast<float>(
-                    values[i]
-                );
+            for (int i = 0; i < FSR_COUNT; ++i)
+            {
+                sums[i] += electrical[i];
+            }
+
+            accepted++;
         }
 
-
-        Serial.print(
-            "."
-        );
-
-
-        delay(
-            50
-        );
+        Serial.print(".");
+        delay(20);
     }
-
 
     Serial.println();
 
-
-    for (
-        int i = 0;
-        i < NUM_FSR;
-        i++
-    )
+    if (accepted < (CALIBRATION_SAMPLES * 3) / 4)
     {
-        reading.baseline[i] =
-            totals[i]
-            /
-            static_cast<float>(
-                CALIBRATION_ROUNDS
-            );
-
-
-        reading.filtered[i] =
-            reading.baseline[i];
-
-
-        reading.pressure[i] =
-            0.0f;
-
-
-        reading.pressureShare[i] =
-            0.0f;
+        Serial.println(
+            "[FSR] ERROR: not enough valid calibration frames were acquired."
+        );
+        return false;
     }
 
+    for (int i = 0; i < FSR_COUNT; ++i)
+    {
+        reading.electricalBaseline[i] =
+            sums[i] / static_cast<float>(accepted);
 
-    reading.calibrated =
-        true;
+        electricalFilteredLoad[i] = 0.0f;
+    }
 
-
-    reading.valid =
-        true;
-
-
-    Serial.println(
-        "FSR baseline calibration complete."
+    mapElectricalToLogical(
+        reading.electricalBaseline,
+        reading.baseline
     );
 
+    Serial.println("FSR baseline calibration complete.");
 
-    for (
-        int i = 0;
-        i < NUM_FSR;
-        i++
-    )
+    for (int i = 0; i < FSR_COUNT; ++i)
     {
-        Serial.print(
-            "  "
-        );
-
-        Serial.print(
-            SENSOR_LABELS[i]
-        );
-
-        Serial.print(
-            " baseline: "
-        );
-
-        Serial.println(
-            reading.baseline[i],
-            1
-        );
+        Serial.print("  ");
+        Serial.print(getSensorLabel(i));
+        Serial.print(" baseline: ");
+        Serial.println(reading.baseline[i], 1);
     }
 
-
-    Serial.println();
-
-
-    previousCompletedSample =
-        millis();
-
-
-    reading.lastSampleMillis =
-        previousCompletedSample;
-
+    if (!calibrationLooksValid())
+    {
+        Serial.println();
+        Serial.println(
+            "[FSR] ERROR: empty-seat baseline contains a saturated/stuck channel."
+        );
+        Serial.println(
+            "[FSR] Do NOT accept this as a normal baseline."
+        );
+        Serial.println(
+            "[FSR] Check seat pressure, FSR divider wiring, GND/3.3V, ADS power,"
+        );
+        Serial.println(
+            "[FSR] and GPIO34. Then recalibrate with the seat fully unloaded."
+        );
+        return false;
+    }
 
     return true;
 }
 
 
-// ============================================================
-// PRESSURE DELTA
-// ============================================================
+bool FSRSensor::calibrationLooksValid() const
+{
+    for (int e = 0; e < FSR_COUNT; ++e)
+    {
+        const float maxExpected =
+            (e == 8)
+                ? GPIO_EXPECTED_PRESS_MAX
+                : ADS_EXPECTED_PRESS_MAX;
 
-float FSRSensor::calculatePressureDelta(
-    float filtered,
+        if (
+            reading.electricalBaseline[e]
+            >=
+            maxExpected * SATURATED_BASELINE_FRACTION
+        )
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+
+float FSRSensor::normalizeElectricalChannel(
+    uint8_t electricalIndex,
+    float raw,
     float baseline
-)
+) const
 {
-    float difference =
-        filtered
-        -
-        baseline
-        -
-        NOISE_MARGIN;
+    const bool gpioChannel = electricalIndex == 8;
 
+    const float expectedMax =
+        gpioChannel
+            ? GPIO_EXPECTED_PRESS_MAX
+            : ADS_EXPECTED_PRESS_MAX;
 
-    if (
-        difference
-        <
-        0.0f
-    )
+    const float deadband =
+        gpioChannel
+            ? GPIO_DEADBAND_RAW
+            : ADS_DEADBAND_RAW;
+
+    float delta = raw - baseline - deadband;
+
+    if (delta <= 0.0f)
     {
-        difference =
-            0.0f;
+        return 0.0f;
     }
 
+    // Channel-specific denominator starts at its measured empty baseline.
+    // This is the critical ADS1115-vs-GPIO34 scale correction.
+    float availableRange = expectedMax - baseline - deadband;
 
-    return difference;
+    const float minimumRange =
+        gpioChannel
+            ? 500.0f
+            : 1200.0f;
+
+    if (availableRange < minimumRange)
+    {
+        availableRange = minimumRange;
+    }
+
+    return clamp01(delta / availableRange);
 }
 
 
-// ============================================================
-// FEATURE CALCULATION
-// ============================================================
-
-void FSRSensor::calculatePressureFeatures()
-{
-    reading.backrestLeftTotal =
-        reading.pressure[
-            BACKREST_FSR1
-        ]
-        +
-        reading.pressure[
-            BACKREST_FSR2
-        ]
-        +
-        reading.pressure[
-            BACKREST_FSR3
-        ];
-
-
-    reading.backrestRightTotal =
-        reading.pressure[
-            BACKREST_FSR4
-        ]
-        +
-        reading.pressure[
-            BACKREST_FSR5
-        ]
-        +
-        reading.pressure[
-            BACKREST_FSR6
-        ];
-
-
-    reading.backrestUpperTotal =
-        reading.pressure[
-            BACKREST_FSR1
-        ]
-        +
-        reading.pressure[
-            BACKREST_FSR4
-        ];
-
-
-    reading.backrestMiddleTotal =
-        reading.pressure[
-            BACKREST_FSR2
-        ]
-        +
-        reading.pressure[
-            BACKREST_FSR5
-        ];
-
-
-    reading.backrestLowerTotal =
-        reading.pressure[
-            BACKREST_FSR3
-        ]
-        +
-        reading.pressure[
-            BACKREST_FSR6
-        ];
-
-
-    reading.cushionLeft =
-        reading.pressure[
-            CUSHION_FSR1
-        ];
-
-
-    reading.cushionCenter =
-        reading.pressure[
-            CUSHION_FSR2
-        ];
-
-
-    reading.cushionRight =
-        reading.pressure[
-            CUSHION_FSR3
-        ];
-
-
-    reading.backrestTotal =
-        reading.backrestLeftTotal
-        +
-        reading.backrestRightTotal;
-
-
-    reading.cushionTotal =
-        reading.cushionLeft
-        +
-        reading.cushionCenter
-        +
-        reading.cushionRight;
-
-
-    reading.wholeSeatTotal =
-        reading.backrestTotal
-        +
-        reading.cushionTotal;
-
-
-    constexpr float EPSILON =
-        0.000001f;
-
-
-    // Keep the current runtime balance convention.
-    // Negative means right-dominant with this field definition.
-    reading.backrestLRBalance =
-        (
-            reading.backrestLeftTotal
-            -
-            reading.backrestRightTotal
-        )
-        /
-        (
-            reading.backrestTotal
-            +
-            EPSILON
-        );
-
-
-    reading.cushionLRBalance =
-        (
-            reading.cushionLeft
-            -
-            reading.cushionRight
-        )
-        /
-        (
-            reading.cushionLeft
-            +
-            reading.cushionRight
-            +
-            EPSILON
-        );
-
-
-    reading.cushionCenterRatio =
-        reading.cushionCenter
-        /
-        (
-            reading.cushionTotal
-            +
-            EPSILON
-        );
-
-
-    // Use the same finite guard as the proven combined sketch.
-    // This prevents gigantic / overflow values when the
-    // cushion has effectively zero pressure.
-    reading.backrestToCushionRatio =
-        reading.backrestTotal
-        /
-        (
-            reading.cushionTotal
-            +
-            1.0f
-        );
-
-
-    calculatePressureShares();
-
-
-    calculatePrototypePostureContext();
-}
-
-
-// ============================================================
-// PRESSURE SHARES
-// ============================================================
-
-void FSRSensor::calculatePressureShares()
-{
-    constexpr float EPSILON =
-        0.000001f;
-
-
-    float denominator =
-        reading.wholeSeatTotal
-        +
-        EPSILON;
-
-
-    for (
-        int i = 0;
-        i < NUM_FSR;
-        i++
-    )
-    {
-        reading.pressureShare[i] =
-            reading.pressure[i]
-            /
-            denominator;
-    }
-}
-
-
-// ============================================================
-// PROTOTYPE POSTURE CONTEXT
-//
-// Reproduces the diagnostic behavior that was already working
-// in the combined sketch.
-// ============================================================
-
-void FSRSensor::calculatePrototypePostureContext()
-{
-    reading.occupied =
-        reading.cushionTotal
-        >=
-        CUSHION_OCCUPANCY_THRESHOLD;
-
-
-    reading.backContact =
-        reading.backrestTotal
-        >=
-        BACK_CONTACT_THRESHOLD;
-
-
-    if (
-        reading.cushionTotal
-        >
-        0.0f
-    )
-    {
-        reading.horizontalCOP =
-            (
-                reading.cushionRight
-                -
-                reading.cushionLeft
-            )
-            /
-            reading.cushionTotal;
-    }
-    else
-    {
-        reading.horizontalCOP =
-            0.0f;
-    }
-
-
-    float combinedLeft =
-        reading.backrestLeftTotal
-        +
-        reading.cushionLeft;
-
-
-    float combinedRight =
-        reading.backrestRightTotal
-        +
-        reading.cushionRight;
-
-
-    float sideTotal =
-        combinedLeft
-        +
-        combinedRight;
-
-
-    if (
-        sideTotal
-        >
-        0.0f
-    )
-    {
-        reading.sideAsymmetry =
-            (
-                combinedRight
-                -
-                combinedLeft
-            )
-            /
-            sideTotal;
-    }
-    else
-    {
-        reading.sideAsymmetry =
-            0.0f;
-    }
-
-
-    if (
-        !reading.occupied
-    )
-    {
-        reading.datasetOrient =
-            'a';
-
-
-        reading.datasetLean =
-            '-';
-
-
-        return;
-    }
-
-
-    if (
-        reading.sideAsymmetry
-        <=
-        -LEAN_ASYMMETRY_THRESHOLD
-    )
-    {
-        reading.datasetLean =
-            'l';
-    }
-    else if (
-        reading.sideAsymmetry
-        >=
-        LEAN_ASYMMETRY_THRESHOLD
-    )
-    {
-        reading.datasetLean =
-            'r';
-    }
-    else
-    {
-        reading.datasetLean =
-            'c';
-    }
-
-
-    if (
-        !reading.backContact
-        ||
-        reading.backrestToCushionRatio
-        <
-        FORWARD_BACK_RATIO
-    )
-    {
-        reading.datasetOrient =
-            'f';
-    }
-    else if (
-        reading.backrestToCushionRatio
-        >
-        BACKWARD_BACK_RATIO
-    )
-    {
-        reading.datasetOrient =
-            'b';
-    }
-    else
-    {
-        reading.datasetOrient =
-            's';
-    }
-}
-
-
-// ============================================================
-// EMPTY-SEAT BASELINE DRIFT CORRECTION
-//
-// This restores the old proven behavior:
-//
-// do not adapt if cushion declares occupied
-// do not adapt if meaningful backrest contact exists
-// ============================================================
-
-void FSRSensor::updateEmptySeatBaseline()
-{
-    if (
-        reading.occupied
-    )
-    {
-        return;
-    }
-
-
-    if (
-        reading.backrestTotal
-        >=
-        BACK_CONTACT_THRESHOLD
-    )
-    {
-        return;
-    }
-
-
-    for (
-        int i = 0;
-        i < NUM_FSR;
-        i++
-    )
-    {
-        reading.baseline[i] =
-            BASELINE_ADAPT_ALPHA
-            *
-            reading.filtered[i]
-            +
-            (
-                1.0f
-                -
-                BASELINE_ADAPT_ALPHA
-            )
-            *
-            reading.baseline[i];
-
-
-        reading.pressure[i] =
-            calculatePressureDelta(
-                reading.filtered[i],
-                reading.baseline[i]
-            );
-    }
-}
-
-
-// ============================================================
-// UPDATE
-// ============================================================
-
-void FSRSensor::update(
+void FSRSensor::processFrame(
+    const float electricalRaw[FSR_COUNT],
     bool occupantPresent
 )
 {
-    /*
-     * Kept only for interface compatibility in Step 4.5.
-     * FSR pressure acquisition itself remains independent of
-     * C1001 labels.
-     */
-    (void) occupantPresent;
-
-
-    if (
-        !reading.connected
-        ||
-        !reading.calibrated
-    )
+    for (int e = 0; e < FSR_COUNT; ++e)
     {
-        return;
-    }
+        reading.electricalRaw[e] = electricalRaw[e];
 
+        float normalized =
+            normalizeElectricalChannel(
+                static_cast<uint8_t>(e),
+                electricalRaw[e],
+                reading.electricalBaseline[e]
+            );
 
-    unsigned long now =
-        millis();
+        const float commonLoad =
+            normalized * COMMON_PRESSURE_SCALE;
 
+        electricalFilteredLoad[e] =
+            FILTER_ALPHA * commonLoad
+            +
+            (1.0f - FILTER_ALPHA) * electricalFilteredLoad[e];
 
-    // --------------------------------------------------------
-    // START A NEW 9-CHANNEL FRAME
-    //
-    // Full frames target ~12.5 Hz (80 ms period).
-    // --------------------------------------------------------
-
-    if (
-        !frameInProgress
-    )
-    {
+        // Very slow baseline drift compensation ONLY while the C1001 says
+        // the seat is not occupied and this channel is effectively unloaded.
+        //
+        // This avoids the dangerous behavior of learning an occupant's
+        // seated pressure as the new zero.
         if (
-            now
-            -
-            reading.lastSampleMillis
-            <
-            TARGET_SAMPLE_INTERVAL_MS
+            !occupantPresent
+            &&
+            electricalFilteredLoad[e] < 120.0f
         )
         {
-            return;
+            reading.electricalBaseline[e] =
+                (1.0f - BASELINE_DRIFT_ALPHA)
+                * reading.electricalBaseline[e]
+                +
+                BASELINE_DRIFT_ALPHA
+                * electricalRaw[e];
         }
-
-
-        frameInProgress =
-            true;
-
-
-        frameChannelIndex =
-            0;
-
-
-        reading.status =
-            FSRStatus::READING;
     }
 
+    float logicalRaw[FSR_COUNT] = {0};
+    float logicalBaseline[FSR_COUNT] = {0};
+    float logicalPressure[FSR_COUNT] = {0};
 
-    // --------------------------------------------------------
-    // READ ONLY ONE CHANNEL THIS CALL
-    //
-    // Main immediately returns to MPU afterward, preventing
-    // one complete FSR frame from monopolizing the loop.
-    // --------------------------------------------------------
+    mapElectricalToLogical(
+        reading.electricalRaw,
+        logicalRaw
+    );
 
-    pendingRaw[
-        frameChannelIndex
-    ] =
-        readOneSensor(
-            frameChannelIndex
-        );
+    mapElectricalToLogical(
+        reading.electricalBaseline,
+        logicalBaseline
+    );
 
+    mapElectricalToLogical(
+        electricalFilteredLoad,
+        logicalPressure
+    );
 
-    frameChannelIndex++;
-
-
-    if (
-        frameChannelIndex
-        <
-        NUM_FSR
-    )
+    for (int i = 0; i < FSR_COUNT; ++i)
     {
-        return;
+        reading.raw[i] = logicalRaw[i];
+        reading.baseline[i] = logicalBaseline[i];
+        reading.pressure[i] = logicalPressure[i];
+        reading.normalized[i] =
+            clamp01(logicalPressure[i] / COMMON_PRESSURE_SCALE);
     }
 
-
-    // --------------------------------------------------------
-    // FULL FRAME READY
-    // --------------------------------------------------------
-
-    frameInProgress =
-        false;
-
-
-    frameChannelIndex =
-        0;
-
-
-    completeScheduledFrame();
+    updateDerivedQuantities();
 }
 
 
-// ============================================================
-// GETTERS
-// ============================================================
+void FSRSensor::updateDerivedQuantities()
+{
+    reading.backrestLeftTotal =
+        reading.pressure[BACKREST_FSR1]
+        + reading.pressure[BACKREST_FSR2]
+        + reading.pressure[BACKREST_FSR3];
 
-const FSRReading&
-FSRSensor::getReading() const
+    reading.backrestRightTotal =
+        reading.pressure[BACKREST_FSR4]
+        + reading.pressure[BACKREST_FSR5]
+        + reading.pressure[BACKREST_FSR6];
+
+    reading.backrestTotal =
+        reading.backrestLeftTotal
+        + reading.backrestRightTotal;
+
+    reading.cushionLeft =
+        reading.pressure[CUSHION_FSR1];
+
+    reading.cushionCenter =
+        reading.pressure[CUSHION_FSR2];
+
+    reading.cushionRight =
+        reading.pressure[CUSHION_FSR3];
+
+    reading.cushionTotal =
+        reading.cushionLeft
+        + reading.cushionCenter
+        + reading.cushionRight;
+
+    reading.wholeSeatTotal =
+        reading.backrestTotal
+        + reading.cushionTotal;
+
+    reading.backrestLRBalance =
+        safeBalance(
+            reading.backrestLeftTotal,
+            reading.backrestRightTotal
+        );
+
+    reading.cushionLRBalance =
+        safeBalance(
+            reading.cushionLeft,
+            reading.cushionRight
+        );
+
+    reading.backrestToCushionRatio =
+        reading.backrestTotal
+        /
+        ((reading.cushionTotal > 1.0f)
+            ? reading.cushionTotal
+            : 1.0f);
+
+    reading.activeSensorCount = 0;
+
+    for (int i = 0; i < FSR_COUNT; ++i)
+    {
+        if (
+            reading.normalized[i]
+            >=
+            ACTIVE_NORMALIZED_THRESHOLD
+        )
+        {
+            reading.activeSensorCount++;
+        }
+    }
+
+    reading.occupiedByPressure =
+        reading.wholeSeatTotal >= OCCUPANCY_TOTAL_THRESHOLD
+        &&
+        reading.activeSensorCount >= OCCUPANCY_ACTIVE_SENSOR_MIN;
+
+    if (reading.wholeSeatTotal > 1.0f)
+    {
+        for (int i = 0; i < FSR_COUNT; ++i)
+        {
+            reading.modelShare[i] =
+                reading.pressure[i]
+                /
+                reading.wholeSeatTotal;
+        }
+    }
+    else
+    {
+        for (int i = 0; i < FSR_COUNT; ++i)
+        {
+            reading.modelShare[i] = 0.0f;
+        }
+    }
+}
+
+
+void FSRSensor::updateSamplingRate(unsigned long now)
+{
+    if (previousFrameMillis != 0UL)
+    {
+        const unsigned long dt =
+            now - previousFrameMillis;
+
+        if (dt > 0UL)
+        {
+            const float instantaneous =
+                1000.0f / static_cast<float>(dt);
+
+            if (reading.actualSamplingRateHz <= 0.0f)
+            {
+                reading.actualSamplingRateHz =
+                    instantaneous;
+            }
+            else
+            {
+                reading.actualSamplingRateHz =
+                    0.90f * reading.actualSamplingRateHz
+                    +
+                    0.10f * instantaneous;
+            }
+        }
+    }
+
+    previousFrameMillis = now;
+}
+
+
+bool FSRSensor::frameLooksSuddenlyZero(
+    const float electricalRaw[FSR_COUNT],
+    bool occupantPresent
+) const
+{
+    bool allADSNearZero = true;
+
+    for (int e = 0; e < 8; ++e)
+    {
+        if (fabsf(electricalRaw[e]) > 1.5f)
+        {
+            allADSNearZero = false;
+            break;
+        }
+    }
+
+    if (!allADSNearZero)
+    {
+        return false;
+    }
+
+    // A sudden full-ADS collapse is suspicious when either:
+    // 1) C1001 still says an occupant is present, or
+    // 2) the immediately previous pressure frame had meaningful load.
+    return occupantPresent || previousWholeSeatTotal > 1500.0f;
+}
+
+
+void FSRSensor::checkAndRecoverADS()
+{
+    const unsigned long now = millis();
+
+    if (
+        now - lastHealthCheckMillis
+        <
+        HEALTH_CHECK_INTERVAL_MS
+    )
+    {
+        return;
+    }
+
+    lastHealthCheckMillis = now;
+
+    const bool probe1 = i2cProbe(ADS1_ADDRESS);
+    const bool probe2 = i2cProbe(ADS2_ADDRESS);
+
+    reading.ads1Connected = probe1;
+    reading.ads2Connected = probe2;
+    reading.connected = probe1 && probe2;
+
+    if (probe1 && probe2)
+    {
+        if (
+            reading.status == FSRStatus::DEGRADED
+            ||
+            reading.status == FSRStatus::RECOVERING
+        )
+        {
+            setStatus(
+                baselineReady
+                    ? FSRStatus::READING
+                    : FSRStatus::CALIBRATION_FAILED
+            );
+        }
+
+        return;
+    }
+
+    if (
+        now - lastRecoveryAttemptMillis
+        <
+        RECOVERY_COOLDOWN_MS
+    )
+    {
+        return;
+    }
+
+    lastRecoveryAttemptMillis = now;
+    reading.maintenanceActive = true;
+    setStatus(FSRStatus::RECOVERING);
+
+    Serial.println();
+    Serial.println("[FSR-MAINT] ADS health fault detected.");
+
+    if (!probe1)
+    {
+        Serial.println("[FSR-MAINT] Reinitializing ADS1115 #1 (0x48)...");
+        reading.ads1Connected = initADS1();
+    }
+
+    if (!probe2)
+    {
+        Serial.println("[FSR-MAINT] Reinitializing ADS1115 #2 (0x49)...");
+        reading.ads2Connected = initADS2();
+    }
+
+    reading.connected =
+        reading.ads1Connected
+        &&
+        reading.ads2Connected;
+
+    if (reading.connected)
+    {
+        reading.recoveryCount++;
+        reading.maintenanceActive = false;
+
+        Serial.println(
+            "[FSR-MAINT] ADS communication recovered; preserving existing baseline."
+        );
+
+        setStatus(
+            baselineReady
+                ? FSRStatus::READING
+                : FSRStatus::CALIBRATION_FAILED
+        );
+    }
+    else
+    {
+        Serial.println(
+            "[FSR-MAINT] Recovery incomplete. Check ADS power, SDA/SCL, GND and jumpers."
+        );
+
+        setStatus(FSRStatus::DEGRADED);
+    }
+}
+
+
+void FSRSensor::update(bool occupantPresent)
+{
+    if (!initialized)
+    {
+        // begin() may have returned true intentionally so Main Hub continues
+        // calling us while one ADS device is temporarily unavailable.
+        checkAndRecoverADS();
+
+        initialized =
+            reading.ads1Connected
+            &&
+            reading.ads2Connected;
+
+        if (!initialized)
+        {
+            reading.valid = false;
+            return;
+        }
+
+        if (!baselineReady)
+        {
+            setStatus(FSRStatus::CALIBRATION_FAILED);
+            reading.valid = false;
+            return;
+        }
+    }
+
+    checkAndRecoverADS();
+
+    if (
+        !reading.ads1Connected
+        ||
+        !reading.ads2Connected
+    )
+    {
+        reading.valid = false;
+        setStatus(FSRStatus::DEGRADED);
+        return;
+    }
+
+    if (!baselineReady)
+    {
+        reading.valid = false;
+        setStatus(FSRStatus::CALIBRATION_FAILED);
+        return;
+    }
+
+    const unsigned long now = millis();
+
+    if (
+        now - reading.lastSampleMillis
+        <
+        SAMPLE_INTERVAL_MS
+    )
+    {
+        return;
+    }
+
+    float electrical[FSR_COUNT] = {0};
+
+    if (!acquireElectricalRaw(electrical))
+    {
+        reading.valid = false;
+        setStatus(FSRStatus::DEGRADED);
+        return;
+    }
+
+    if (frameLooksSuddenlyZero(electrical, occupantPresent))
+    {
+        suddenZeroStreak++;
+    }
+    else
+    {
+        suddenZeroStreak = 0;
+    }
+
+    // A short transient is ignored. Sustained all-zero collapse while an
+    // occupant/previous load is expected triggers an ADS reinitialization.
+    if (suddenZeroStreak >= 6)
+    {
+        Serial.println();
+        Serial.println(
+            "[FSR-MAINT] Sustained unexpected all-zero ADS frame detected."
+        );
+        Serial.println(
+            "[FSR-MAINT] Reinitializing both ADS1115 devices without erasing baseline."
+        );
+
+        setStatus(FSRStatus::RECOVERING);
+        reading.maintenanceActive = true;
+
+        const bool ok1 = initADS1();
+        const bool ok2 = initADS2();
+
+        reading.connected = ok1 && ok2;
+        reading.recoveryCount++;
+        reading.maintenanceActive = false;
+
+        suddenZeroStreak = 0;
+
+        if (!reading.connected)
+        {
+            setStatus(FSRStatus::DEGRADED);
+            reading.valid = false;
+            return;
+        }
+
+        setStatus(FSRStatus::READING);
+        return;
+    }
+
+    processFrame(electrical, occupantPresent);
+
+    reading.sampleCount++;
+    reading.lastSampleMillis = now;
+    reading.valid =
+        reading.connected
+        &&
+        baselineReady;
+
+    reading.baselineValid = baselineReady;
+
+    updateSamplingRate(now);
+
+    previousWholeSeatTotal =
+        reading.wholeSeatTotal;
+
+    if (reading.valid)
+    {
+        setStatus(FSRStatus::READING);
+    }
+}
+
+
+void FSRSensor::forceRecalibration()
+{
+    if (
+        !reading.ads1Connected
+        ||
+        !reading.ads2Connected
+    )
+    {
+        Serial.println(
+            "[FSR-MAINT] Cannot recalibrate: ADS1115 hardware is not fully connected."
+        );
+        return;
+    }
+
+    setStatus(FSRStatus::CALIBRATING);
+    reading.valid = false;
+    baselineReady = false;
+    reading.baselineValid = false;
+
+    baselineReady = calibrateEmptySeat();
+    reading.baselineValid = baselineReady;
+
+    if (baselineReady)
+    {
+        for (int i = 0; i < FSR_COUNT; ++i)
+        {
+            electricalFilteredLoad[i] = 0.0f;
+            reading.pressure[i] = 0.0f;
+            reading.normalized[i] = 0.0f;
+            reading.modelShare[i] = 0.0f;
+        }
+
+        previousWholeSeatTotal = 0.0f;
+        suddenZeroStreak = 0;
+        reading.valid = false;
+
+        setStatus(FSRStatus::READING);
+
+        Serial.println(
+            "[FSR-MAINT] Empty-seat recalibration completed successfully."
+        );
+    }
+    else
+    {
+        setStatus(FSRStatus::CALIBRATION_FAILED);
+        Serial.println(
+            "[FSR-MAINT] Recalibration rejected. Do not use this baseline."
+        );
+    }
+}
+
+
+const FSRReading& FSRSensor::getReading() const
 {
     return reading;
 }
@@ -1468,69 +908,176 @@ FSRSensor::getReading() const
 
 bool FSRSensor::hasValidReading() const
 {
-    return (
-        reading.connected
-        &&
-        reading.calibrated
-        &&
-        reading.valid
-    );
+    return reading.valid;
 }
 
 
-const char*
-FSRSensor::getSensorLabel(
-    int index
-) const
+void FSRSensor::setStatus(FSRStatus status)
 {
-    if (
-        index < 0
-        ||
-        index >= NUM_FSR
-    )
-    {
-        return "Unknown FSR";
-    }
-
-
-    return SENSOR_LABELS[
-        index
-    ];
+    reading.status = status;
 }
 
 
-// ============================================================
-// STATUS TEXT
-// ============================================================
-
-const char*
-FSRSensor::getStatusText() const
+const char* FSRSensor::getStatusText() const
 {
-    switch (
-        reading.status
-    )
+    switch (reading.status)
     {
-        case FSRStatus::DISCONNECTED:
-            return "DISCONNECTED";
-
+        case FSRStatus::UNINITIALIZED:
+            return "UNINITIALIZED";
 
         case FSRStatus::CALIBRATING:
             return "CALIBRATING";
 
-
-        case FSRStatus::READY:
-            return "READY";
-
-
         case FSRStatus::READING:
             return "READING";
 
+        case FSRStatus::DEGRADED:
+            return "DEGRADED";
 
-        case FSRStatus::INVALID_READING:
-            return "INVALID READING";
+        case FSRStatus::RECOVERING:
+            return "RECOVERING";
 
+        case FSRStatus::CALIBRATION_FAILED:
+            return "CALIBRATION FAILED";
 
         default:
             return "UNKNOWN";
     }
+}
+
+
+const char* FSRSensor::getSensorLabel(int logicalIndex) const
+{
+    switch (logicalIndex)
+    {
+        case BACKREST_FSR1:
+            return "BackLeftTop (FSR1 logical)";
+
+        case BACKREST_FSR2:
+            return "BackLeftMiddle (FSR2 logical)";
+
+        case BACKREST_FSR3:
+            return "BackLeftBottom (FSR3 logical)";
+
+        case BACKREST_FSR4:
+            return "BackRightTop (FSR4 logical)";
+
+        case BACKREST_FSR5:
+            return "BackRightMiddle (FSR5 logical)";
+
+        case BACKREST_FSR6:
+            return "BackRightBottom (FSR6 logical)";
+
+        case CUSHION_FSR1:
+            return "CushionLeft (FSR1)";
+
+        case CUSHION_FSR2:
+            return "CushionCenter (FSR2)";
+
+        case CUSHION_FSR3:
+            return "CushionRight (FSR3)";
+
+        default:
+            return "Unknown FSR";
+    }
+}
+
+
+const char* FSRSensor::getElectricalSource(int logicalIndex) const
+{
+    switch (logicalIndex)
+    {
+        case BACKREST_FSR1:
+            return "ADS1 A3 / electrical Backrest FSR4";
+
+        case BACKREST_FSR2:
+            return "ADS2 A0 / electrical Backrest FSR5";
+
+        case BACKREST_FSR3:
+            return "ADS2 A1 / electrical Backrest FSR6";
+
+        case BACKREST_FSR4:
+            return "ADS1 A0 / electrical Backrest FSR1";
+
+        case BACKREST_FSR5:
+            return "ADS1 A1 / electrical Backrest FSR2";
+
+        case BACKREST_FSR6:
+            return "ADS1 A2 / electrical Backrest FSR3";
+
+        case CUSHION_FSR1:
+            return "ADS2 A2";
+
+        case CUSHION_FSR2:
+            return "ADS2 A3";
+
+        case CUSHION_FSR3:
+            return "GPIO34";
+
+        default:
+            return "unknown";
+    }
+}
+
+
+void FSRSensor::printMaintenanceDiagnostics(Stream& out) const
+{
+    out.println();
+    out.println("========================================");
+    out.println(" SAFESEAT FSR MAINTENANCE DIAGNOSTICS");
+    out.println("========================================");
+
+    out.print("Status          : ");
+    out.println(getStatusText());
+
+    out.print("ADS1 0x48       : ");
+    out.println(reading.ads1Connected ? "OK" : "FAULT");
+
+    out.print("ADS2 0x49       : ");
+    out.println(reading.ads2Connected ? "OK" : "FAULT");
+
+    out.print("Baseline valid  : ");
+    out.println(reading.baselineValid ? "YES" : "NO");
+
+    out.print("Recovery count  : ");
+    out.println(reading.recoveryCount);
+
+    out.print("Actual Fs       : ");
+    out.println(reading.actualSamplingRateHz, 2);
+
+    out.println();
+    out.println("Logical/model channels:");
+
+    for (int i = 0; i < FSR_COUNT; ++i)
+    {
+        out.print("  ");
+        out.print(i + 1);
+        out.print(" | ");
+        out.print(getSensorLabel(i));
+        out.print(" | source=");
+        out.print(getElectricalSource(i));
+        out.print(" | raw=");
+        out.print(reading.raw[i], 1);
+        out.print(" | base=");
+        out.print(reading.baseline[i], 1);
+        out.print(" | pressure=");
+        out.print(reading.pressure[i], 1);
+        out.print(" | share=");
+        out.println(reading.modelShare[i], 5);
+    }
+
+    out.println();
+    out.println("Electrical raw channels:");
+
+    for (int e = 0; e < FSR_COUNT; ++e)
+    {
+        out.print("  E");
+        out.print(e);
+        out.print(" raw=");
+        out.print(reading.electricalRaw[e], 1);
+        out.print(" baseline=");
+        out.println(reading.electricalBaseline[e], 1);
+    }
+
+    out.println("========================================");
 }

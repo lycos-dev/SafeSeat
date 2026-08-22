@@ -436,41 +436,6 @@ String SafeSeatApi::buildSensorsJson() const
     appendModelEvidence(out, in.mpu.model);
     out += F(",\"fusion_role\":\"artifact_context\"}");
 
-    // --------------------------------------------------------
-    // Piezo - deterministic respiration support
-    // --------------------------------------------------------
-    out += F(",\"piezo\":{");
-    out += F("\"available\":");
-    appendJsonBool(out, in.piezo.available);
-    out += F(",\"connected\":");
-    appendJsonBool(out, in.piezo.connected);
-    out += F(",\"valid\":");
-    appendJsonBool(out, in.piezo.valid);
-    out += F(",\"signal_usable\":");
-    appendJsonBool(out, in.piezo.signalUsable);
-    out += F(",\"breath_tracking_ready\":");
-    appendJsonBool(out, in.piezo.breathTrackingReady);
-    out += F(",\"breath_detected_recently\":");
-    appendJsonBool(out, in.piezo.breathDetectedRecently);
-    out += F(",\"packet_age_ms\":");
-    out += String(s.piezoLink.packetAgeMillis);
-    out += F(",\"packets_received\":");
-    out += String(s.piezoLink.packetsReceived);
-    out += F(",\"sampling_rate_hz\":");
-    appendJsonFloat(out, s.piezoLink.remoteSamplingRateHz, 2);
-    out += F(",\"respiration_bpm\":");
-    appendJsonFloat(out, in.piezo.respirationBPM, 2);
-    out += F(",\"respiration_wave\":");
-    appendJsonFloat(out, in.piezo.respirationWave, 2);
-    out += F(",\"total_breath_events\":");
-    out += String(in.piezo.totalBreaths);
-    out += F(",\"no_breath_duration_ms\":");
-    out += String(in.piezo.noBreathDurationMs);
-    out += F(",\"no_breath_support_active\":");
-    appendJsonBool(out, in.piezo.noBreathTimerExceeded);
-    out += F(",\"deployment\":\"deterministic_no_ml\"");
-    out += F(",\"fusion_role\":\"secondary_respiration_corroboration\"}");
-
     return out;
 }
 

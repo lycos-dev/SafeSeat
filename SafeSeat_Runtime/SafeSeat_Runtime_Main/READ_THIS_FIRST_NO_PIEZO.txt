@@ -1,0 +1,11 @@
+SafeSeat Main Hub - CLEAN NO-PIEZO runtime
+===========================================
+
+Open ONLY:
+  SafeSeat_Runtime_Main_NO_PIEZO.ino
+
+Do not merge this folder into an older SafeSeat_Runtime_Main folder.
+Arduino compiles every .cpp file in the sketch folder, so stale PiezoComm.cpp/.h
+from an older version will cause compile errors even though Piezo was removed.
+
+This clean folder contains no PiezoComm, PiezoProtocol, Piezo Fusion, or Piezo telemetry code.

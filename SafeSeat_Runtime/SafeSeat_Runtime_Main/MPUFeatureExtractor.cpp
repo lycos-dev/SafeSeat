@@ -224,8 +224,8 @@ bool MPUFeatureExtractor::computeStats(
     SignalStats &output
 ) const
 {
-    float values[MPU_ML_WINDOW_SAMPLES];
-    float sorted[MPU_ML_WINDOW_SAMPLES];
+    static float values[MPU_ML_WINDOW_SAMPLES];
+    static float sorted[MPU_ML_WINDOW_SAMPLES];
 
     double sum = 0.0;
     double sumSquares = 0.0;
@@ -297,7 +297,7 @@ bool MPUFeatureExtractor::computeStats(
     output.iqr =
         output.q75 - output.q25;
 
-    float absoluteDeviations[MPU_ML_WINDOW_SAMPLES];
+    static float absoluteDeviations[MPU_ML_WINDOW_SAMPLES];
 
     for (uint16_t i = 0; i < MPU_ML_WINDOW_SAMPLES; i++)
     {
@@ -417,7 +417,7 @@ bool MPUFeatureExtractor::computeStats(
         double jerkSquareSum = 0.0;
         double jerkSum = 0.0;
         float jerkMaxAbs = 0.0f;
-        float jerkValues[MPU_ML_WINDOW_SAMPLES - 1];
+        static float jerkValues[MPU_ML_WINDOW_SAMPLES - 1];
 
         for (uint16_t i = 1; i < MPU_ML_WINDOW_SAMPLES; i++)
         {
@@ -505,7 +505,7 @@ bool MPUFeatureExtractor::extract(
     MPUFeatureVector &output
 ) const
 {
-    SignalStats stats[8];
+    static SignalStats stats[8];
 
     for (uint8_t signal = 0; signal < 8; signal++)
     {
@@ -525,12 +525,12 @@ bool MPUFeatureExtractor::extract(
         }
     }
 
-    float ax[MPU_ML_WINDOW_SAMPLES];
-    float ay[MPU_ML_WINDOW_SAMPLES];
-    float az[MPU_ML_WINDOW_SAMPLES];
-    float gx[MPU_ML_WINDOW_SAMPLES];
-    float gy[MPU_ML_WINDOW_SAMPLES];
-    float gz[MPU_ML_WINDOW_SAMPLES];
+    static float ax[MPU_ML_WINDOW_SAMPLES];
+    static float ay[MPU_ML_WINDOW_SAMPLES];
+    static float az[MPU_ML_WINDOW_SAMPLES];
+    static float gx[MPU_ML_WINDOW_SAMPLES];
+    static float gy[MPU_ML_WINDOW_SAMPLES];
+    static float gz[MPU_ML_WINDOW_SAMPLES];
 
     for (uint16_t i = 0; i < MPU_ML_WINDOW_SAMPLES; i++)
     {

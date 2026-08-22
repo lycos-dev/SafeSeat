@@ -249,7 +249,9 @@ bool MPUInference::predict(
     result =
         MPUInferenceResult{};
 
-    float scaled[MPU_MODEL_FEATURE_COUNT];
+    // 198 floats (~792 bytes) are kept out of loopTask stack.
+    // Main runs MPU inference serially, so this reusable buffer is safe.
+    static float scaled[MPU_MODEL_FEATURE_COUNT];
 
     if (
         !applyPreprocessor(

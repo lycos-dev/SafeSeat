@@ -1,0 +1,32 @@
+SAFESEAT MAIN HUB HOOK CHECK
+
+Your existing Main Hub should already do this:
+
+    FSRSensor fsr;
+
+setup():
+    fsrInitialized = fsr.begin();
+
+loop():
+    bool occupantPresent =
+        c1001Initialized
+        &&
+        c1001.getReading().present;
+
+    if (fsrInitialized)
+    {
+        fsr.update(occupantPresent);
+    }
+
+    const FSRReading &f = fsr.getReading();
+
+NO Main Hub .ino change is required if those calls already exist.
+
+Optional maintenance diagnostics:
+    fsr.printMaintenanceDiagnostics(Serial);
+
+Optional deliberate empty-seat recalibration:
+    fsr.forceRecalibration();
+
+Do not call forceRecalibration() while anyone is sitting on or leaning on
+the backrest/cushion.

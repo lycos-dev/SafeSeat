@@ -1,0 +1,44 @@
+{
+  "package": "SafeSeat_Runtime_Main FSR Update Overlay",
+  "date": "2026-08-21",
+  "replace": [
+    "SafeSeat_Runtime_Main/FSR.h",
+    "SafeSeat_Runtime_Main/FSR.cpp"
+  ],
+  "keep_existing": [
+    "SafeSeat_Runtime_Main.ino",
+    "Config.h",
+    "Fusion files",
+    "FSRML files / embedded trained model",
+    "MLX files",
+    "MPU files",
+    "C1001 link files",
+    "Camera link files",
+    "SafeSeat API / SoftAP / network files"
+  ],
+  "runtime_contract": {
+    "fsr_completed_frame_rate_hz_approx": 4.5,
+    "fsr_ml_window_frames": 23,
+    "fsr_ml_stride_frames": 5,
+    "representation": "9-sensor pressure shares"
+  },
+  "electrical_map": {
+    "ADS1_A0": "electrical Backrest FSR1",
+    "ADS1_A1": "electrical Backrest FSR2",
+    "ADS1_A2": "electrical Backrest FSR3",
+    "ADS1_A3": "electrical Backrest FSR4",
+    "ADS2_A0": "electrical Backrest FSR5",
+    "ADS2_A1": "electrical Backrest FSR6",
+    "ADS2_A2": "Cushion FSR1 / left",
+    "ADS2_A3": "Cushion FSR2 / center",
+    "GPIO34": "Cushion FSR3 / right"
+  },
+  "logical_backrest_correction": {
+    "logical_FSR1_left_top": "electrical FSR4 / ADS1 A3",
+    "logical_FSR2_left_middle": "electrical FSR5 / ADS2 A0",
+    "logical_FSR3_left_bottom": "electrical FSR6 / ADS2 A1",
+    "logical_FSR4_right_top": "electrical FSR1 / ADS1 A0",
+    "logical_FSR5_right_middle": "electrical FSR2 / ADS1 A1",
+    "logical_FSR6_right_bottom": "electrical FSR3 / ADS1 A2"
+  }
+}

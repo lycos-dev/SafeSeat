@@ -4,7 +4,6 @@
 #include <WiFi.h>
 #include <esp_now.h>
 
-#include "PiezoProtocol.h"
 #include "C1001Protocol.h"
 #include "CameraProtocol.h"
 #include "SafeSeatNowProtocol.h"
@@ -15,7 +14,6 @@ struct SafeSeatNowStatus
     uint8_t channel = 0;
     uint32_t hubBeaconsSent = 0;
     uint32_t hubBeaconSendErrors = 0;
-    uint32_t piezoPacketsQueued = 0;
     uint32_t c1001PacketsQueued = 0;
     uint32_t cameraStatusPacketsQueued = 0;
     uint32_t cameraResultPacketsQueued = 0;
@@ -32,10 +30,6 @@ public:
     bool begin();
     void update();
 
-    bool takeLatestPiezoPacket(
-        PiezoWirePacket &packet,
-        uint8_t sourceMac[6]
-    );
 
     bool takeLatestC1001Packet(
         C1001WirePacket &packet,
@@ -67,9 +61,6 @@ private:
     SafeSeatNowStatus status{};
     unsigned long lastBeaconMillis = 0;
 
-    volatile bool pendingPiezoReady = false;
-    PiezoWirePacket pendingPiezoPacket{};
-    uint8_t pendingPiezoMac[6]{};
 
     volatile bool pendingC1001Ready = false;
     C1001WirePacket pendingC1001Packet{};

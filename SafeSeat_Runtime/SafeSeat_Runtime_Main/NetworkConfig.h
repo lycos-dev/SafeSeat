@@ -9,7 +9,7 @@
 //
 // The Main Hub is the only SafeSeat device that creates the
 // user-facing local Wi-Fi network. The ESP32-S3 camera and phone
-// join this AP. C1001 and Piezo remain ESP-NOW sensor nodes.
+// join this AP. C1001 remains an ESP-NOW sensor node.
 //
 // IMPORTANT:
 // Wi-Fi and ESP-NOW share the same 2.4 GHz radio. Keep the AP on

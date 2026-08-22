@@ -301,21 +301,6 @@ void FusionEngine::update(
             input.mpu.health
         );
 
-    const bool piezoAvailable =
-        input.piezo.available;
-
-    const bool piezoConnected =
-        piezoAvailable
-        &&
-        input.piezo.connected;
-
-    const bool piezoUsable =
-        piezoConnected
-        &&
-        input.piezo.valid
-        &&
-        input.piezo.signalUsable;
-
 
     if (
         c1001Usable
@@ -365,16 +350,6 @@ void FusionEngine::update(
     }
 
 
-    if (
-        piezoUsable
-    )
-    {
-        reading.evidence.validSensorCount++;
-    }
-    else
-    {
-        reading.evidence.unavailableSensorCount++;
-    }
 
 
     // --------------------------------------------------------
@@ -924,44 +899,16 @@ void FusionEngine::update(
 
 
     // --------------------------------------------------------
-    // Respiration: C1001 primary + deterministic Piezo support
-    // STEP 5.9.8.2
+    // Respiration: C1001 only - FINAL ARCHITECTURE
     //
-    // Piezo no longer contributes IF/OCSVM model evidence.
-    // It is a secondary mechanical-respiration corroborator:
+    // C1001 is the final deployed respiration source available
+    // to Fusion.
     //
-    // - Piezo alone can NEVER create WARNING/EMERGENCY/camera.
-    // - A Piezo no-event support timer alone is context only.
-    // - If C1001 is already anomalous, an agreeing Piezo
-    //   no-event concern can add one corroborating anomaly vote.
-    // - Piezo never adds a strong anomaly vote by itself.
-    // - The support timer is only possible after the Piezo node
-    //   first establishes repeatable breath-event tracking.
-    // --------------------------------------------------------
-
-    const bool piezoTracking =
-        piezoUsable
-        &&
-        input.piezo.breathTrackingReady;
-
-    const bool piezoBreathingObserved =
-        piezoTracking
-        &&
-        input.piezo.breathDetectedRecently
-        &&
-        !input.piezo.noBreathTimerExceeded;
-
-    const bool piezoNoBreathConcern =
-        piezoTracking
-        &&
-        input.piezo.noBreathTimerExceeded;
-
-    bool piezoUncorroboratedConcern =
-        false;
-
-
-    // --------------------------------------------------------
-    // Human-readable respiration state
+    // The C1001 anomaly model is multivariate across HR, RR and
+    // their dynamics, so an anomalous model window cannot be
+    // attributed specifically to respiration. In that case the
+    // respiration state remains UNKNOWN rather than claiming a
+    // respiratory diagnosis.
     // --------------------------------------------------------
 
     if (
@@ -970,69 +917,15 @@ void FusionEngine::update(
         !c1001Usable
     )
     {
-        if (piezoNoBreathConcern)
-        {
-            // Piezo alone is not allowed to claim medical
-            // "no breath"; expose only an irregular/support state.
-            reading.respiration =
-                FusionRespirationState::IRREGULAR;
-        }
-        else if (piezoBreathingObserved)
-        {
-            reading.respiration =
-                FusionRespirationState::NORMAL;
-        }
-        else
-        {
-            reading.respiration =
-                FusionRespirationState::NOT_AVAILABLE;
-        }
+        reading.respiration =
+            FusionRespirationState::NOT_AVAILABLE;
     }
     else if (
         !input.c1001.reading.trustedVitalsAvailable
     )
     {
-        if (piezoNoBreathConcern)
-        {
-            reading.respiration =
-                FusionRespirationState::IRREGULAR;
-        }
-        else if (piezoBreathingObserved)
-        {
-            reading.respiration =
-                FusionRespirationState::NORMAL;
-        }
-        else
-        {
-            reading.respiration =
-                FusionRespirationState::UNKNOWN;
-        }
-    }
-    else if (
-        piezoNoBreathConcern
-        &&
-        (
-            c1001StrongAnomaly
-            ||
-            c1001WeakAnomaly
-        )
-    )
-    {
-        // Only the corroborated combination is represented as
-        // NO_BREATH in Fusion. This is still system evidence,
-        // not a medical diagnosis.
         reading.respiration =
-            FusionRespirationState::NO_BREATH;
-    }
-    else if (piezoNoBreathConcern)
-    {
-        reading.respiration =
-            FusionRespirationState::IRREGULAR;
-    }
-    else if (piezoBreathingObserved)
-    {
-        reading.respiration =
-            FusionRespirationState::NORMAL;
+            FusionRespirationState::UNKNOWN;
     }
     else if (
         c1001StrongAnomaly
@@ -1040,9 +933,6 @@ void FusionEngine::update(
         c1001WeakAnomaly
     )
     {
-        // C1001's multivariate model can be abnormal for HR,
-        // RR, or their dynamics, so without usable Piezo support
-        // do not over-attribute the anomaly specifically to RR.
         reading.respiration =
             FusionRespirationState::UNKNOWN;
     }
@@ -1050,42 +940,6 @@ void FusionEngine::update(
     {
         reading.respiration =
             FusionRespirationState::NORMAL;
-    }
-
-
-    // --------------------------------------------------------
-    // Evidence contribution
-    // --------------------------------------------------------
-
-    if (piezoBreathingObserved)
-    {
-        reading.evidence.normalEvidenceCount++;
-    }
-
-    if (piezoNoBreathConcern)
-    {
-        // Always record the deterministic Piezo timer as context.
-        // By itself this cannot become warningCandidate because it
-        // does not increment anomalyEvidenceCount.
-        reading.evidence.supportingContextCount++;
-
-        if (
-            c1001StrongAnomaly
-            ||
-            c1001WeakAnomaly
-        )
-        {
-            // Corroboration only: one non-strong anomaly vote.
-            // StrongAnomalyEvidenceCount is intentionally NOT
-            // incremented, so C1001+Piezo alone cannot satisfy
-            // the strong camera/emergency candidate rule.
-            reading.evidence.anomalyEvidenceCount++;
-        }
-        else
-        {
-            piezoUncorroboratedConcern =
-                true;
-        }
     }
 
 
@@ -1455,16 +1309,6 @@ void FusionEngine::update(
         // previous elevated state.
         effectiveLevel =
             previousLevel;
-    }
-    else if (
-        piezoUncorroboratedConcern
-    )
-    {
-        // Deterministic Piezo no-event concern without C1001 corroboration:
-        // remain at WATCH. Do not create WARNING, EMERGENCY,
-        // camera request, or alert from Piezo alone.
-        effectiveLevel =
-            FusionLevel::WATCH;
     }
     else if (
         reading.occupancy

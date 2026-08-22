@@ -76,7 +76,6 @@ bool SafeSeatNow::begin()
     status.initialized = true;
     status.channel = WiFi.channel();
     lastBeaconMillis = 0;
-    pendingPiezoReady = false;
     pendingC1001Ready = false;
     pendingCameraStatusReady = false;
     pendingCameraResultReady = false;
@@ -170,26 +169,6 @@ void SafeSeatNow::onReceive(
     uint16_t magic = 0;
     memcpy(&magic, data, sizeof(magic));
 
-    if (
-        magic == PIEZO_WIRE_MAGIC
-        && len == static_cast<int>(sizeof(PiezoWirePacket))
-    )
-    {
-        PiezoWirePacket packet;
-        memcpy(&packet, data, sizeof(packet));
-
-        if (
-            packet.version == PIEZO_WIRE_VERSION
-            && packet.packetSize == sizeof(PiezoWirePacket)
-        )
-        {
-            pendingPiezoPacket = packet;
-            memcpy(pendingPiezoMac, info->src_addr, 6);
-            pendingPiezoReady = true;
-            status.piezoPacketsQueued++;
-            return;
-        }
-    }
 
     if (
         magic == C1001_WIRE_MAGIC
@@ -258,21 +237,6 @@ void SafeSeatNow::onReceive(
     status.unknownPacketsIgnored++;
 }
 
-bool SafeSeatNow::takeLatestPiezoPacket(
-    PiezoWirePacket &packet,
-    uint8_t sourceMac[6]
-)
-{
-    if (!pendingPiezoReady)
-    {
-        return false;
-    }
-
-    packet = pendingPiezoPacket;
-    memcpy(sourceMac, pendingPiezoMac, 6);
-    pendingPiezoReady = false;
-    return true;
-}
 
 bool SafeSeatNow::takeLatestC1001Packet(
     C1001WirePacket &packet,

@@ -1,141 +1,139 @@
 #pragma once
 
 #include <Arduino.h>
+#include <Wire.h>
 #include <Adafruit_ADS1X15.h>
 
-
 // ============================================================
-// SAFESEAT FSR PHYSICAL LAYOUT
+// SAFESEAT FSR ARRAY
+// 2026-08-21 runtime-aligned revision
 //
-// BACKREST
+// Hardware:
+//   ADS1115 #1 0x48:
+//     A0 = electrical Backrest FSR1
+//     A1 = electrical Backrest FSR2
+//     A2 = electrical Backrest FSR3
+//     A3 = electrical Backrest FSR4
 //
-// FSR1        FSR4
-// FSR2        FSR5
-// FSR3        FSR6
+//   ADS1115 #2 0x49:
+//     A0 = electrical Backrest FSR5
+//     A1 = electrical Backrest FSR6
+//     A2 = Cushion FSR1
+//     A3 = Cushion FSR2
 //
-// CUSHION
+//   ESP32 GPIO34 = Cushion FSR3
 //
-// FSR1        FSR2        FSR3
+// IMPORTANT PHYSICAL-ORIENTATION CORRECTION:
+// Live validation on 2026-08-21 showed that the installed backrest
+// left/right orientation is mirrored relative to the earlier software
+// assumption. Electrical FSR4-FSR6 are occupant-left; electrical
+// FSR1-FSR3 are occupant-right.
 //
-// Mapping to the proven combined sketch:
+// Therefore reading.pressure[] is exposed in the LOGICAL / MODEL order:
+//   FSR1-FSR3 = physical LEFT top/middle/bottom
+//   FSR4-FSR6 = physical RIGHT top/middle/bottom
+// while electricalRaw[] preserves the actual ADC-channel identity.
 //
-// BACKREST_FSR1 = BackLeftTop
-// BACKREST_FSR2 = BackLeftMiddle
-// BACKREST_FSR3 = BackLeftBottom
-// BACKREST_FSR4 = BackRightTop
-// BACKREST_FSR5 = BackRightMiddle
-// BACKREST_FSR6 = BackRightBottom
-// CUSHION_FSR1  = CushionLeft
-// CUSHION_FSR2  = CushionCenter
-// CUSHION_FSR3  = CushionRight
+// This keeps the trained ChairPose/TDSD feature topology aligned without
+// changing the already-validated electrical wiring.
 // ============================================================
 
-enum FSRIndex
+enum FSRIndex : uint8_t
 {
-    BACKREST_FSR1 = 0,
-    BACKREST_FSR2 = 1,
-    BACKREST_FSR3 = 2,
-
-    BACKREST_FSR4 = 3,
-    BACKREST_FSR5 = 4,
-    BACKREST_FSR6 = 5,
-
-    CUSHION_FSR1 = 6,
-    CUSHION_FSR2 = 7,
-    CUSHION_FSR3 = 8
+    BACKREST_FSR1 = 0,  // logical physical LEFT top
+    BACKREST_FSR2 = 1,  // logical physical LEFT middle
+    BACKREST_FSR3 = 2,  // logical physical LEFT bottom
+    BACKREST_FSR4 = 3,  // logical physical RIGHT top
+    BACKREST_FSR5 = 4,  // logical physical RIGHT middle
+    BACKREST_FSR6 = 5,  // logical physical RIGHT bottom
+    CUSHION_FSR1  = 6,  // physical left
+    CUSHION_FSR2  = 7,  // physical center
+    CUSHION_FSR3  = 8,  // physical right
+    FSR_COUNT     = 9
 };
-
-
-constexpr int NUM_FSR = 9;
-
-
-// ============================================================
-// STATUS
-// ============================================================
 
 enum class FSRStatus
 {
-    DISCONNECTED,
+    UNINITIALIZED,
     CALIBRATING,
-    READY,
     READING,
-    INVALID_READING
+    DEGRADED,
+    RECOVERING,
+    CALIBRATION_FAILED
 };
-
-
-// ============================================================
-// READING
-// ============================================================
 
 struct FSRReading
 {
     bool connected = false;
-    bool calibrated = false;
     bool valid = false;
+    FSRStatus status = FSRStatus::UNINITIALIZED;
 
-    int16_t raw[NUM_FSR] = {0};
+    bool ads1Connected = false;
+    bool ads2Connected = false;
+    bool baselineValid = false;
+    bool maintenanceActive = false;
 
-    float filtered[NUM_FSR] = {0};
+    // Raw ADC readings in LOGICAL / MODEL order.
+    float raw[FSR_COUNT] = {0};
 
-    float baseline[NUM_FSR] = {0};
+    // Raw ADC baselines in LOGICAL / MODEL order.
+    float baseline[FSR_COUNT] = {0};
 
-    float pressure[NUM_FSR] = {0};
+    // Baseline-corrected, filtered, ADC-scale-normalized pressure.
+    //
+    // All channels are converted to one common 0..26000 pressure-unit
+    // scale before aggregation. This prevents GPIO34's 12-bit 0..4095
+    // range from being compared directly with ADS1115 raw magnitudes.
+    //
+    // This array is in the SAME logical order expected by SafeSeat's
+    // 6-backrest + 3-cushion ChairPose/TDSD runtime representation.
+    float pressure[FSR_COUNT] = {0};
 
+    // 0..1 normalized channel loading in logical/model order.
+    float normalized[FSR_COUNT] = {0};
 
-    // --------------------------------------------------------
-    // Group / distribution features
-    // --------------------------------------------------------
+    // Per-frame 9-sensor shares. Sum is 1.0 when loaded, otherwise 0.
+    // The deployed Step 5.5 FSR ML branch is share-based; absolute
+    // pressure magnitude is intentionally not a model input.
+    float modelShare[FSR_COUNT] = {0};
+
+    // Actual electrical-channel data, useful for maintenance.
+    //
+    // Indices:
+    // 0 ADS1 A0 = electrical FSR1
+    // 1 ADS1 A1 = electrical FSR2
+    // 2 ADS1 A2 = electrical FSR3
+    // 3 ADS1 A3 = electrical FSR4
+    // 4 ADS2 A0 = electrical FSR5
+    // 5 ADS2 A1 = electrical FSR6
+    // 6 ADS2 A2 = cushion FSR1
+    // 7 ADS2 A3 = cushion FSR2
+    // 8 GPIO34  = cushion FSR3
+    float electricalRaw[FSR_COUNT] = {0};
+    float electricalBaseline[FSR_COUNT] = {0};
 
     float backrestLeftTotal = 0.0f;
     float backrestRightTotal = 0.0f;
-
-    float backrestUpperTotal = 0.0f;
-    float backrestMiddleTotal = 0.0f;
-    float backrestLowerTotal = 0.0f;
+    float backrestTotal = 0.0f;
 
     float cushionLeft = 0.0f;
     float cushionCenter = 0.0f;
     float cushionRight = 0.0f;
-
-    float backrestTotal = 0.0f;
     float cushionTotal = 0.0f;
-    float wholeSeatTotal = 0.0f;
 
+    float wholeSeatTotal = 0.0f;
     float backrestLRBalance = 0.0f;
     float cushionLRBalance = 0.0f;
-    float cushionCenterRatio = 0.0f;
     float backrestToCushionRatio = 0.0f;
 
-    float pressureShare[NUM_FSR] = {0};
+    uint8_t activeSensorCount = 0;
+    bool occupiedByPressure = false;
 
-
-    // --------------------------------------------------------
-    // Old-prototype posture context
-    //
-    // These are retained as runtime diagnostics only.
-    // ML inference later uses the trained FSR feature pipeline.
-    // --------------------------------------------------------
-
-    bool occupied = false;
-    bool backContact = false;
-
-    float horizontalCOP = 0.0f;
-    float sideAsymmetry = 0.0f;
-
-    char datasetOrient = 'a';
-    char datasetLean = '-';
-
-
-    // --------------------------------------------------------
-    // Timing
-    // --------------------------------------------------------
-
+    uint32_t sampleCount = 0;
+    uint32_t recoveryCount = 0;
     unsigned long lastSampleMillis = 0;
     float actualSamplingRateHz = 0.0f;
-
-    FSRStatus status = FSRStatus::DISCONNECTED;
 };
-
 
 class FSRSensor
 {
@@ -144,146 +142,106 @@ public:
 
     bool begin();
 
-    /*
-     * occupantPresent is kept in the interface for Fusion-ready
-     * compatibility with Runtime_Main.
-     *
-     * Step 3 deliberately restores the old proven FSR baseline
-     * behavior internally; it does not use C1001 as a label.
-     */
-    void update(
-        bool occupantPresent
-    );
+    // API retained for compatibility with the earlier Main Hub:
+    // fsr.update(occupantPresent);
+    void update(bool occupantPresent);
 
     const FSRReading& getReading() const;
 
     bool hasValidReading() const;
-
     const char* getStatusText() const;
+    const char* getSensorLabel(int logicalIndex) const;
+    const char* getElectricalSource(int logicalIndex) const;
 
-    const char* getSensorLabel(
-        int index
-    ) const;
+    // Manual maintenance option if you intentionally want a fresh
+    // empty-seat baseline without reflashing.
+    void forceRecalibration();
 
+    // Prints raw electrical channels, baselines, normalized pressure,
+    // and ADS health. Safe to call from a temporary diagnostic path.
+    void printMaintenanceDiagnostics(Stream& out) const;
 
 private:
+    static constexpr uint8_t ADS1_ADDRESS = 0x48;
+    static constexpr uint8_t ADS2_ADDRESS = 0x49;
+    static constexpr uint8_t CUSHION_RIGHT_GPIO = 34;
+
+    // Preserve live Step 5.5 timing alignment:
+    // ~4.5 completed FSR frames per second.
+    static constexpr unsigned long SAMPLE_INTERVAL_MS = 220UL;
+
+    static constexpr unsigned long HEALTH_CHECK_INTERVAL_MS = 2000UL;
+    static constexpr unsigned long RECOVERY_COOLDOWN_MS = 2000UL;
+
+    static constexpr int CALIBRATION_SAMPLES = 30;
+    static constexpr unsigned long CALIBRATION_SETTLE_MS = 3000UL;
+
+    static constexpr float COMMON_PRESSURE_SCALE = 26000.0f;
+    static constexpr float ADS_EXPECTED_PRESS_MAX = 26000.0f;
+    static constexpr float GPIO_EXPECTED_PRESS_MAX = 4095.0f;
+
+    static constexpr float ADS_DEADBAND_RAW = 55.0f;
+    static constexpr float GPIO_DEADBAND_RAW = 18.0f;
+
+    static constexpr float FILTER_ALPHA = 0.35f;
+    static constexpr float BASELINE_DRIFT_ALPHA = 0.0007f;
+
+    static constexpr float ACTIVE_NORMALIZED_THRESHOLD = 0.025f;
+    static constexpr float OCCUPANCY_TOTAL_THRESHOLD = 1800.0f;
+    static constexpr uint8_t OCCUPANCY_ACTIVE_SENSOR_MIN = 2;
+
+    // An empty-seat baseline this close to ADC full pressure is suspicious.
+    static constexpr float SATURATED_BASELINE_FRACTION = 0.92f;
+
     Adafruit_ADS1115 ads1;
     Adafruit_ADS1115 ads2;
 
     FSRReading reading;
 
+    bool initialized = false;
+    bool baselineReady = false;
 
-    // ========================================================
-    // PROVEN HARDWARE / FILTER SETTINGS
-    // ========================================================
+    float electricalFilteredLoad[FSR_COUNT] = {0};
 
-    static constexpr int
-        MEDIAN_SAMPLES = 5;
+    unsigned long lastHealthCheckMillis = 0;
+    unsigned long lastRecoveryAttemptMillis = 0;
+    unsigned long previousFrameMillis = 0;
 
-    static constexpr int
-        CALIBRATION_ROUNDS = 20;
+    uint8_t suddenZeroStreak = 0;
+    float previousWholeSeatTotal = 0.0f;
 
-    static constexpr unsigned long
-        CALIBRATION_DELAY_MS = 3000UL;
-
-    static constexpr float
-        NOISE_MARGIN = 20.0f;
-
-    static constexpr float
-        BASELINE_ADAPT_ALPHA = 0.003f;
-
-
-    // Old prototype posture thresholds.
-    static constexpr float
-        CUSHION_OCCUPANCY_THRESHOLD = 900.0f;
-
-    static constexpr float
-        BACK_CONTACT_THRESHOLD = 800.0f;
-
-    static constexpr float
-        FORWARD_BACK_RATIO = 0.30f;
-
-    static constexpr float
-        BACKWARD_BACK_RATIO = 1.25f;
-
-    static constexpr float
-        LEAN_ASYMMETRY_THRESHOLD = 0.16f;
-
-
-    // ========================================================
-    // RUNTIME SAMPLE TIMING
-    //
-    // The frame scheduler becomes eligible to start a new frame
-    // after this interval, but one completed frame requires nine
-    // cooperative channel reads. On the proven combined runtime
-    // the effective completed-frame cadence is ~4.5 Hz.
-    //
-    // Step 5.5 retrains the FSR model to that observed cadence.
-    // ========================================================
-
-    static constexpr unsigned long
-        TARGET_SAMPLE_INTERVAL_MS = 80UL;
-
-    unsigned long previousCompletedSample = 0;
-
-
-    // ========================================================
-    // NON-BLOCKING FRAME SCHEDULER
-    //
-    // A full FSR frame contains 9 channels. Reading all nine
-    // channels in one update() call starved the high-rate MPU.
-    //
-    // Step 4.5 reads ONE FSR channel per update() invocation,
-    // allowing Main to run MPU updates between channels.
-    // ========================================================
-
-    bool frameInProgress = false;
-
-    uint8_t frameChannelIndex = 0;
-
-    int16_t pendingRaw[NUM_FSR] = {0};
-
-
-    static const char*
-        SENSOR_LABELS[NUM_FSR];
-
-
-    int16_t readMedianADS(
-        Adafruit_ADS1115& module,
-        uint8_t channel
-    );
-
-    int16_t readMedianNative(
-        uint8_t pin
-    );
-
-    void readAllSensors(
-        int16_t destination[]
-    );
-
-    int16_t readOneSensor(
-        uint8_t index
-    );
-
-    void completeScheduledFrame();
-
-    float applyAdaptiveFilter(
-        int16_t raw,
-        float previousFiltered
-    );
+    bool i2cProbe(uint8_t address);
+    bool initADS1();
+    bool initADS2();
+    void checkAndRecoverADS();
 
     bool calibrateEmptySeat();
+    bool calibrationLooksValid() const;
 
-    float calculatePressureDelta(
-        float filtered,
+    bool acquireElectricalRaw(float out[FSR_COUNT]);
+    void mapElectricalToLogical(
+        const float electrical[FSR_COUNT],
+        float logical[FSR_COUNT]
+    ) const;
+
+    float normalizeElectricalChannel(
+        uint8_t electricalIndex,
+        float raw,
         float baseline
+    ) const;
+
+    void processFrame(
+        const float electricalRaw[FSR_COUNT],
+        bool occupantPresent
     );
 
-    void calculatePressureFeatures();
+    void updateDerivedQuantities();
+    void updateSamplingRate(unsigned long now);
 
-    void calculatePressureShares();
+    bool frameLooksSuddenlyZero(
+        const float electricalRaw[FSR_COUNT],
+        bool occupantPresent
+    ) const;
 
-    void calculatePrototypePostureContext();
-
-    void updateEmptySeatBaseline();
+    void setStatus(FSRStatus status);
 };

@@ -97,21 +97,17 @@ constexpr unsigned long MAIN_PRINT_INTERVAL_MS = 1000UL;
 constexpr bool ENABLE_DEBUG_SERIAL = true;
 
 // ============================================================
-// SAFESEAT ESP-NOW REMOTE LINK - STEP 5.7.3
+// SAFESEAT ESP-NOW REMOTE LINK
 //
 // Main Hub broadcasts a small channel beacon and receives remote
-// Piezo + C1001 evidence wirelessly. No sensor-node UART or common-
-// ground communication wiring is required between those nodes and
-// the Main Hub.
+// C1001 evidence plus ESP32-S3 camera status/results wirelessly.
 //
-// Channel 6 is the local default before frontend Wi-Fi exists.
-// A later infrastructure Wi-Fi connection may move the Main Hub
-// to the AP's channel; the Piezo scanner follows the hub beacon.
+// Channel 6 is the SafeSeat local-network channel. Remote nodes
+// follow the Main Hub beacon and remain on that channel.
 // ============================================================
 
 constexpr uint8_t SAFESEAT_ESPNOW_DEFAULT_CHANNEL = 6;
 constexpr unsigned long SAFESEAT_ESPNOW_HUB_BEACON_INTERVAL_MS = 250UL;
-constexpr unsigned long PIEZO_COMM_FRESHNESS_TIMEOUT_MS = 2500UL;
 constexpr unsigned long C1001_COMM_FRESHNESS_TIMEOUT_MS = 2500UL;
 
 // ============================================================

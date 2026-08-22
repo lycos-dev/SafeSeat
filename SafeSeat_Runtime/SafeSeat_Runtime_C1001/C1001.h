@@ -199,6 +199,12 @@ private:
     static constexpr int
         STRONG_MOTION_RANGE = 30;
 
+    // Live validation 2026-08-22 showed isolated MoveRange spikes
+    // (30..100) while the participant was effectively stationary.
+    // Do not classify one radar spike as sustained strong motion.
+    static constexpr int
+        STRONG_MOTION_CONFIRM_SAMPLES = 2;
+
     static constexpr int
         RECOVERY_STABLE_SAMPLES = 5;
 
@@ -241,6 +247,11 @@ private:
     // ========================================================
 
     bool motionArtifactActive = false;
+
+    // Consecutive >= STRONG_MOTION_RANGE samples.
+    // One isolated spike does not activate the full motion-artifact
+    // state; two consecutive strong samples are required.
+    int strongMotionConfirmCount = 0;
 
     int stableRecoveryCount = 0;
 

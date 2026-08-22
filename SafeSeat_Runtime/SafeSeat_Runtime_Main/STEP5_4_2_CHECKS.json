@@ -1,9 +1,0 @@
-{
-  "feature_count_header": true,
-  "median_centering_embedded": true,
-  "mapping_last_feature_37": true,
-  "no_mapping_38_plus": true,
-  "warm_target_gate_preserved": true,
-  "if_match_all": true,
-  "svm_match_all": true
-}

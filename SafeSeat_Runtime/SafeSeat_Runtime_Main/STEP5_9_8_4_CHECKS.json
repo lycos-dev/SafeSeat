@@ -1,0 +1,15 @@
+{
+  "step": "5.9.8.4",
+  "main_piezo_cpp_h_files": "ABSENT",
+  "main_piezo_protocol": "ABSENT",
+  "main_piezo_fusion_input": "ABSENT",
+  "main_piezo_espnow_handler": "ABSENT",
+  "main_piezo_api_fields": "ABSENT",
+  "main_piezo_serial_dashboard": "ABSENT",
+  "c1001_protocol_main_vs_node": "IDENTICAL",
+  "camera_protocol_main_vs_node": "IDENTICAL",
+  "fusion_host_syntax_check": "PASS",
+  "safeseatnow_host_syntax_check": "PASS",
+  "telemetry_host_syntax_check": "PASS",
+  "arduino_verify_main": "PENDING_USER"
+}

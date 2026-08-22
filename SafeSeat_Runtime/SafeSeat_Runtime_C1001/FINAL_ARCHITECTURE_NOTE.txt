@@ -1,0 +1,8 @@
+SafeSeat Final Architecture Note
+================================
+
+This C1001 node remains part of the final deployed system.
+It performs local C1001 acquisition/filtering/model inference and sends
+evidence to the Main Hub over ESP-NOW.
+
+The removed PVDF/Piezo node is not required by this C1001 runtime.

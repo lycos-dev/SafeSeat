@@ -103,6 +103,8 @@ void loop()
     Serial.println(model.windowSamplesRequired);
     Serial.print("ML windows     : ");
     Serial.println(model.windowsEvaluated);
+    Serial.print("ML motion holds: ");
+    Serial.println(model.motionSamplesHeld);
 
     if (model.valid)
     {

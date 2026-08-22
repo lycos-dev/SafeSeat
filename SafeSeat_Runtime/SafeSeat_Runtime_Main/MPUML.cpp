@@ -380,13 +380,16 @@ void MPUML::copyOrderedWindow(
 
 void MPUML::runInference()
 {
-    MPUModelSample ordered[
+    // Large inference scratch buffers are static so they live in
+    // global/static RAM rather than the Arduino loopTask stack.
+    // MPU inference is single-threaded in Main, so reuse is safe.
+    static MPUModelSample ordered[
         MPU_ML_WINDOW_SAMPLES
     ];
 
-    copyOrderedWindow(ordered);
+    static MPUFeatureVector features;
 
-    MPUFeatureVector features;
+    copyOrderedWindow(ordered);
 
     if (
         !featureExtractor.extract(

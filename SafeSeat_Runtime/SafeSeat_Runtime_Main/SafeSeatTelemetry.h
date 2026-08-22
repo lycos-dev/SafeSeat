@@ -4,7 +4,6 @@
 
 #include "Fusion.h"
 #include "C1001Comm.h"
-#include "PiezoComm.h"
 #include "CameraComm.h"
 #include "SafeSeatAccessPoint.h"
 
@@ -25,7 +24,6 @@ struct SafeSeatTelemetrySnapshot
     FusionReading fusion{};
 
     C1001RemoteStatus c1001Link{};
-    PiezoRemoteStatus piezoLink{};
     CameraRemoteStatus cameraLink{};
     SafeSeatAccessPointStatus network{};
 };
@@ -37,7 +35,6 @@ public:
         const FusionInput &input,
         const FusionReading &fusionReading,
         const C1001RemoteStatus &c1001Status,
-        const PiezoRemoteStatus &piezoStatus,
         const CameraRemoteStatus &cameraStatus,
         const SafeSeatAccessPointStatus &networkStatus
     );

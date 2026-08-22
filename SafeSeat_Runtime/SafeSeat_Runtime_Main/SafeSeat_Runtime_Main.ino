@@ -13,7 +13,6 @@
 #include "MPU.h"
 #include "MPUML.h"
 #include "Fusion.h"
-#include "PiezoComm.h"
 #include "CameraComm.h"
 #include "SafeSeatAccessPoint.h"
 #include "NetworkConfig.h"
@@ -34,7 +33,6 @@ FSRML fsrML;
 MPUSensor mpu;
 MPUML mpuML;
 FusionEngine fusion;
-PiezoComm piezoComm;
 CameraComm cameraComm;
 SafeSeatAccessPoint safeSeatAccessPoint;
 SafeSeatTelemetry safeSeatTelemetry;
@@ -53,7 +51,6 @@ bool c1001CommInitialized = false;
 bool mlxInitialized = false;
 bool fsrInitialized = false;
 bool mpuInitialized = false;
-bool piezoCommInitialized = false;
 bool cameraCommInitialized = false;
 bool safeSeatAccessPointInitialized = false;
 bool safeSeatApiInitialized = false;
@@ -173,14 +170,6 @@ void printInitializationSummary()
         )
     );
 
-    Serial.print(
-        "PiezoLink: "
-    );
-    Serial.println(
-        readyText(
-            piezoCommInitialized
-        )
-    );
 
     Serial.print(
         "CameraLink: "
@@ -237,7 +226,7 @@ void setup()
     );
 
     Serial.println(
-        " Step 5.9.8.2 - Deterministic Piezo + API + SoftAP + ESP-NOW"
+        " Step 5.9.8.4 - Final sensor architecture + API + SoftAP + ESP-NOW"
     );
 
     Serial.println(
@@ -332,8 +321,8 @@ void setup()
     // SAFESEAT LOCAL WI-FI ACCESS POINT - STEP 5.9.6
     //
     // Main Hub is the only device that creates the SafeSeat AP.
-    // The ESP32-S3 camera and phone join this network. C1001 and
-    // Piezo continue to use ESP-NOW through the station interface.
+    // The ESP32-S3 camera and phone join this network. C1001
+    // continues to use ESP-NOW through the station interface.
     // Step 5.9.8 adds a read-only local telemetry/API layer on
     // top of this existing network.
     // ========================================================
@@ -501,29 +490,6 @@ void setup()
 
 
     // ========================================================
-    // PIEZO REMOTE ESP-NOW - STEP 5.9.8.2
-    //
-    // Wireless deterministic respiration support from the separate
-    // seatbelt ESP32. No Piezo ML model is deployed. No Piezo/Main
-    // signal wire or common-ground link is required.
-    // ========================================================
-
-    Serial.println();
-    Serial.println(
-        "[MAIN] Starting Piezo evidence link..."
-    );
-
-    piezoCommInitialized =
-        piezoComm.begin();
-
-    Serial.println(
-        piezoCommInitialized
-            ? "[MAIN] SafeSeat ESP-NOW ready; waiting for Piezo evidence."
-            : "[MAIN] WARNING: ESP-NOW initialization failed."
-    );
-
-
-    // ========================================================
     // ESP32-S3 CAMERA VERIFICATION LINK - STEP 5.9.5
     //
     // The camera is a separate ESP32-S3 WROOM camera node. It remains idle
@@ -602,12 +568,6 @@ void loop()
         c1001Comm.update();
     }
 
-    if (
-        piezoCommInitialized
-    )
-    {
-        piezoComm.update();
-    }
 
     if (
         cameraCommInitialized
@@ -857,11 +817,6 @@ void loop()
             ? 1.0f
             : 0.0f;
 
-    // Step 5.9.8.2 remote Piezo support. The separate Piezo ESP32
-    // performs 25 Hz deterministic signal processing and breath-event
-    // tracking. No IF/OCSVM is deployed on the Piezo node.
-    fusionInput.piezo =
-        piezoComm.getFusionEvidence();
 
     // Step 5.9.4 ESP32-CAM evidence. Camera output is verification
     // only: UPRIGHT can reject one persistent strong candidate;
@@ -899,7 +854,6 @@ void loop()
         fusionInput,
         fusionReading,
         c1001Comm.getStatus(),
-        piezoComm.getStatus(),
         cameraComm.getStatus(),
         safeSeatAccessPoint.getStatus()
     );
@@ -935,11 +889,6 @@ void loop()
         now;
 
 
-    const PiezoRemoteStatus &piezoStatus =
-        piezoComm.getStatus();
-
-    const PiezoFusionEvidence &piezoEvidence =
-        fusionInput.piezo;
 
     const CameraRemoteStatus &cameraStatus =
         cameraComm.getStatus();
@@ -2085,193 +2034,6 @@ void loop()
 
 
     // ========================================================
-    // PIEZO REMOTE - STEP 5.9.8.2
-    // ========================================================
-
-    Serial.println();
-    Serial.println(
-        "--------------- PIEZO --------------------"
-    );
-
-    Serial.print(
-        "Link init      : "
-    );
-    Serial.println(
-        readyText(
-            piezoCommInitialized
-        )
-    );
-
-    Serial.print(
-        "Connected      : "
-    );
-    Serial.println(
-        piezoStatus.connected
-            ? "YES"
-            : "NO / STALE"
-    );
-
-    Serial.print(
-        "Packets RX     : "
-    );
-    Serial.println(
-        piezoStatus.packetsReceived
-    );
-
-    Serial.print(
-        "Bad packets    : "
-    );
-    Serial.println(
-        piezoStatus.badPackets
-    );
-
-    const SafeSeatNowStatus &wirelessStatus =
-        piezoComm.getWirelessStatus();
-
-    Serial.print(
-        "Transport      : "
-    );
-    Serial.println(
-        "ESP-NOW"
-    );
-
-    Serial.print(
-        "Wi-Fi channel  : "
-    );
-    Serial.println(
-        wirelessStatus.channel
-    );
-
-    Serial.print(
-        "Hub beacons TX : "
-    );
-    Serial.println(
-        wirelessStatus.hubBeaconsSent
-    );
-
-    if (piezoStatus.connected)
-    {
-        Serial.print(
-            "Packet age     : "
-        );
-        Serial.print(
-            piezoStatus.packetAgeMillis
-        );
-        Serial.println(
-            " ms"
-        );
-
-        Serial.printf(
-            "Piezo MAC      : %02X:%02X:%02X:%02X:%02X:%02X\n",
-            piezoStatus.sourceMac[0],
-            piezoStatus.sourceMac[1],
-            piezoStatus.sourceMac[2],
-            piezoStatus.sourceMac[3],
-            piezoStatus.sourceMac[4],
-            piezoStatus.sourceMac[5]
-        );
-
-        Serial.print(
-            "Remote Fs      : "
-        );
-        Serial.print(
-            piezoStatus.remoteSamplingRateHz,
-            2
-        );
-        Serial.println(
-            " Hz"
-        );
-
-        Serial.print(
-            "Breath events  : "
-        );
-        Serial.println(
-            piezoStatus.remoteBreathCount
-        );
-
-        Serial.print(
-            "Signal usable  : "
-        );
-        Serial.println(
-            piezoEvidence.signalUsable
-                ? "YES"
-                : "STARTING / INVALID"
-        );
-
-        Serial.print(
-            "Tracking ready : "
-        );
-        Serial.println(
-            piezoEvidence.breathTrackingReady
-                ? "YES"
-                : "NO"
-        );
-
-        Serial.print(
-            "Respiration RR : "
-        );
-        if (
-            isfinite(
-                piezoEvidence.respirationBPM
-            )
-        )
-        {
-            Serial.print(
-                piezoEvidence.respirationBPM,
-                1
-            );
-            Serial.println(
-                " BPM"
-            );
-        }
-        else
-        {
-            Serial.println(
-                "not ready"
-            );
-        }
-
-        Serial.print(
-            "Resp waveform  : "
-        );
-        Serial.println(
-            piezoEvidence.respirationWave,
-            2
-        );
-
-        Serial.print(
-            "Last event age : "
-        );
-        Serial.print(
-            piezoEvidence.noBreathDurationMs
-            /
-            1000.0f,
-            1
-        );
-        Serial.println(
-            " sec"
-        );
-
-        Serial.print(
-            "No-breath support: "
-        );
-        Serial.println(
-            piezoEvidence.noBreathTimerExceeded
-                ? "ACTIVE (CORROBORATION ONLY)"
-                : "NO"
-        );
-
-        Serial.println(
-            "Model          : NOT DEPLOYED"
-        );
-
-        Serial.println(
-            "Fusion role    : deterministic respiration corroboration; never standalone emergency"
-        );
-    }
-
-
-    // ========================================================
     // FUSION
     // ========================================================
 
@@ -2440,20 +2202,17 @@ void loop()
         "------------------------------------------"
     );
 
+
     Serial.println(
-        "Piezo          : separate ESP32; ESP-NOW evidence link ACTIVE"
+        "ML inference   : C1001 REMOTE + FSR + MPU ACTIVE; MLX WESAD diagnostic-only"
     );
 
     Serial.println(
-        "ML inference   : C1001 REMOTE + FSR + MPU + Piezo ACTIVE; MLX WESAD diagnostic-only"
+        "Fusion         : active; C1001 + MLX context + FSR + MPU context + camera verification"
     );
 
     Serial.println(
-        "Fusion         : active; C1001 + MLX context + FSR + MPU context + Piezo + camera verification"
-    );
-
-    Serial.println(
-        "Camera         : ESP32-CAM INT8 verifier + ESP-NOW trigger/result ACTIVE"
+        "Camera         : ESP32-S3 INT8 verifier + ESP-NOW trigger/result ACTIVE"
     );
 
     Serial.println(

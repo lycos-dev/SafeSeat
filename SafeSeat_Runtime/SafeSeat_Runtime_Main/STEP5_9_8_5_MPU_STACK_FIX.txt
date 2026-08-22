@@ -1,0 +1,20 @@
+SafeSeat Main Step 5.9.8.5 - MPU loopTask stack hotfix
+=====================================================
+
+Observed failure:
+  Guru Meditation: Stack canary watchpoint triggered (loopTask)
+  occurring around the first 80-sample MPU ML inference.
+
+Fix:
+  Large MPU inference/feature-extraction scratch arrays were moved from
+  automatic local stack storage to static reusable storage. Mathematical
+  feature extraction, unit conversion, RobustScaler, IF, and OCSVM logic
+  are unchanged.
+
+FSR IMPORTANT:
+  FSR startup calibration is EMPTY-SEAT calibration. Do not sit on the
+  seat during boot/calibration. Wait for 'FSR baseline calibration complete'
+  before sitting down. If occupied during calibration, your seated load is
+  learned as the zero baseline and runtime pressure will appear near zero.
+
+No Piezo code is present.
