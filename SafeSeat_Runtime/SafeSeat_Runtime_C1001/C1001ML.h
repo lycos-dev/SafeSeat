@@ -17,7 +17,10 @@ enum class C1001MLStatus
     READY_NORMAL,
     READY_WEAK_ANOMALY,
     READY_STRONG_ANOMALY,
-    INFERENCE_ERROR
+    INFERENCE_ERROR,
+
+    // Appended to preserve existing status numeric values.
+    REACQUISITION_HOLD
 };
 
 struct C1001MLReading
@@ -41,6 +44,8 @@ struct C1001MLReading
     // motion context indicated a likely artifact. Holding a
     // sample does NOT erase the existing ML window.
     uint32_t motionSamplesHeld = 0;
+
+    uint32_t reacquisitionSamplesHeld = 0;
 
     uint32_t lastProcessedSampleSequence = 0;
 

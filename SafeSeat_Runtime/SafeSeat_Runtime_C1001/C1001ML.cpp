@@ -25,11 +25,19 @@ void C1001ML::begin()
     );
 
     Serial.println(
-        "[C1001-ML] Isolation Forest + One-Class SVM ready."
+        "[C1001-ML] Isolation Forest + tuned One-Class SVM ready."
+    );
+
+    Serial.println(
+        "[C1001-ML] Model source: 2026 60 GHz mmWave radar candidate."
     );
 
     Serial.println(
         "[C1001-ML] MoveRange is context only; motion samples are held, window preserved."
+    );
+
+    Serial.println(
+        "[C1001-ML] Post-motion target reacquisition gate active."
     );
 }
 
@@ -105,6 +113,9 @@ void C1001ML::resetWindow(
 
     reading.motionSamplesHeld =
         0;
+
+    reading.reacquisitionSamplesHeld =
+        0;
 }
 
 
@@ -122,7 +133,7 @@ void C1001ML::resetWindow(
 //   samples.
 // - Crucially, the existing 30-s ML window is PRESERVED.
 //
-// This protects the BIDMC-aligned HR/RR model from obvious radar
+// This protects the 60 GHz radar-domain HR/RR model from obvious radar
 // contamination without allowing one noisy movement estimate to
 // erase up to 29 seconds of valid physiology.
 // ============================================================
@@ -139,13 +150,23 @@ bool C1001ML::shouldHoldForMotion(
         ||
         sensorReading.motionArtifactActive
         ||
+        sensorReading.reacquisitionActive
+        ||
         sensorReading.status
         ==
         C1001Status::STRONG_MOTION
         ||
         sensorReading.status
         ==
-        C1001Status::MOTION_RECOVERY;
+        C1001Status::MOTION_RECOVERY
+        ||
+        sensorReading.status
+        ==
+        C1001Status::REACQUIRING_TARGET
+        ||
+        sensorReading.status
+        ==
+        C1001Status::REACQUIRING_REBASELINE;
 }
 
 
@@ -457,10 +478,28 @@ void C1001ML::update(
         reading.valid =
             false;
 
+        const bool reacquisitionHold =
+            sensorReading.reacquisitionActive
+            ||
+            sensorReading.status
+            ==
+            C1001Status::REACQUIRING_TARGET
+            ||
+            sensorReading.status
+            ==
+            C1001Status::REACQUIRING_REBASELINE;
+
         reading.status =
-            C1001MLStatus::MOTION_HOLD;
+            reacquisitionHold
+                ? C1001MLStatus::REACQUISITION_HOLD
+                : C1001MLStatus::MOTION_HOLD;
 
         reading.motionSamplesHeld++;
+
+        if (reacquisitionHold)
+        {
+            reading.reacquisitionSamplesHeld++;
+        }
 
         reading.windowSamplesCollected =
             windowCount;
@@ -492,8 +531,8 @@ void C1001ML::update(
         return;
     }
 
-    // Match the broad validity gate used to build the BIDMC
-    // C1001 training dataset. These limits are data-cleaning
+    // Match the broad validity gate used by the SafeSeat
+    // C1001 HR/RR model pipeline. These limits are data-cleaning
     // bounds, NOT medical emergency thresholds.
     const bool trainingValidHeartRate =
         sensorReading.rawHeartRate
@@ -626,6 +665,9 @@ C1001ML::getStatusText() const
 
         case C1001MLStatus::INFERENCE_ERROR:
             return "INFERENCE ERROR";
+
+        case C1001MLStatus::REACQUISITION_HOLD:
+            return "HOLD - TARGET REACQUISITION (WINDOW PRESERVED)";
 
         default:
             return "UNKNOWN";

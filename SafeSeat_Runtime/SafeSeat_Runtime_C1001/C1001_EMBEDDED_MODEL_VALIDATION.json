@@ -1,42 +1,62 @@
 {
-  "pipeline": "SafeSeat C1001 embedded model",
-  "source_manifest": {
-    "sampling_rate_hz": 1.0,
-    "window_seconds": 30,
-    "window_overlap": 0.5,
-    "stride_samples": 15,
-    "feature_count": 64
+  "package_date": "2026-08-22",
+  "candidate": "C1001_MMwave_2026_candidate",
+  "feature_count": 64,
+  "feature_order_exact_match_with_existing_runtime": true,
+  "saved_candidate_combined_verification": {
+    "held_out_healthy_windows": 19,
+    "isolation_forest_normal": 19,
+    "isolation_forest_anomaly": 0,
+    "isolation_forest_anomaly_percent": 0.0,
+    "one_class_svm_normal": 19,
+    "one_class_svm_anomaly": 0,
+    "one_class_svm_anomaly_percent": 0.0,
+    "both_models_normal": 19,
+    "model_agreement_percent": 100.0,
+    "if_score_min": 0.028010014558856766,
+    "if_score_median": 0.12612934278503596,
+    "if_score_max": 0.18087030986198344,
+    "svm_score_min": 0.001770122368779381,
+    "svm_score_median": 0.00459317987338248,
+    "svm_score_max": 0.011317049694484771
   },
-  "embedded_model": {
-    "isolation_forest_tree_count": 300,
-    "isolation_forest_total_nodes": 33900,
-    "isolation_forest_max_samples": 256,
-    "one_class_svm_support_vectors": 85,
-    "one_class_svm_gamma": 0.0025194258015908567
+  "embedded_float32_parity": {
+    "isolation_forest_max_abs_decision_error": 1.110498060175047e-08,
+    "one_class_svm_max_abs_decision_error": 2.889741529399359e-08,
+    "isolation_forest_prediction_match_percent": 100.0,
+    "one_class_svm_prediction_match_percent": 100.0
   },
-  "feature_extractor_validation": {
-    "windows_tested": 100,
-    "max_absolute_feature_error": 3.7186461554483685e-06,
-    "mean_absolute_feature_error": 8.007973848446362e-08,
-    "values_over_1e-4_error": 0
+  "old_false_anomaly_live_window_replay": {
+    "source": "2026-08-22 live C1001 log; exact 30 raw HR/RR samples that old BIDMC model classified STRONG ANOMALY",
+    "python_sklearn_if_decision": 0.13689724846046758,
+    "python_sklearn_svm_decision": 0.004672538994914932,
+    "embedded_float32_if_decision": 0.13689725956544818,
+    "embedded_float32_svm_decision": 0.004672567535700334,
+    "isolation_forest_prediction": "NORMAL",
+    "one_class_svm_prediction": "NORMAL",
+    "combined_expected_status": "READY - NORMAL"
   },
-  "model_inference_validation": {
-    "test_feature_rows": 327,
-    "isolation_forest_max_abs_decision_error": 3.2412837192019595e-08,
-    "isolation_forest_prediction_match_rate": 1.0,
-    "one_class_svm_max_abs_decision_error": 9.254278472425881e-07,
-    "one_class_svm_prediction_match_rate": 1.0
+  "model_structure": {
+    "isolation_forest_trees": 300,
+    "isolation_forest_nodes": 19118,
+    "isolation_forest_max_samples": 75,
+    "isolation_forest_offset": -0.5829769372940063,
+    "ocsvm_support_vectors": 4,
+    "ocsvm_gamma": 9.999999747378752e-05,
+    "ocsvm_intercept": -0.7207266092300415,
+    "ocsvm_nu": 0.01
   },
-  "end_to_end_raw_window_validation": {
-    "full_raw_windows_tested": 316,
-    "isolation_forest_max_abs_decision_error": 3.2412837192019595e-08,
-    "isolation_forest_prediction_match_rate": 1.0,
-    "one_class_svm_max_abs_decision_error": 9.254278472425881e-07,
-    "one_class_svm_prediction_match_rate": 1.0
-  },
-  "notes": [
-    "C++ feature extraction was compared against saved Python-generated C1001 feature rows.",
-    "C++ model decisions were compared against the original sklearn joblib models.",
-    "Runtime starts model collection only after C1001 warm-up and resets the model window on motion artifacts or invalid samples."
-  ]
+  "interpretation": "This verifies normal-reference acceptance and Python-to-embedded numerical parity. It is not emergency-detection accuracy and does not replace physical C1001 live validation.",
+  "cpp_end_to_end_live_window": {
+    "compile": "PASS",
+    "run": "PASS",
+    "output": "IF=0.136897251 SVM=0.004672567 IF_A=0 SVM_A=0 BOTH=0",
+    "isolation_forest_decision": 0.136897251,
+    "one_class_svm_decision": 0.004672567,
+    "isolation_forest_prediction": "NORMAL",
+    "one_class_svm_prediction": "NORMAL",
+    "both_models_anomaly": false,
+    "abs_error_vs_python_embedded_if": 8.565448184061353e-09,
+    "abs_error_vs_python_embedded_svm": 5.357003339187538e-10
+  }
 }

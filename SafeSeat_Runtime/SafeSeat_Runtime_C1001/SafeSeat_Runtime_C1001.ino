@@ -80,6 +80,24 @@ void loop()
     Serial.print(" / ");
     Serial.println(reading.rawHeartRate);
 
+    Serial.print("Reacquisition  : ");
+    if (reading.reacquisitionActive)
+    {
+        Serial.print(
+            reading.reacquisitionRebaseline
+                ? "REBASELINE "
+                : "ACTIVE "
+        );
+        Serial.print(reading.reacquisitionStableCount);
+        Serial.print(" / 5 stable, age ");
+        Serial.print(reading.reacquisitionElapsedSamples);
+        Serial.println(" s");
+    }
+    else
+    {
+        Serial.println("IDLE");
+    }
+
     if (reading.trustedVitalsAvailable)
     {
         Serial.print("Filtered RR    : ");
@@ -105,6 +123,8 @@ void loop()
     Serial.println(model.windowsEvaluated);
     Serial.print("ML motion holds: ");
     Serial.println(model.motionSamplesHeld);
+    Serial.print("ML reacq holds : ");
+    Serial.println(model.reacquisitionSamplesHeld);
 
     if (model.valid)
     {

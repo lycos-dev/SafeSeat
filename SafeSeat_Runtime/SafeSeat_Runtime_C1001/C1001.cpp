@@ -250,6 +250,28 @@ void C1001Sensor::resetAllFilters()
     stableRecoveryCount = 0;
 
 
+    reacquisitionActive = false;
+
+    reacquisitionRebaseline = false;
+
+    reacquisitionStableCount = 0;
+
+    reacquisitionElapsedSamples = 0;
+
+    reacquisitionBaselineRR = 0;
+
+    reacquisitionBaselineHR = 0;
+
+
+    reading.reacquisitionActive = false;
+
+    reading.reacquisitionRebaseline = false;
+
+    reading.reacquisitionStableCount = 0;
+
+    reading.reacquisitionElapsedSamples = 0;
+
+
     reading.filteredRespiration =
         NAN;
 
@@ -456,6 +478,306 @@ bool C1001Sensor::confirmLargeChange(
         candidateCount >=
         CHANGE_CONFIRMATION_COUNT
     );
+}
+
+
+// ============================================================
+// POST-MOTION / TARGET REACQUISITION
+// ============================================================
+
+void C1001Sensor::beginReacquisition()
+{
+    // Do not overwrite the original pre-disturbance baseline if a
+    // second strong MoveRange sample arrives while already holding.
+    if (!reacquisitionActive)
+    {
+        reacquisitionBaselineRR =
+            filterInitialized
+                ? acceptedRR
+                : reading.rawRespiration;
+
+        reacquisitionBaselineHR =
+            filterInitialized
+                ? acceptedHR
+                : reading.rawHeartRate;
+    }
+
+    reacquisitionActive = true;
+
+    // If no trusted filter baseline exists yet, skip the fast
+    // return-to-baseline phase and rebuild from five clean samples.
+    reacquisitionRebaseline =
+        !filterInitialized;
+
+    reacquisitionStableCount = 0;
+    reacquisitionElapsedSamples = 0;
+
+    // Samples collected before the disturbance must not be mixed
+    // with post-disturbance radar estimates in the median filter.
+    // The last accepted/filtered values themselves are preserved.
+    clearMedianBuffers();
+
+    reading.reacquisitionActive = true;
+    reading.reacquisitionRebaseline =
+        reacquisitionRebaseline;
+    reading.reacquisitionStableCount = 0;
+    reading.reacquisitionElapsedSamples = 0;
+}
+
+
+void C1001Sensor::finishReacquisition()
+{
+    reacquisitionActive = false;
+    reacquisitionRebaseline = false;
+    reacquisitionStableCount = 0;
+    reacquisitionElapsedSamples = 0;
+
+    motionArtifactActive = false;
+    strongMotionConfirmCount = 0;
+    stableRecoveryCount = 0;
+
+    rrCandidateCount = 0;
+    hrCandidateCount = 0;
+
+    reading.reacquisitionActive = false;
+    reading.reacquisitionRebaseline = false;
+    reading.reacquisitionStableCount = 0;
+    reading.reacquisitionElapsedSamples = 0;
+    reading.motionArtifactActive = false;
+    reading.recoveryStableCount = 0;
+}
+
+
+bool C1001Sensor::processReacquisitionSample(
+    int rawRR,
+    int rawHR,
+    int moveRange
+)
+{
+    if (!reacquisitionActive)
+    {
+        return false;
+    }
+
+    // Every post-disturbance sample is quarantined here. C1001ML
+    // sees reacquisitionActive and therefore preserves its existing
+    // 30-second window without ingesting this raw HR/RR pair.
+    reading.reacquisitionActive = true;
+    reading.motionArtifactActive = true;
+
+    if (
+        reacquisitionElapsedSamples
+        <
+        REACQ_MAX_HOLD_SAMPLES
+    )
+    {
+        reacquisitionElapsedSamples++;
+    }
+
+    reading.reacquisitionElapsedSamples =
+        reacquisitionElapsedSamples;
+
+    const bool lowMotion =
+        moveRange >= 0
+        &&
+        moveRange < MODERATE_MOTION_RANGE;
+
+    const bool validPair =
+        isValidRespiration(rawRR)
+        &&
+        isValidHeartRate(rawHR);
+
+    // --------------------------------------------------------
+    // PHASE 1: FAST RETURN TO PRE-MOTION BASELINE
+    // --------------------------------------------------------
+
+    if (!reacquisitionRebaseline)
+    {
+        const bool rrNearBaseline =
+            validPair
+            &&
+            abs(
+                rawRR
+                -
+                reacquisitionBaselineRR
+            )
+            <=
+            REACQ_RR_BASELINE_TOLERANCE;
+
+        const bool hrNearBaseline =
+            validPair
+            &&
+            abs(
+                rawHR
+                -
+                reacquisitionBaselineHR
+            )
+            <=
+            REACQ_HR_BASELINE_TOLERANCE;
+
+        if (
+            lowMotion
+            &&
+            rrNearBaseline
+            &&
+            hrNearBaseline
+        )
+        {
+            reacquisitionStableCount++;
+        }
+        else
+        {
+            reacquisitionStableCount = 0;
+        }
+
+        reading.reacquisitionStableCount =
+            reacquisitionStableCount;
+
+        if (
+            reacquisitionStableCount
+            >=
+            REACQ_STABLE_SAMPLES
+        )
+        {
+            finishReacquisition();
+
+            // Start a clean post-reacquisition median buffer while
+            // keeping the pre-motion accepted/EMA values. The current
+            // sample is certified baseline-compatible and may resume ML.
+            processVitalSigns(
+                rawRR,
+                rawHR
+            );
+
+            return true;
+        }
+
+        // If the radar has not returned near the old baseline for a
+        // full 30 seconds, do not hold forever. Switch to a controlled
+        // new-baseline rebuild. ML remains held during that rebuild.
+        if (
+            reacquisitionElapsedSamples
+            >=
+            REACQ_MAX_HOLD_SAMPLES
+        )
+        {
+            reacquisitionRebaseline = true;
+            reacquisitionStableCount = 0;
+
+            clearMedianBuffers();
+
+            reading.reacquisitionRebaseline = true;
+            reading.reacquisitionStableCount = 0;
+            reading.status =
+                C1001Status::REACQUIRING_REBASELINE;
+
+            return true;
+        }
+
+        reading.status =
+            C1001Status::REACQUIRING_TARGET;
+
+        return true;
+    }
+
+    // --------------------------------------------------------
+    // PHASE 2: CONTROLLED NEW-BASELINE REBUILD
+    // --------------------------------------------------------
+    // This phase exists so a genuine, lasting physiological shift
+    // after motion is not suppressed indefinitely. It requires five
+    // consecutive valid, low-motion readings. They are used only to
+    // build a fresh median baseline; none are fed to ML while the
+    // quarantine is active.
+
+    if (
+        !lowMotion
+        ||
+        !validPair
+    )
+    {
+        clearMedianBuffers();
+
+        reacquisitionStableCount = 0;
+
+        reading.reacquisitionStableCount = 0;
+        reading.status =
+            C1001Status::REACQUIRING_REBASELINE;
+
+        return true;
+    }
+
+    addToMedianBuffers(
+        rawRR,
+        rawHR
+    );
+
+    reacquisitionStableCount =
+        bufferCount;
+
+    reading.reacquisitionStableCount =
+        reacquisitionStableCount;
+
+    if (
+        bufferCount
+        <
+        MEDIAN_WINDOW
+    )
+    {
+        reading.status =
+            C1001Status::REACQUIRING_REBASELINE;
+
+        return true;
+    }
+
+    const int newMedianRR =
+        calculateMedian(
+            rrBuffer,
+            bufferCount
+        );
+
+    const int newMedianHR =
+        calculateMedian(
+            hrBuffer,
+            bufferCount
+        );
+
+    acceptedRR = newMedianRR;
+    acceptedHR = newMedianHR;
+
+    filteredRR =
+        static_cast<float>(
+            newMedianRR
+        );
+
+    filteredHR =
+        static_cast<float>(
+            newMedianHR
+        );
+
+    filterInitialized = true;
+
+    reading.medianRespiration =
+        newMedianRR;
+
+    reading.medianHeartRate =
+        newMedianHR;
+
+    reading.filteredRespiration =
+        filteredRR;
+
+    reading.filteredHeartRate =
+        filteredHR;
+
+    reading.trustedVitalsAvailable =
+        true;
+
+    clearMedianBuffers();
+    finishReacquisition();
+
+    reading.status =
+        C1001Status::FILTER_INITIALIZED;
+
+    return true;
 }
 
 
@@ -974,47 +1296,16 @@ void C1001Sensor::update()
 
 
     // --------------------------------------------------------
-    // Validate RR / HR
-    // --------------------------------------------------------
-
-    if (!reading.validPair)
-    {
-        reading.status =
-            C1001Status::
-                INVALID_VITALS;
-
-
-        return;
-    }
-
-
-    // --------------------------------------------------------
-    // Motion context / artifact handling
+    // Motion context / post-motion target reacquisition
     //
-    // Live C1001 validation (2026-08-22) showed that MoveRange
-    // can produce isolated high spikes even when the participant
-    // is effectively stationary. MoveRange is therefore treated
-    // as radar QUALITY/CONTEXT, not as a direct ML feature.
-    //
-    // Policy:
-    // - Moderate 15..29: keep collecting HR/RR.
-    // - First isolated strong sample >=30: hold this sensor-filter
-    //   sample only; do NOT enter full recovery.
-    // - Two consecutive strong samples >=30: confirm sustained
-    //   strong motion and enter the existing recovery state.
-    //
-    // The C1001ML layer has an additional protection: motion-held
-    // samples preserve the existing ML window instead of erasing it.
+    // Detect strong radar disturbance BEFORE validating HR/RR. A
+    // strong obstruction can make the vital outputs invalid in the
+    // very same sample; that still must start the quarantine.
     // --------------------------------------------------------
 
     const bool strongMotionSample =
         moveRange >=
         STRONG_MOTION_RANGE;
-
-    const bool lowMotion =
-        moveRange <
-        MODERATE_MOTION_RANGE;
-
 
     if (strongMotionSample)
     {
@@ -1026,150 +1317,123 @@ void C1001Sensor::update()
         {
             strongMotionConfirmCount++;
         }
-    }
-    else
-    {
-        strongMotionConfirmCount =
-            0;
-    }
 
+        const bool confirmedStrongMotion =
+            strongMotionConfirmCount
+            >=
+            STRONG_MOTION_CONFIRM_SAMPLES;
 
-    const bool confirmedStrongMotion =
-        strongMotionConfirmCount
-        >=
-        STRONG_MOTION_CONFIRM_SAMPLES;
+        beginReacquisition();
 
-
-    // --------------------------------------------------------
-    // CONFIRMED SUSTAINED STRONG MOTION
-    // --------------------------------------------------------
-
-    if (confirmedStrongMotion)
-    {
-        motionArtifactActive =
-            true;
-
-        stableRecoveryCount =
-            0;
-
-        rrCandidateCount =
-            0;
-
-        hrCandidateCount =
-            0;
-
-        reading.motionArtifactActive =
-            true;
-
-        reading.recoveryStableCount =
-            0;
-
-        reading.status =
-            C1001Status::
-                STRONG_MOTION;
-
-        return;
-    }
-
-
-    // --------------------------------------------------------
-    // ISOLATED STRONG RADAR SPIKE
-    //
-    // Hold this one filtered-sensor sample, but do not activate
-    // the full motion-artifact/recovery state. The ML layer will
-    // independently hold the same sample while preserving its
-    // already-collected HR/RR window.
-    // --------------------------------------------------------
-
-    if (
-        strongMotionSample
-        &&
-        !motionArtifactActive
-    )
-    {
-        reading.motionArtifactActive =
-            false;
-
-        reading.recoveryStableCount =
-            0;
-
-        reading.status =
-            C1001Status::
-                HOLDING_LAST_VALUE;
-
-        return;
-    }
-
-
-    // --------------------------------------------------------
-    // RECOVERY AFTER *CONFIRMED* SUSTAINED MOTION
-    // --------------------------------------------------------
-
-    if (motionArtifactActive)
-    {
-        if (lowMotion)
+        if (confirmedStrongMotion)
         {
-            stableRecoveryCount++;
+            motionArtifactActive = true;
 
-            reading.recoveryStableCount =
-                stableRecoveryCount;
-
-            if (
-                stableRecoveryCount >=
-                RECOVERY_STABLE_SAMPLES
-            )
-            {
-                motionArtifactActive =
-                    false;
-
-                strongMotionConfirmCount =
-                    0;
-
-                stableRecoveryCount =
-                    0;
-
-                reading.motionArtifactActive =
-                    false;
-
-                reading.recoveryStableCount =
-                    0;
-
-                clearMedianBuffers();
-
-                reading.status =
-                    C1001Status::
-                        COLLECTING_FILTER_SAMPLES;
-
-                return;
-            }
+            reading.status =
+                C1001Status::STRONG_MOTION;
         }
         else
         {
-            stableRecoveryCount =
-                0;
-
-            reading.recoveryStableCount =
-                0;
+            reading.status =
+                C1001Status::REACQUIRING_TARGET;
         }
 
-        reading.motionArtifactActive =
-            true;
-
-        reading.status =
-            C1001Status::
-                MOTION_RECOVERY;
+        reading.motionArtifactActive = true;
 
         return;
     }
 
+    // --------------------------------------------------------
+    // Validate RR / HR
+    // --------------------------------------------------------
 
-    // --------------------------------------------------------
-    // MODERATE MOTION
-    //
-    // Do NOT reject the physiological sample solely because
-    // MoveRange is 15..29. The raw MoveRange is still retained
-    // for diagnostics and later MPU/fusion context.
-    // --------------------------------------------------------
+    if (!reading.validPair)
+    {
+        if (reacquisitionActive)
+        {
+            // Invalid HR/RR during post-motion recovery is a quality
+            // hold, not a reason to destroy the existing ML window.
+            reading.reacquisitionActive = true;
+            reading.motionArtifactActive = true;
+            reading.reacquisitionStableCount = 0;
+
+            if (
+                reacquisitionElapsedSamples
+                <
+                REACQ_MAX_HOLD_SAMPLES
+            )
+            {
+                reacquisitionElapsedSamples++;
+            }
+
+            reading.reacquisitionElapsedSamples =
+                reacquisitionElapsedSamples;
+
+            if (reacquisitionRebaseline)
+            {
+                // Rebaseline requires consecutive clean samples.
+                clearMedianBuffers();
+                reacquisitionStableCount = 0;
+                reading.reacquisitionStableCount = 0;
+            }
+            else if (
+                reacquisitionElapsedSamples
+                >=
+                REACQ_MAX_HOLD_SAMPLES
+            )
+            {
+                reacquisitionRebaseline = true;
+                clearMedianBuffers();
+                reacquisitionStableCount = 0;
+                reading.reacquisitionRebaseline = true;
+                reading.reacquisitionStableCount = 0;
+            }
+
+            reading.status =
+                reacquisitionRebaseline
+                    ? C1001Status::REACQUIRING_REBASELINE
+                    : C1001Status::REACQUIRING_TARGET;
+
+            return;
+        }
+
+        reading.status =
+            C1001Status::INVALID_VITALS;
+
+        return;
+    }
+
+    // Disturbance validation on 2026-08-22 proved that C1001 can
+    // continue reporting smooth-but-false HR/RR for many seconds
+    // after MoveRange itself has already returned to a low value.
+    // Therefore ANY strong MoveRange sample above starts a
+    // non-destructive quarantine immediately. Two consecutive
+    // strong samples still mark confirmed strong motion for
+    // diagnostic context, but confirmation is NOT required to start
+    // target reacquisition.
+
+    // Once MoveRange falls below the strong threshold, keep holding
+    // until the target/vital estimator has actually reacquired.
+    if (reacquisitionActive)
+    {
+        // A non-strong sample breaks the consecutive strong-motion
+        // confirmation sequence, but NOT the reacquisition state.
+        strongMotionConfirmCount = 0;
+
+        processReacquisitionSample(
+            rawRR,
+            rawHR,
+            moveRange
+        );
+
+        return;
+    }
+
+    strongMotionConfirmCount = 0;
+    motionArtifactActive = false;
+    stableRecoveryCount = 0;
+    reading.motionArtifactActive = false;
+    reading.recoveryStableCount = 0;
 
     // --------------------------------------------------------
     // CLEAN SAMPLE
@@ -1275,6 +1539,12 @@ C1001Sensor::getStatusText() const
 
         case C1001Status::HOLDING_LAST_VALUE:
             return "HOLDING LAST TRUSTED VALUE";
+
+        case C1001Status::REACQUIRING_TARGET:
+            return "REACQUIRING TARGET - HOLD";
+
+        case C1001Status::REACQUIRING_REBASELINE:
+            return "REACQUIRING NEW BASELINE";
 
         default:
             return "UNKNOWN";

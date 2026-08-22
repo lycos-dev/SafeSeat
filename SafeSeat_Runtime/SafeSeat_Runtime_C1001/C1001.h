@@ -31,7 +31,13 @@ enum class C1001Status
 
     SUSTAINED_CHANGE,
 
-    HOLDING_LAST_VALUE
+    HOLDING_LAST_VALUE,
+
+    // Appended to preserve the numeric values of all existing
+    // wire/status codes used by the Main Hub.
+    REACQUIRING_TARGET,
+
+    REACQUIRING_REBASELINE
 };
 
 
@@ -101,6 +107,18 @@ struct C1001Reading
     bool trustedVitalsAvailable = false;
 
     bool motionArtifactActive = false;
+
+    // True while the radar is being quarantined after a strong
+    // movement/obstruction. During this state, the last trusted
+    // filtered vitals remain available, but new raw HR/RR samples
+    // must NOT enter the ML window.
+    bool reacquisitionActive = false;
+
+    bool reacquisitionRebaseline = false;
+
+    int reacquisitionStableCount = 0;
+
+    int reacquisitionElapsedSamples = 0;
 
 
     int recoveryStableCount = 0;
@@ -210,6 +228,38 @@ private:
 
 
     // ========================================================
+    // POST-MOTION / TARGET REACQUISITION SETTINGS
+    //
+    // Live disturbance testing on 2026-08-22 showed that after
+    // an obstruction, body shift, or leaving/re-entering the
+    // radar field, C1001 HR/RR can remain falsely elevated even
+    // after MoveRange falls back to 1..10. A simple 3-sample
+    // sustained-change rule is therefore unsafe immediately after
+    // strong radar disturbance.
+    //
+    // Policy:
+    // - ANY MoveRange >=30 starts a non-destructive quarantine.
+    // - Preserve the ML window and hold the last trusted vitals.
+    // - Fast exit: require 5 consecutive low-motion samples whose
+    //   raw HR/RR have returned near the pre-motion trusted level.
+    // - If that does not happen within 30 samples, collect a fresh
+    //   5-sample low-motion median baseline while ML remains held.
+    // ========================================================
+
+    static constexpr int
+        REACQ_STABLE_SAMPLES = 5;
+
+    static constexpr int
+        REACQ_MAX_HOLD_SAMPLES = 30;
+
+    static constexpr int
+        REACQ_RR_BASELINE_TOLERANCE = 5;
+
+    static constexpr int
+        REACQ_HR_BASELINE_TOLERANCE = 15;
+
+
+    // ========================================================
     // FILTER SETTINGS
     // ========================================================
 
@@ -254,6 +304,23 @@ private:
     int strongMotionConfirmCount = 0;
 
     int stableRecoveryCount = 0;
+
+
+    // ========================================================
+    // REACQUISITION STATE
+    // ========================================================
+
+    bool reacquisitionActive = false;
+
+    bool reacquisitionRebaseline = false;
+
+    int reacquisitionStableCount = 0;
+
+    int reacquisitionElapsedSamples = 0;
+
+    int reacquisitionBaselineRR = 0;
+
+    int reacquisitionBaselineHR = 0;
 
 
     // ========================================================
@@ -348,6 +415,19 @@ private:
         int rawRR,
         int rawHR
     );
+
+
+    void beginReacquisition();
+
+
+    bool processReacquisitionSample(
+        int rawRR,
+        int rawHR,
+        int moveRange
+    );
+
+
+    void finishReacquisition();
 
 
     void updateStatus();

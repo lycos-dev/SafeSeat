@@ -3,26 +3,31 @@
 #include <Arduino.h>
 #include <stdint.h>
 
-// AUTO-GENERATED FROM THE TRAINED SAFESEAT C1001 MODELS.
+// AUTO-GENERATED: SafeSeat C1001 2026 60 GHz mmWave candidate.
 //
-// Source artifacts:
-// - models/C1001/c1001_preprocessor.joblib
-// - models/C1001/isolation_forest.joblib
-// - models/C1001/one_class_svm.joblib
-// - models/C1001/feature_columns.json
+// Source:
+//   models/C1001_MMwave_2026_candidate/
 //
-// Parameters are stored as float32 for embedded inference.
-// Validation against the original sklearn models is included
-// in C1001_EMBEDDED_MODEL_VALIDATION.json.
+// Offline normal-reference validation:
+//   IF:    19/19 held-out healthy windows NORMAL
+//   OCSVM: 19/19 held-out healthy windows NORMAL
+//
+// Tuned OCSVM:
+//   nu = 0.01
+//   gamma = 0.0001
+//
+// IMPORTANT:
+// This candidate is not promoted to canonical models/C1001 until
+// physical C1001 live-runtime validation passes.
 
 constexpr uint16_t C1001_MODEL_FEATURE_COUNT = 64;
 
 constexpr uint16_t C1001_IF_TREE_COUNT = 300;
-constexpr uint32_t C1001_IF_NODE_COUNT = 33900;
-constexpr uint16_t C1001_IF_MAX_SAMPLES = 256;
+constexpr uint32_t C1001_IF_NODE_COUNT = 19118;
+constexpr uint16_t C1001_IF_MAX_SAMPLES = 75;
 
 constexpr uint16_t C1001_OCSVM_SUPPORT_VECTOR_COUNT =
-    85;
+    4;
 
 extern const float C1001_IMPUTER_MEDIAN[C1001_MODEL_FEATURE_COUNT];
 extern const float C1001_SCALER_CENTER[C1001_MODEL_FEATURE_COUNT];

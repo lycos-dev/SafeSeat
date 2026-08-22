@@ -1,0 +1,51 @@
+{
+  "pipeline": "SafeSeat C1001 2026 mmWave OCSVM candidate tuning",
+  "generated_at_utc": "2026-08-22T13:56:17.411870+00:00",
+  "selection_policy": "5-fold subject-wise CV on training subjects only; held-out test subjects evaluated once after selection",
+  "train_input": "C:\\Users\\Lycos Blanza\\Downloads\\SAFESEAT\\SafeSeat_ML\\features\\C1001_MMwave_2026\\train_features.csv",
+  "test_input": "C:\\Users\\Lycos Blanza\\Downloads\\SAFESEAT\\SafeSeat_ML\\features\\C1001_MMwave_2026\\test_features.csv",
+  "feature_count": 64,
+  "training_windows": 75,
+  "held_out_test_windows": 19,
+  "grid": {
+    "nu_values": [
+      0.01,
+      0.02,
+      0.03,
+      0.05,
+      0.075,
+      0.1
+    ],
+    "gamma_values": [
+      "0.0001",
+      "0.00025",
+      "0.0005",
+      "0.001",
+      "0.0025",
+      "0.005",
+      "0.01",
+      "0.02",
+      "scale"
+    ]
+  },
+  "selected": {
+    "nu": 0.01,
+    "gamma": "0.0001",
+    "cv_validation_anomaly_percent": 5.333333333333334,
+    "cv_validation_acceptance_percent": 94.66666666666667,
+    "cv_validation_std_percent": 4.988876515698589,
+    "cv_training_anomaly_percent": 2.3333333333333335,
+    "preferred_criteria_pass": true
+  },
+  "final_refit": {
+    "training_anomaly_percent": 1.3333333333333335,
+    "training_acceptance_percent": 98.66666666666667,
+    "held_out_anomaly_percent": 0.0,
+    "held_out_acceptance_percent": 100.0,
+    "held_out_normal_count": 19,
+    "held_out_total_count": 19,
+    "train_score_median": 0.004478040000668981,
+    "test_score_median": 0.00459317987338248
+  },
+  "interpretation": "All evaluation windows are healthy/normal reference data. Reported anomaly percentages are false-positive/generalization rates, not emergency-detection metrics."
+}
