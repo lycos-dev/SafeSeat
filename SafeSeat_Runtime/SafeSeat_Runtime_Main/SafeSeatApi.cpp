@@ -434,7 +434,7 @@ String SafeSeatApi::buildSensorsJson() const
     appendJsonFloat(out, in.mpu.reading.dynamicAcceleration, 4);
     out += F(",\"road_motion_model\":");
     appendModelEvidence(out, in.mpu.model);
-    out += F(",\"fusion_role\":\"artifact_context\"}");
+    out += F(",\"model_interpretation\":\"road_domain_diagnostic_only_after_physical_motion\",\"fusion_role\":\"vehicle_motion_context_for_fsr_artifact_handling\"}");
 
     return out;
 }

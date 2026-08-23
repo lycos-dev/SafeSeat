@@ -1779,7 +1779,7 @@ void loop()
 
     Serial.println();
     Serial.println(
-        "MPU ML (ROAD/MOTION CONTEXT):"
+        "MPU ML (ROAD-DOMAIN DIAGNOSTIC):"
     );
 
     Serial.print(
@@ -1865,7 +1865,7 @@ void loop()
         );
 
         Serial.print(
-            "  Context      : "
+            "  Model only   : "
         );
 
         if (
@@ -1873,7 +1873,7 @@ void loop()
         )
         {
             Serial.println(
-                "STRONG ROAD/MOTION ANOMALY"
+                "BOTH-MODEL ROAD-DOMAIN OUTLIER"
             );
         }
         else if (
@@ -1881,18 +1881,18 @@ void loop()
         )
         {
             Serial.println(
-                "WEAK ROAD/MOTION ANOMALY"
+                "ONE-MODEL ROAD-DOMAIN OUTLIER"
             );
         }
         else
         {
             Serial.println(
-                "NORMAL ROAD MOTION"
+                "ROAD-DOMAIN INLIER"
             );
         }
 
         Serial.println(
-            "  Fusion role  : ARTIFACT CONTEXT ONLY"
+            "  Fusion role  : PHYSICAL VEHICLE MOTION FIRST; FSR ARTIFACT CONTEXT"
         );
     }
     else

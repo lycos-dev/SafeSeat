@@ -181,6 +181,10 @@ void FusionEngine::begin()
     lastCameraResultId = 0;
     cameraAbnormalLatched = false;
 
+    lastMpuMotionSampleCount = 0UL;
+    mpuActivePersistenceSamples = 0U;
+    mpuStrongPersistenceSamples = 0U;
+
 
     Serial.println();
     Serial.println(
@@ -442,70 +446,119 @@ void FusionEngine::update(
 
 
     // --------------------------------------------------------
-    // Motion: MPU6050 vehicle/road context + raw fallback
+    // Motion: MPU6050 vehicle/road context
+    // 2026-08-23 V4 BENCH-VALIDATED SEMANTICS
     // --------------------------------------------------------
     //
-    // Step 5.6 adds the runtime-aligned MPU IF/OCSVM model.
-    // IMPORTANT: MPU anomaly is NOT occupant anomaly evidence.
-    // It describes vehicle/seat motion that can explain transient
-    // changes seen by pressure/vital sensors.
+    // SafeSeat MPU role:
+    // vehicle / seat-frame vibration context that can help
+    // explain temporary FSR pressure artifacts.
     //
-    // - both MPU models anomaly -> strong road/motion context
-    // - either-only anomaly     -> weak road/motion context
-    // - instantaneous raw magnitudes remain a fast fallback
-    //   before the one-second model window is ready
+    // It is NOT occupant anomaly evidence.
+    //
+    // Order:
+    // 1) qualify real physical motion;
+    // 2) require 3 consecutive fresh MPU samples;
+    // 3) only then use IF/OCSVM to characterize road pattern.
+    //
+    // A stationary OCSVM outlier therefore cannot create
+    // vehicle-motion context by itself.
     // --------------------------------------------------------
+
+    bool mpuPhysicalMotion = false;
+    bool mpuStrongPhysicalMotion = false;
 
     bool mpuStrongRoadMotion = false;
     bool mpuWeakRoadMotion = false;
 
-    if (
-        mpuUsable &&
-        hasStrongModelAnomaly(
-            input.mpu.model
-        )
-    )
-    {
-        mpuStrongRoadMotion = true;
-    }
-    else if (
-        mpuUsable &&
-        hasWeakModelAnomaly(
-            input.mpu.model
-        )
-    )
-    {
-        mpuWeakRoadMotion = true;
-    }
-
-    if (
-        mpuStrongRoadMotion ||
-        mpuWeakRoadMotion
-    )
-    {
-        // Context only. Do not increment anomalyEvidenceCount.
-        reading.evidence.supportingContextCount++;
-    }
+    bool mpuModerateInstantMotion = false;
 
     if (
         !mpuUsable
+        ||
+        !input.mpu.reading.valid
     )
     {
-        reading.motion =
-            FusionMotionState::UNKNOWN;
+        lastMpuMotionSampleCount = 0UL;
+        mpuActivePersistenceSamples = 0U;
+        mpuStrongPersistenceSamples = 0U;
     }
     else
     {
-        const bool strongInstantMotion =
-            input.mpu.reading.dynamicAcceleration
-            >
-            0.25f
-            ||
-            input.mpu.reading.gyroMagnitude
-            >
-            35.0f;
+        const unsigned long currentSampleCount =
+            input.mpu.reading.sampleCount;
 
-        const bool moderateInstantMotion =
+        if (
+            currentSampleCount
+            !=
+            lastMpuMotionSampleCount
+        )
+        {
+            lastMpuMotionSampleCount =
+                currentSampleCount;
+
+            const bool activeSample =
+                input.mpu.reading.dynamicAcceleration
+                >=
+                MPU_ACTIVE_ACCEL_G
+                ||
+                input.mpu.reading.gyroMagnitude
+                >=
+                MPU_ACTIVE_GYRO_DPS;
+
+            const bool strongSample =
+                input.mpu.reading.dynamicAcceleration
+                >=
+                MPU_STRONG_ACCEL_G
+                ||
+                input.mpu.reading.gyroMagnitude
+                >=
+                MPU_STRONG_GYRO_DPS;
+
+            if (activeSample)
+            {
+                if (
+                    mpuActivePersistenceSamples
+                    <
+                    MPU_MOTION_PERSIST_SAMPLES
+                )
+                {
+                    mpuActivePersistenceSamples++;
+                }
+            }
+            else
+            {
+                mpuActivePersistenceSamples = 0U;
+            }
+
+            if (strongSample)
+            {
+                if (
+                    mpuStrongPersistenceSamples
+                    <
+                    MPU_MOTION_PERSIST_SAMPLES
+                )
+                {
+                    mpuStrongPersistenceSamples++;
+                }
+            }
+            else
+            {
+                mpuStrongPersistenceSamples = 0U;
+            }
+        }
+
+        mpuPhysicalMotion =
+            mpuActivePersistenceSamples
+            >=
+            MPU_MOTION_PERSIST_SAMPLES;
+
+        mpuStrongPhysicalMotion =
+            mpuStrongPersistenceSamples
+            >=
+            MPU_MOTION_PERSIST_SAMPLES;
+
+        mpuModerateInstantMotion =
             input.mpu.reading.dynamicAcceleration
             >
             0.12f
@@ -514,43 +567,67 @@ void FusionEngine::update(
             >
             20.0f;
 
-        const bool lowInstantMotion =
-            input.mpu.reading.dynamicAcceleration
-            >
-            0.04f
-            ||
-            input.mpu.reading.gyroMagnitude
-            >
-            8.0f;
-
         if (
-            mpuStrongRoadMotion ||
-            strongInstantMotion
+            mpuPhysicalMotion
+            &&
+            hasStrongModelAnomaly(
+                input.mpu.model
+            )
         )
         {
-            reading.motion =
-                FusionMotionState::HIGH_MOTION;
+            mpuStrongRoadMotion = true;
         }
         else if (
-            mpuWeakRoadMotion ||
-            moderateInstantMotion
+            mpuPhysicalMotion
+            &&
+            hasWeakModelAnomaly(
+                input.mpu.model
+            )
         )
         {
-            reading.motion =
-                FusionMotionState::MODERATE_MOTION;
+            mpuWeakRoadMotion = true;
         }
-        else if (
-            lowInstantMotion
-        )
-        {
-            reading.motion =
-                FusionMotionState::LOW_MOTION;
-        }
-        else
-        {
-            reading.motion =
-                FusionMotionState::STILL;
-        }
+    }
+
+    if (mpuPhysicalMotion)
+    {
+        // Ordinary vehicle vibration is useful supporting
+        // context even if both road models call it normal.
+        reading.evidence.supportingContextCount++;
+    }
+
+    if (!mpuUsable)
+    {
+        reading.motion =
+            FusionMotionState::UNKNOWN;
+    }
+    else if (!mpuPhysicalMotion)
+    {
+        reading.motion =
+            FusionMotionState::STILL;
+    }
+    else if (
+        mpuStrongPhysicalMotion
+        ||
+        mpuStrongRoadMotion
+    )
+    {
+        reading.motion =
+            FusionMotionState::HIGH_MOTION;
+    }
+    else if (
+        mpuModerateInstantMotion
+        ||
+        mpuWeakRoadMotion
+    )
+    {
+        reading.motion =
+            FusionMotionState::MODERATE_MOTION;
+    }
+    else
+    {
+        reading.motion =
+            FusionMotionState::LOW_MOTION;
     }
 
 
@@ -950,21 +1027,18 @@ void FusionEngine::update(
         mpuUsable
         &&
         (
+            mpuStrongPhysicalMotion
+            ||
             mpuStrongRoadMotion
-            ||
-            input.mpu.reading.dynamicAcceleration
-            >
-            0.25f
-            ||
-            input.mpu.reading.gyroMagnitude
-            >
-            35.0f
         )
     )
     {
-        // Only STRONG MPU model agreement gates escalation.
-        // An either-only/weak MPU anomaly is supporting context
-        // but is not enough by itself to suppress occupant evidence.
+        // Only persistent STRONG vehicle/road motion can gate
+        // escalation as a motion-artifact possibility.
+        //
+        // A one-sample spike, weak model-only outlier, or
+        // stationary OCSVM outlier cannot suppress FSR/occupant
+        // evidence.
         motionArtifactPossible =
             true;
     }

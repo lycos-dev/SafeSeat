@@ -1,0 +1,20 @@
+{
+  "date": "2026-08-23",
+  "bench_runtime_validation": "PASS_WITH_OBSERVATION",
+  "vehicle_domain_validation": "PENDING",
+  "validated_package": "SafeSeat_MPU6050_ML_Validation_V4_2026-08-23.zip",
+  "model_retrained": false,
+  "model_parameters_changed": false,
+  "main_sampling_request_changed": false,
+  "motion_persistence_samples": 3,
+  "approx_persistence_ms_at_80_hz": 37.5,
+  "stationary_ocsvm_outlier_has_motion_authority": false,
+  "persistent_strong_motion_can_gate_artifacts": true,
+  "host_syntax": {
+    "Fusion.cpp": "PASS",
+    "MPUML.cpp": "PASS",
+    "Fusion_stderr": "",
+    "MPUML_stderr": ""
+  },
+  "arduino_ide_verify": "PENDING_USER"
+}

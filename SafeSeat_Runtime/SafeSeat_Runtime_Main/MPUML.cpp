@@ -592,13 +592,13 @@ MPUML::getStatusText() const
             return "COLLECTING 1 s WINDOW";
 
         case MPUMLStatus::READY_NORMAL:
-            return "READY - NORMAL ROAD MOTION";
+            return "READY - ROAD-DOMAIN INLIER";
 
         case MPUMLStatus::READY_WEAK_ROAD_MOTION:
-            return "READY - WEAK ROAD/MOTION ANOMALY";
+            return "READY - ONE-MODEL ROAD-DOMAIN OUTLIER";
 
         case MPUMLStatus::READY_STRONG_ROAD_MOTION:
-            return "READY - STRONG ROAD/MOTION ANOMALY";
+            return "READY - BOTH-MODEL ROAD-DOMAIN OUTLIER";
 
         case MPUMLStatus::INFERENCE_ERROR:
             return "INFERENCE ERROR";

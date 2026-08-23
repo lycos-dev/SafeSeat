@@ -521,6 +521,25 @@ private:
     static constexpr unsigned long
         CLEAR_STABLE_MS = 3000UL;
 
+    // MPU physical-motion qualification validated on 2026-08-23.
+    // Three consecutive fresh samples at ~80 Hz = ~37.5 ms.
+    // Physical motion must exist before IF/OCSVM road-domain
+    // output is allowed to affect vehicle-motion context.
+    static constexpr uint8_t
+        MPU_MOTION_PERSIST_SAMPLES = 3U;
+
+    static constexpr float
+        MPU_ACTIVE_ACCEL_G = 0.040f;
+
+    static constexpr float
+        MPU_ACTIVE_GYRO_DPS = 5.0f;
+
+    static constexpr float
+        MPU_STRONG_ACCEL_G = 0.20f;
+
+    static constexpr float
+        MPU_STRONG_GYRO_DPS = 35.0f;
+
     FusionReading reading;
 
     unsigned long warningCandidateStartMillis = 0UL;
@@ -536,4 +555,9 @@ private:
     uint32_t lastCameraRequestId = 0;
     uint32_t lastCameraResultId = 0;
     bool cameraAbnormalLatched = false;
+
+    // MPU motion-persistence state.
+    unsigned long lastMpuMotionSampleCount = 0UL;
+    uint8_t mpuActivePersistenceSamples = 0U;
+    uint8_t mpuStrongPersistenceSamples = 0U;
 };
