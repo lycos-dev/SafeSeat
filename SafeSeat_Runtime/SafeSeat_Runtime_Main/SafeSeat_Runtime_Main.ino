@@ -226,7 +226,7 @@ void setup()
     );
 
     Serial.println(
-        " Step 5.9.8.4 - Final sensor architecture + API + SoftAP + ESP-NOW"
+        " Step 5.9.8.8 - MLX geometry guard + anomaly persistence"
     );
 
     Serial.println(
@@ -633,22 +633,46 @@ void loop()
     const MLXReading &t =
         mlx.getReading();
 
+    const FSRReading &f =
+        fsr.getReading();
+
+    // Combined-runtime thermal session:
+    // occupancy establishes that a person is actually in the seat.
+    // MLX ambient/Object-Ta are confidence/context only and are
+    // never allowed to repeatedly destroy the personal baseline.
+    const bool mlxSeatOccupied =
+        occupantPresent
+        ||
+        (
+            fsrInitialized
+            &&
+            f.connected
+            &&
+            f.valid
+            &&
+            (
+                f.occupiedByPressure
+                ||
+                f.wholeSeatTotal > 300.0f
+            )
+        );
+
     mlxML.update(
-        t
+        t,
+        mlxSeatOccupied
     );
 
     const MLXMLReading &tml =
         mlxML.getReading();
 
     mlxContext.update(
-        t
+        t,
+        tml,
+        mlxSeatOccupied
     );
 
     const MLXContextReading &tx =
         mlxContext.getReading();
-
-    const FSRReading &f =
-        fsr.getReading();
 
     fsrML.update(
         f,
@@ -1111,24 +1135,63 @@ void loop()
     Serial.print("  Status       : ");
     Serial.println(mlxML.getStatusText());
 
-    Serial.print("  Target gate  : ");
-    Serial.println(tml.warmTargetQualified ? "QUALIFIED" : "NOT QUALIFIED");
+    Serial.print("  Session gate : ");
+    Serial.println(tml.seatOccupied ? "OCCUPIED / QUALIFIED" : "WAITING FOR OCCUPANT");
+
+    Serial.print("  Contrast ctx : ");
+    Serial.println(tml.targetContrastDegraded ? "LOW (INFO ONLY)" : "HIGH");
+
+    if (tml.lowContrastBlocks > 0)
+    {
+        Serial.print("  Low contrast : ");
+        Serial.print(tml.lowContrastBlocks);
+        Serial.println(" consecutive sec (diagnostic only)");
+    }
 
     Serial.print("  Stability    : ");
     Serial.println(tml.stabilityQualified ? "QUALIFIED" : "NOT QUALIFIED / WAITING");
+
+    Serial.print("  Geometry     : ");
+    if (tml.geometryDegraded)
+        Serial.println("DEGRADED / FOV SUSPECTED");
+    else if (tml.reacquiring)
+        Serial.println("REACQUIRING");
+    else
+        Serial.println("TRUSTED");
+
+    if (tml.geometryDegraded || tml.reacquiring)
+    {
+        Serial.print("  Reacquire    : ");
+        Serial.print(tml.geometryReacquireStableBlocks);
+        Serial.print(" / ");
+        Serial.print(tml.geometryReacquireRequiredBlocks);
+        Serial.println(" stable sec near baseline");
+    }
+
+    Serial.print("  Geometry evt : ");
+    Serial.println(tml.geometryEvents);
+
+    if (tml.anomalyCandidateBlocks > 0)
+    {
+        Serial.print("  Anom persist : ");
+        Serial.print(tml.anomalyCandidateBlocks);
+        Serial.print(" / ");
+        Serial.print(tml.anomalyPersistenceRequiredBlocks);
+        Serial.println(" trusted anomalous sec");
+    }
 
     if (isfinite(tml.targetDeltaC))
     {
         Serial.print("  Object-Ta    : ");
         Serial.print(tml.targetDeltaC, 2);
-        Serial.println(" C (quality gate; not ML feature)");
+        Serial.println(" C (context only; NEVER blocks baseline/ML)");
     }
 
     if (isfinite(tml.oneSecondObjectStdC))
     {
-        Serial.print("  1-s obj std  : ");
+        Serial.print("  1-s filt std : ");
         Serial.print(tml.oneSecondObjectStdC, 3);
-        Serial.println(" C (quality only)");
+        Serial.println(" C (filtered-signal quality; not body motion)");
     }
 
     Serial.print("  Baseline     : ");
@@ -1148,13 +1211,17 @@ void loop()
     Serial.print("  Eval blocks  : ");
     Serial.println(tml.evaluatedBlocks);
 
-    Serial.print("  Held blocks  : ");
+    Serial.print("  Transition holds: ");
     Serial.println(tml.unstableBlocksHeld);
 
-    Serial.print("  Target losses: ");
+    Serial.print("  Session losses : ");
     Serial.println(tml.targetLosses);
 
-    if (tml.valid)
+    if (
+        tml.valid
+        ||
+        tml.anomalyCandidateBlocks > 0
+    )
     {
         Serial.print("  Delta base   : ");
         Serial.print(tml.deviationFromBaselineC, 3);
@@ -1169,7 +1236,9 @@ void loop()
         Serial.println(tml.oneClassSVMAnomaly ? "  [ANOMALY]" : "  [NORMAL]");
 
         Serial.print("  Fusion vote  : ");
-        if (tml.bothModelsAnomaly)
+        if (!tml.valid && tml.anomalyCandidateBlocks > 0)
+            Serial.println("HELD - ANOMALY PERSISTENCE NOT YET MET");
+        else if (tml.bothModelsAnomaly)
             Serial.println("STRONG MLX ANOMALY EVIDENCE");
         else if (tml.eitherModelAnomaly)
             Serial.println("WEAK MLX ANOMALY EVIDENCE");
@@ -1195,13 +1264,23 @@ void loop()
     );
 
     Serial.print(
-        "  Thermal gate : "
+        "  Contrast ctx : "
     );
     Serial.println(
         tx.thermalContrastQualified
-            ? "QUALIFIED"
-            : "NOT QUALIFIED"
+            ? "HIGH"
+            : "LOW (INFO ONLY)"
     );
+
+    Serial.print("  Context mode : ");
+    if (tx.geometryDegraded)
+        Serial.println("TARGET/FOV GEOMETRY DEGRADED");
+    else if (tx.reacquiring)
+        Serial.println("TARGET REACQUIRING");
+    else if (tx.targetContrastDegraded)
+        Serial.println("LOW CONTRAST (INFO ONLY)");
+    else
+        Serial.println("NORMAL");
 
     if (
         isfinite(

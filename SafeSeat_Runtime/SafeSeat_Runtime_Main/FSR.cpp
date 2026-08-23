@@ -228,10 +228,15 @@ void FSRSensor::mapElectricalToLogical(
     logical[BACKREST_FSR5] = electrical[1];  // ADS1 A1, electrical FSR2
     logical[BACKREST_FSR6] = electrical[2];  // ADS1 A2, electrical FSR3
 
-    // Cushion physical order was validated directly and is unchanged.
-    logical[CUSHION_FSR1] = electrical[6];   // ADS2 A2, left
-    logical[CUSHION_FSR2] = electrical[7];   // ADS2 A3, center
-    logical[CUSHION_FSR3] = electrical[8];   // GPIO34, right
+    // Cushion left/right mapping corrected from combined live validation
+    // on 2026-08-23. Left/right are from the SEATED OCCUPANT perspective.
+    //
+    // Physical LEFT  = electrical cushion FSR3 = GPIO34
+    // Physical CENTER = electrical cushion FSR2 = ADS2 A3
+    // Physical RIGHT = electrical cushion FSR1 = ADS2 A2
+    logical[CUSHION_FSR1] = electrical[8];   // GPIO34, physical left
+    logical[CUSHION_FSR2] = electrical[7];   // ADS2 A3, physical center
+    logical[CUSHION_FSR3] = electrical[6];   // ADS2 A2, physical right
 }
 
 

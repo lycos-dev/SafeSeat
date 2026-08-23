@@ -1,0 +1,12 @@
+{
+  "date": "2026-08-23",
+  "issue": "Combined runtime native MLX wrapper remained UNSTABLE with raw 1-s std around 2-3 C while filtered MLXContext could build a stable baseline.",
+  "root_cause_class": "runtime preprocessing / stability-signal mismatch",
+  "model_retrained": false,
+  "model_parameters_changed": false,
+  "stability_threshold_changed": false,
+  "warm_target_thresholds_changed": false,
+  "baseline_duration_changed": false,
+  "change": "MLXML 1-second blocks now use accepted filteredObjectC/filteredAmbientC instead of rawObjectC/rawAmbientC.",
+  "expected_next_test": "INT-HW-02 seated fixed-nape combined-hardware retest"
+}

@@ -1,0 +1,21 @@
+{
+  "date": "2026-08-23",
+  "change": "MLX target hysteresis and persistent target-loss handling",
+  "acquire_delta_c": 2.0,
+  "hold_delta_c": 1.0,
+  "loss_persistence_seconds": 3.0,
+  "mlx_model_retrained": false,
+  "model_features_changed": false,
+  "one_second_stability_gate_changed": false,
+  "host_syntax": {
+    "MLXML.cpp": "PASS",
+    "MLXContext.cpp": "PASS",
+    "Fusion.cpp": "PASS"
+  },
+  "host_behavior_harness": {
+    "MLXML_hysteresis": "PASS",
+    "MLXContext_hysteresis": "PASS"
+  },
+  "arduino_ide_verify": "PENDING_USER",
+  "next_test": "Repeat INT-HW-02 in normal room conditions and verify short Object-Ta dips show TARGET DEGRADED / HELD without resetting baseline."
+}

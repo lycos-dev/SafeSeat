@@ -885,22 +885,33 @@ void FusionEngine::update(
     // - either-only anomaly     -> one WEAK MLX sensor vote
     // - both normal             -> one normal MLX sensor vote
     //
-    // MLX ambient temperature, Object-Ta and broad context-change
-    // remain contextual/quality signals; they are NOT additional
-    // independent anomaly votes and are not model inputs.
+    // MLX ambient temperature and Object-Ta remain contextual
+    // signals only. Combined-runtime testing showed Ta can drift
+    // with local sensor/package/body heating, so Object-Ta has
+    // NO authority to create/destroy the occupant session or
+    // suppress the baseline-relative IF/OCSVM model.
     // --------------------------------------------------------
+
+    const bool mlxTargetDegraded =
+        input.mlx.context.targetContrastDegraded;
+
+    const bool mlxGeometryDegraded =
+        input.mlx.context.geometryDegraded
+        ||
+        input.mlx.context.reacquiring;
 
     const bool mlxModelReady =
         mlxUsable
-        && input.mlx.context.thermalContrastQualified
         && input.mlx.context.baselineReady
         && hasModelEvidence(input.mlx.model);
 
     const bool mlxStrongAnomaly =
-        hasStrongModelAnomaly(input.mlx.model);
+        mlxModelReady
+        && hasStrongModelAnomaly(input.mlx.model);
 
     const bool mlxWeakAnomaly =
-        hasWeakModelAnomaly(input.mlx.model);
+        mlxModelReady
+        && hasWeakModelAnomaly(input.mlx.model);
 
     const bool mlxModelNormal =
         mlxModelReady
@@ -919,9 +930,17 @@ void FusionEngine::update(
     {
         reading.temperature = FusionTemperatureState::INVALID;
     }
-    else if (!input.mlx.context.thermalContrastQualified)
+    else if (
+        reading.occupancy
+        !=
+        FusionOccupancyState::OCCUPIED
+    )
     {
         reading.temperature = FusionTemperatureState::NO_THERMAL_TARGET;
+    }
+    else if (mlxGeometryDegraded)
+    {
+        reading.temperature = FusionTemperatureState::TARGET_DEGRADED;
     }
     else if (mlxStrongAnomaly || mlxWeakAnomaly)
     {
@@ -934,6 +953,12 @@ void FusionEngine::update(
     else if (mlxContextChanged)
     {
         reading.temperature = FusionTemperatureState::CONTEXT_CHANGE;
+    }
+    else if (mlxTargetDegraded)
+    {
+        // LOW Object-Ta contrast is visible to Fusion but does
+        // not invalidate the shared baseline/model anymore.
+        reading.temperature = FusionTemperatureState::TARGET_DEGRADED;
     }
     else
     {
@@ -956,7 +981,12 @@ void FusionEngine::update(
 
     // Same MLX signal family: context-change is supporting context
     // only and never becomes a second independent anomaly vote.
-    if (mlxContextChanged && !mlxStrongAnomaly && !mlxWeakAnomaly)
+    if (
+        mlxContextChanged
+        && !mlxGeometryDegraded
+        && !mlxStrongAnomaly
+        && !mlxWeakAnomaly
+    )
     {
         reading.evidence.supportingContextCount++;
     }
@@ -1756,6 +1786,10 @@ FusionEngine::getTemperatureText(
 
         case FusionTemperatureState::NO_THERMAL_TARGET:
             return "NO THERMAL TARGET";
+
+
+        case FusionTemperatureState::TARGET_DEGRADED:
+            return "TARGET DEGRADED / HELD";
 
 
         case FusionTemperatureState::BASELINE_BUILDING:

@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 #include "MLX.h"
+#include "MLXML.h"
 
 
 // ============================================================
@@ -29,6 +30,7 @@ enum class MLXContextStatus
 {
     UNAVAILABLE,
     WAITING_FOR_THERMAL_TARGET,
+    TARGET_CONTRAST_DEGRADED,
     BUILDING_BASELINE,
     STABLE,
     CONTEXT_CHANGE
@@ -43,6 +45,9 @@ struct MLXContextReading
     // Optical/thermal quality gate only. This is NOT a body-
     // temperature calculation and is NOT a medical threshold.
     bool thermalContrastQualified = false;
+    bool targetContrastDegraded = false;
+    bool geometryDegraded = false;
+    bool reacquiring = false;
 
     bool baselineReady = false;
     bool contextChange = false;
@@ -56,6 +61,10 @@ struct MLXContextReading
 
     uint16_t baselineSamplesCollected = 0;
     uint16_t baselineSamplesRequired = 120;
+
+    uint8_t lowContrastSamples = 0;
+    uint8_t targetLossGraceSamples = 12;
+    uint32_t targetLosses = 0;
 
     unsigned long lastProcessedAcceptedSampleCount = 0;
     unsigned long lastUpdateMillis = 0;
@@ -73,7 +82,9 @@ public:
     void begin();
 
     void update(
-        const MLXReading& sensorReading
+        const MLXReading& sensorReading,
+        const MLXMLReading& modelReading,
+        bool seatOccupied
     );
 
     const MLXContextReading&
@@ -83,16 +94,14 @@ public:
     getStatusText() const;
 
 private:
-    // Existing engineering qualification gate. It is retained
-    // only to prevent building a skin-surface baseline while the
-    // MLX is pointed at a room/background target.
+    // Object-Ta is diagnostic context only in the combined
+    // runtime. It no longer owns target/session validity.
     static constexpr float
-        MIN_THERMAL_CONTRAST_C =
+        HIGH_CONTRAST_CONTEXT_C =
             2.0f;
 
-    // MLX filtered acquisition is 4 Hz. 120 accepted samples =
-    // 30 s, giving a robust session baseline before Fusion uses
-    // temperature context.
+    // Kept for dashboard/API compatibility. The authoritative
+    // baseline is now the native MLX model's 30-second baseline.
     static constexpr uint16_t
         BASELINE_SAMPLE_COUNT =
             120;
@@ -108,16 +117,5 @@ private:
 
     MLXContextReading reading;
 
-    float baselineBuffer[
-        BASELINE_SAMPLE_COUNT
-    ] = {0};
-
-    uint16_t baselineCount = 0;
-
     void resetBaseline();
-
-    static float median(
-        float *values,
-        uint16_t count
-    );
 };

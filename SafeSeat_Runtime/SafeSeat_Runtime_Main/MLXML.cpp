@@ -7,15 +7,23 @@ void MLXML::begin()
     reading = MLXMLReading{};
     reading.modelAvailable = true;
     reading.baselineBlocksRequired = BASELINE_BLOCK_COUNT;
+    reading.targetLossGraceBlocks = 0U;
     resetSessionBaseline(MLXMLStatus::WAITING_FOR_SAMPLE);
 
     Serial.println();
     Serial.println("[MLX-ML] Native MLX90614 model initialized.");
     Serial.println("[MLX-ML] External source: human MLX90614 dataset (not WESAD/E4).");
-    Serial.println("[MLX-ML] Physical acquisition: 4 Hz -> stable 1-second blocks.");
+    Serial.println("[MLX-ML] Physical acquisition: 4 Hz -> filtered 1-second blocks.");
     Serial.println("[MLX-ML] 30 stable seconds establish personal/session baseline.");
     Serial.println("[MLX-ML] Features: delta from session baseline + absolute delta only.");
-    Serial.println("[MLX-ML] Ambient/Object-Ta/stability remain quality/context, not ML features.");
+    Serial.println("[MLX-ML] Median+EMA filtered object signal feeds baseline/model blocks.");
+    Serial.println("[MLX-ML] Ambient/Object-Ta remain quality/context, not ML features.");
+    Serial.println("[MLX-ML] OCCUPANCY establishes the thermal session; Object-Ta is NOT a hard gate.");
+    Serial.println("[MLX-ML] Low thermal contrast is reported but does NOT reset/block baseline or ML.");
+    Serial.println("[MLX-ML] Filtered 1-s transition guard: std <= 1.00 C.");
+    Serial.println("[MLX-ML] FOV guard: rapid 1-2 s shifts -> TARGET GEOMETRY DEGRADED.");
+    Serial.println("[MLX-ML] Geometry hold preserves baseline; 3 stable near-baseline sec reacquire.");
+    Serial.println("[MLX-ML] Anomaly vote requires 3 consecutive trusted anomalous blocks.");
     Serial.println("[MLX-ML] IF + tuned OCSVM active and available to Fusion.");
 }
 
@@ -33,14 +41,27 @@ void MLXML::clearDecision()
 
 void MLXML::resetSessionBaseline(MLXMLStatus status)
 {
+    blockCount = 0;
     baselineCount = 0;
     reading.baselineBlocksCollected = 0;
     reading.baselineReady = false;
     reading.baselineObjectC = NAN;
     reading.warmTargetQualified = false;
+    reading.targetContrastDegraded = false;
     reading.stabilityQualified = false;
+    reading.lowContrastBlocks = 0;
+    reading.geometryDegraded = false;
+    reading.reacquiring = false;
+    reading.geometryReacquireStableBlocks = 0;
+    reading.anomalyCandidateBlocks = 0;
+    geometryHold = false;
+    geometryReacquireCount = 0;
+    consecutiveAnomalyBlocks = 0;
+    previousStableObjectC = NAN;
+    twoBlocksAgoStableObjectC = NAN;
     clearDecision();
     reading.status = status;
+    lowContrastBlockCount = 0;
 }
 
 float MLXML::mean4(const float values[BLOCK_SAMPLES])
@@ -107,36 +128,179 @@ void MLXML::processOneSecondBlock()
     reading.oneSecondObjectStdC = objectStd;
     reading.targetDeltaC = thermalDelta;
 
-    reading.warmTargetQualified =
-        isfinite(thermalDelta)
-        && thermalDelta >= WARM_TARGET_MIN_DELTA_C;
-
     reading.stabilityQualified =
         isfinite(objectStd)
         && objectStd <= MAX_ONE_SECOND_OBJECT_STD_C;
 
-    if (!reading.warmTargetQualified)
-    {
-        reading.targetLosses++;
-        resetSessionBaseline(MLXMLStatus::WAITING_FOR_WARM_TARGET);
+    // --------------------------------------------------------
+    // OCCUPANCY-GATED THERMAL SESSION
+    // --------------------------------------------------------
+    // Object-Ta is deliberately NOT allowed to decide whether
+    // the occupant exists. The MLX Ta channel follows the local
+    // sensor/package thermal environment and can drift upward
+    // near a warm occupant/enclosure.
+    //
+    // The occupant session is established outside this wrapper
+    // by FSR/C1001 occupancy. Object-Ta is retained only as a
+    // diagnostic confidence/context signal.
+    // --------------------------------------------------------
 
-        // resetSessionBaseline clears only model/baseline state; preserve the
-        // just-observed block diagnostics for Serial/API reporting.
-        reading.targetDeltaC = thermalDelta;
-        reading.oneSecondObjectMeanC = objectMean;
-        reading.oneSecondAmbientMeanC = ambientMean;
-        reading.oneSecondObjectStdC = objectStd;
-        reading.warmTargetQualified = false;
-        reading.stabilityQualified = objectStd <= MAX_ONE_SECOND_OBJECT_STD_C;
+    reading.warmTargetQualified =
+        reading.seatOccupied;
+
+    reading.targetContrastDegraded =
+        !isfinite(thermalDelta)
+        || thermalDelta < HIGH_CONTRAST_CONTEXT_C;
+
+    if (reading.targetContrastDegraded)
+    {
+        if (lowContrastBlockCount < 255U)
+            lowContrastBlockCount++;
+    }
+    else
+    {
+        lowContrastBlockCount = 0;
+    }
+
+    reading.lowContrastBlocks =
+        lowContrastBlockCount;
+
+    if (!reading.seatOccupied)
+    {
+        clearDecision();
+        reading.status =
+            MLXMLStatus::WAITING_FOR_WARM_TARGET;
         return;
     }
 
+    // A genuinely abrupt filtered transition is still held so
+    // it cannot contaminate the personal baseline/model.
     if (!reading.stabilityQualified)
     {
         reading.unstableBlocksHeld++;
         clearDecision();
-        reading.status = MLXMLStatus::UNSTABLE_TARGET;
+        consecutiveAnomalyBlocks = 0;
+        reading.anomalyCandidateBlocks = 0;
+        reading.status =
+            MLXMLStatus::UNSTABLE_TARGET;
         return;
+    }
+
+    // --------------------------------------------------------
+    // POST-BASELINE FOV / TARGET-GEOMETRY GUARD
+    // --------------------------------------------------------
+    // A rapid step in a non-contact IR surface reading is much
+    // more consistent with target/FOV movement than with a real
+    // physiological temperature change. We therefore quarantine
+    // the MLX channel instead of creating immediate anomaly
+    // evidence. The personal baseline is preserved.
+    // --------------------------------------------------------
+    if (reading.baselineReady)
+    {
+        const float deviationFromBaseline =
+            objectMean - reading.baselineObjectC;
+
+        const bool havePrevious =
+            isfinite(previousStableObjectC);
+
+        const bool haveTwoAgo =
+            isfinite(twoBlocksAgoStableObjectC);
+
+        const float oneSecondStep =
+            havePrevious
+                ? objectMean - previousStableObjectC
+                : 0.0f;
+
+        const float twoSecondStep =
+            haveTwoAgo
+                ? objectMean - twoBlocksAgoStableObjectC
+                : 0.0f;
+
+        const bool meaningfulDeparture =
+            fabsf(deviationFromBaseline)
+            >=
+            GEOMETRY_MIN_BASELINE_DEVIATION_C;
+
+        const bool rapidGeometryShift =
+            meaningfulDeparture
+            &&
+            (
+                (
+                    havePrevious
+                    &&
+                    fabsf(oneSecondStep)
+                    >=
+                    GEOMETRY_ONE_SEC_STEP_C
+                )
+                ||
+                (
+                    haveTwoAgo
+                    &&
+                    fabsf(twoSecondStep)
+                    >=
+                    GEOMETRY_TWO_SEC_STEP_C
+                )
+            );
+
+        if (!geometryHold && rapidGeometryShift)
+        {
+            geometryHold = true;
+            geometryReacquireCount = 0;
+            consecutiveAnomalyBlocks = 0;
+            reading.anomalyCandidateBlocks = 0;
+            reading.geometryEvents++;
+        }
+
+        if (geometryHold)
+        {
+            const bool nearTrustedBaseline =
+                fabsf(deviationFromBaseline)
+                <=
+                GEOMETRY_REACQUIRE_BAND_C;
+
+            if (nearTrustedBaseline)
+            {
+                if (geometryReacquireCount < GEOMETRY_REACQUIRE_BLOCKS)
+                    geometryReacquireCount++;
+            }
+            else
+            {
+                geometryReacquireCount = 0;
+            }
+
+            reading.geometryReacquireStableBlocks =
+                geometryReacquireCount;
+
+            clearDecision();
+            reading.geometryDegraded = true;
+            reading.reacquiring =
+                geometryReacquireCount > 0;
+
+            // Keep recent stable physical values moving so the
+            // dashboard remains representative, but do not alter
+            // the personal baseline or infer a medical anomaly.
+            twoBlocksAgoStableObjectC = previousStableObjectC;
+            previousStableObjectC = objectMean;
+
+            if (geometryReacquireCount >= GEOMETRY_REACQUIRE_BLOCKS)
+            {
+                geometryHold = false;
+                geometryReacquireCount = 0;
+                reading.geometryReacquireStableBlocks =
+                    GEOMETRY_REACQUIRE_BLOCKS;
+                reading.geometryDegraded = false;
+                reading.reacquiring = true;
+                reading.status =
+                    MLXMLStatus::REACQUIRING_TARGET;
+                return;
+            }
+
+            reading.status =
+                reading.reacquiring
+                    ? MLXMLStatus::REACQUIRING_TARGET
+                    : MLXMLStatus::TARGET_GEOMETRY_DEGRADED;
+            return;
+        }
     }
 
     if (!reading.baselineReady)
@@ -151,6 +315,15 @@ void MLXML::processOneSecondBlock()
         {
             reading.baselineObjectC = median30(baselineBlocks);
             reading.baselineReady = isfinite(reading.baselineObjectC);
+
+            if (reading.baselineReady)
+            {
+                previousStableObjectC = reading.baselineObjectC;
+                twoBlocksAgoStableObjectC = reading.baselineObjectC;
+                consecutiveAnomalyBlocks = 0;
+                reading.anomalyCandidateBlocks = 0;
+            }
+
             reading.status = reading.baselineReady
                 ? MLXMLStatus::BASELINE_READY
                 : MLXMLStatus::INFERENCE_ERROR;
@@ -171,7 +344,8 @@ void MLXML::processOneSecondBlock()
         return;
     }
 
-    reading.valid = true;
+    // Preserve the raw model decisions for diagnostics even
+    // while an anomaly candidate is being quarantined.
     reading.deviationFromBaselineC = delta;
     reading.isolationForestDecision = result.isolationForestDecision;
     reading.oneClassSVMDecision = result.oneClassSVMDecision;
@@ -181,15 +355,47 @@ void MLXML::processOneSecondBlock()
     reading.eitherModelAnomaly = result.eitherAnomaly;
     reading.evaluatedBlocks++;
     reading.lastInferenceMillis = millis();
+    reading.geometryDegraded = false;
+    reading.reacquiring = false;
 
-    reading.status = result.bothAnomaly
-        ? MLXMLStatus::READY_STRONG_ANOMALY
-        : (result.eitherAnomaly
-            ? MLXMLStatus::READY_WEAK_ANOMALY
-            : MLXMLStatus::READY_NORMAL);
+    // Shift physical history only after the block passed the
+    // transition/geometry guards.
+    twoBlocksAgoStableObjectC = previousStableObjectC;
+    previousStableObjectC = objectMean;
+
+    if (result.eitherAnomaly)
+    {
+        if (consecutiveAnomalyBlocks < 255U)
+            consecutiveAnomalyBlocks++;
+
+        reading.anomalyCandidateBlocks =
+            consecutiveAnomalyBlocks;
+
+        if (consecutiveAnomalyBlocks < ANOMALY_PERSISTENCE_BLOCKS)
+        {
+            // Candidate is visible in diagnostics but is NOT
+            // valid model evidence for Fusion yet.
+            reading.valid = false;
+            reading.status = MLXMLStatus::ANOMALY_CANDIDATE;
+            return;
+        }
+
+        reading.valid = true;
+        reading.status = result.bothAnomaly
+            ? MLXMLStatus::READY_STRONG_ANOMALY
+            : MLXMLStatus::READY_WEAK_ANOMALY;
+        return;
+    }
+
+    // Any trusted NORMAL block immediately clears a transient
+    // anomaly candidate.
+    consecutiveAnomalyBlocks = 0;
+    reading.anomalyCandidateBlocks = 0;
+    reading.valid = true;
+    reading.status = MLXMLStatus::READY_NORMAL;
 }
 
-void MLXML::update(const MLXReading &sensorReading)
+void MLXML::update(const MLXReading &sensorReading, bool seatOccupied)
 {
     if (!sensorReading.connected)
     {
@@ -206,10 +412,53 @@ void MLXML::update(const MLXReading &sensorReading)
     }
 
     reading.lastProcessedAcceptedSampleCount = sensorReading.acceptedSampleCount;
+    reading.seatOccupied = seatOccupied;
 
+    // Occupancy, not Object-Ta, owns session lifetime.
+    if (!seatOccupied)
+    {
+        if (targetLatched)
+        {
+            reading.targetLosses++;
+        }
+
+        targetLatched = false;
+        resetSessionBaseline(
+            MLXMLStatus::WAITING_FOR_WARM_TARGET
+        );
+        reading.seatOccupied = false;
+        return;
+    }
+
+    if (!targetLatched)
+    {
+        // New occupied session: start a clean personal baseline.
+        resetSessionBaseline(
+            MLXMLStatus::WAITING_FOR_SAMPLE
+        );
+        targetLatched = true;
+        reading.seatOccupied = true;
+        reading.warmTargetQualified = true;
+    }
+
+    // IMPORTANT:
+    // The shared Main Hub already produces a trusted production
+    // MLX signal using median-of-three + EMA filtering.
+    //
+    // Combined-hardware testing showed that the instantaneous RAW
+    // IR samples can vary by multiple degrees when the headrest FOV
+    // mixes nape/nearby surfaces, even while the FILTERED object
+    // signal remains usable and MLXContext can build a stable
+    // personal baseline.
+    //
+    // Therefore the native ML runtime now forms its 1-second
+    // blocks from the accepted FILTERED physical samples.
+    //
+    // Raw values remain available in MLXReading for diagnostics,
+    // but are no longer allowed to falsely block baseline creation.
     consumeAcceptedSample(
-        sensorReading.rawObjectC,
-        sensorReading.rawAmbientC
+        sensorReading.filteredObjectC,
+        sensorReading.filteredAmbientC
     );
 }
 
@@ -227,9 +476,11 @@ const char* MLXML::getStatusText() const
         case MLXMLStatus::SENSOR_UNAVAILABLE:
             return "SENSOR UNAVAILABLE";
         case MLXMLStatus::WAITING_FOR_WARM_TARGET:
-            return "WAITING FOR WARM TARGET - BASELINE RESET";
+            return "WAITING FOR OCCUPIED THERMAL SESSION";
+        case MLXMLStatus::TARGET_CONTRAST_DEGRADED:
+            return "LOW THERMAL CONTRAST - CONTEXT ONLY";
         case MLXMLStatus::UNSTABLE_TARGET:
-            return "UNSTABLE TARGET - BLOCK HELD";
+            return "ABRUPT THERMAL TRANSITION - BLOCK HELD";
         case MLXMLStatus::BUILDING_BASELINE:
             return "BUILDING 30 s PERSONAL BASELINE";
         case MLXMLStatus::BASELINE_READY:
@@ -240,6 +491,12 @@ const char* MLXML::getStatusText() const
             return "READY - WEAK ANOMALY";
         case MLXMLStatus::READY_STRONG_ANOMALY:
             return "READY - STRONG ANOMALY";
+        case MLXMLStatus::TARGET_GEOMETRY_DEGRADED:
+            return "TARGET GEOMETRY DEGRADED - ML HELD";
+        case MLXMLStatus::REACQUIRING_TARGET:
+            return "REACQUIRING TARGET - ML HELD";
+        case MLXMLStatus::ANOMALY_CANDIDATE:
+            return "ANOMALY CANDIDATE - PERSISTENCE CHECK";
         case MLXMLStatus::INFERENCE_ERROR:
             return "INFERENCE ERROR";
         default:

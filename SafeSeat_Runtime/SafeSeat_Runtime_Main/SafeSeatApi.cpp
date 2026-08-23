@@ -371,6 +371,12 @@ String SafeSeatApi::buildSensorsJson() const
     appendJsonBool(out, in.mlx.context.available);
     out += F(",\"thermal_target_qualified\":");
     appendJsonBool(out, in.mlx.context.thermalContrastQualified);
+    out += F(",\"target_contrast_degraded\":");
+    appendJsonBool(out, in.mlx.context.targetContrastDegraded);
+    out += F(",\"low_contrast_samples\":");
+    out += String(in.mlx.context.lowContrastSamples);
+    out += F(",\"target_losses\":");
+    out += String(in.mlx.context.targetLosses);
     out += F(",\"baseline_ready\":");
     appendJsonBool(out, in.mlx.context.baselineReady);
     out += F(",\"context_change\":");

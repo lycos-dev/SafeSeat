@@ -1,0 +1,14 @@
+{
+  "date": "2026-08-23",
+  "model_retrained": false,
+  "model_features_changed": false,
+  "baseline_duration_sec": 30,
+  "geometry_one_sec_step_c": 0.9,
+  "geometry_two_sec_step_c": 1.4,
+  "geometry_min_baseline_departure_c": 1.25,
+  "reacquire_band_c": 1.0,
+  "reacquire_consecutive_blocks": 3,
+  "anomaly_persistence_blocks": 3,
+  "baseline_preserved_during_geometry_hold": true,
+  "context_change_suppressed_during_geometry_hold": true
+}

@@ -168,6 +168,7 @@ enum class FusionTemperatureState
     UNKNOWN,
     INVALID,
     NO_THERMAL_TARGET,
+    TARGET_DEGRADED,
     BASELINE_BUILDING,
     STABLE,
     CONTEXT_CHANGE,

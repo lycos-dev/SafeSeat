@@ -1,0 +1,14 @@
+{
+  "date": "2026-08-23",
+  "issue": "MLX ambient/Ta drift and Object-Ta hard gate repeatedly prevented stable combined-runtime session/baseline.",
+  "resolution": "Occupancy establishes session; ambient and Object-Ta are diagnostic context only.",
+  "model_retrained": false,
+  "model_features_changed": false,
+  "shared_baseline": true,
+  "baseline_seconds": 30,
+  "stability_transition_guard_c": 1.0,
+  "object_minus_ambient_blocks_baseline": false,
+  "object_minus_ambient_blocks_inference": false,
+  "object_minus_ambient_resets_session": false,
+  "session_reset_condition": "seat occupancy lost or sensor unavailable"
+}
