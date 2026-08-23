@@ -1,0 +1,22 @@
+{
+  "checks": {
+    "base_59821": true,
+    "public_FSRReading_unchanged": true,
+    "private_rearm_state": true,
+    "six_frame_rearm": true,
+    "one_active_rearm": true,
+    "exit_arms_guard": true,
+    "entry_guard_present": true,
+    "existing_exit_logic_preserved": true,
+    "tiny_ml_heartbeat_preserved": true,
+    "runtime_460800": true,
+    "mlx_hold_preserved": true,
+    "mpu_retry_preserved": true,
+    "no_watchdog": true,
+    "braces_ok": true
+  },
+  "host_syntax": {
+    "status": "PASS",
+    "stderr": ""
+  }
+}

@@ -264,6 +264,12 @@ private:
     uint8_t occupancyExitStreak = 0;
     float occupancyPeakTotal = 0.0f;
 
+    // Anti-rebound re-arm guard after a confirmed seat exit.
+    bool occupancyRearmRequired = false;
+    uint8_t occupancyRearmStreak = 0;
+    static constexpr uint8_t OCCUPANCY_REARM_FRAMES = 6;
+    static constexpr uint8_t OCCUPANCY_REARM_MAX_ACTIVE = 1;
+
     bool i2cProbe(uint8_t address);
     bool initADS1();
     bool initADS2();

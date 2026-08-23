@@ -231,7 +231,7 @@ void setup()
     );
 
     Serial.println(
-        " Step 5.9.8.21 - stable runtime + tiny ML status heartbeat"
+        " Step 5.9.8.22 - stable ML heartbeat + FSR anti-rebound rearm"
     );
 
     Serial.println(

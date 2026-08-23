@@ -109,6 +109,7 @@ bool FSRSensor::begin()
     Serial.println("[FSR] Empty-seat drift tracker: ACTIVE until pressure occupancy is confirmed.");
     Serial.println("[FSR] Occupancy: >=12k total + >=2 active sensors for 3 frames.");
     Serial.println("[FSR] Exit: hard-empty, residual-release, or sustained <=30% seated-peak collapse.");
+    Serial.println("[FSR] Re-arm: after exit, wait for <=1 active FSR before new occupancy.");
 
     initialized = ads1OK && ads2OK;
     reading.connected = initialized;
@@ -624,23 +625,67 @@ void FSRSensor::updateDerivedQuantities()
         occupancyExitStreak = 0;
         occupancyPeakTotal = 0.0f;
 
-        if (enterCandidate)
+        if (occupancyRearmRequired)
         {
-            if (occupancyEnterStreak < OCCUPANCY_ENTER_FRAMES)
+            // After a confirmed exit, lingering foam/FSR pressure can
+            // still satisfy the normal >=12k + >=2-sensor entry rule.
+            // Do not re-latch until the old pressure pattern collapses
+            // to <=1 active FSR for six completed frames (~1.3 s).
+            if (
+                reading.activeSensorCount
+                <=
+                OCCUPANCY_REARM_MAX_ACTIVE
+            )
             {
-                occupancyEnterStreak++;
+                if (
+                    occupancyRearmStreak
+                    <
+                    OCCUPANCY_REARM_FRAMES
+                )
+                {
+                    occupancyRearmStreak++;
+                }
+            }
+            else
+            {
+                occupancyRearmStreak = 0;
+            }
+
+            if (
+                occupancyRearmStreak
+                >=
+                OCCUPANCY_REARM_FRAMES
+            )
+            {
+                occupancyRearmRequired = false;
+                occupancyRearmStreak = 0;
+                occupancyEnterStreak = 0;
+            }
+            else
+            {
+                occupancyEnterStreak = 0;
             }
         }
         else
         {
-            occupancyEnterStreak = 0;
-        }
+            if (enterCandidate)
+            {
+                if (occupancyEnterStreak < OCCUPANCY_ENTER_FRAMES)
+                {
+                    occupancyEnterStreak++;
+                }
+            }
+            else
+            {
+                occupancyEnterStreak = 0;
+            }
 
-        if (occupancyEnterStreak >= OCCUPANCY_ENTER_FRAMES)
-        {
-            pressureOccupancyLatched = true;
-            occupancyEnterStreak = 0;
-            occupancyPeakTotal = reading.wholeSeatTotal;
+            if (occupancyEnterStreak >= OCCUPANCY_ENTER_FRAMES)
+            {
+                pressureOccupancyLatched = true;
+                occupancyEnterStreak = 0;
+                occupancyPeakTotal = reading.wholeSeatTotal;
+            }
         }
     }
     else
@@ -701,6 +746,11 @@ void FSRSensor::updateDerivedQuantities()
             pressureOccupancyLatched = false;
             occupancyExitStreak = 0;
             occupancyPeakTotal = 0.0f;
+
+            // Prevent residual pressure rebound from looking like a
+            // brand-new passenger immediately after the exit.
+            occupancyRearmRequired = true;
+            occupancyRearmStreak = 0;
         }
     }
 
@@ -1063,6 +1113,9 @@ void FSRSensor::forceRecalibration()
         pressureOccupancyLatched = false;
         occupancyEnterStreak = 0;
         occupancyExitStreak = 0;
+        occupancyPeakTotal = 0.0f;
+        occupancyRearmRequired = false;
+        occupancyRearmStreak = 0;
 
         reading.occupiedByPressure = false;
         reading.emptyBaselineTracking = false;
