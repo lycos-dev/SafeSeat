@@ -38,7 +38,7 @@ void MLXContext::begin()
         "[MLX-CONTEXT] Context-change reference: +/-1.85 C from baseline (FDA p99 repeated-round range; non-medical)."
     );
     Serial.println(
-        "[MLX-CONTEXT] WESAD IF/OCSVM remains diagnostic-only and is NOT fused."
+        "[MLX-CONTEXT] Native MLX IF/OCSVM runs separately; Ta/delta remain context only."
     );
 }
 

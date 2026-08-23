@@ -1,0 +1,23 @@
+{
+  "date": "2026-08-23",
+  "base_package": "user uploaded SafeSeat_Runtime(2).zip",
+  "mlx_wesad_active_cpp_files": "REMOVED",
+  "mlx_native_model_files": "PRESENT",
+  "mlx_native_if_trees": 300,
+  "mlx_native_ocsvm_nu": 0.02,
+  "mlx_native_ocsvm_gamma": 0.03,
+  "mlx_native_heldout_subjects": 48,
+  "mlx_native_both_normal_heldout": 0.9754010695,
+  "mlx_native_embedded_if_parity": 1.0,
+  "mlx_native_embedded_svm_parity": 1.0,
+  "live_nape_validation": "PASS",
+  "fusion_role": "ACTIVE_CONSERVATIVE_EVIDENCE",
+  "fsr_mlx_geometry_compensation": "DEFERRED_UNTIL_COMBINED_LIVE_TEST",
+  "arduino_verify_main": "PENDING_USER",
+  "mlx_wrapper_state_machine_host_test": "PASS",
+  "fusion_host_syntax_check": "PASS",
+  "fsr_ml_current_api_compatibility_host_check": "PASS",
+  "fsr_feature_extractor_current_api_compatibility_host_check": "PASS",
+  "uploaded_runtime_fsr_api_mismatch_found_and_repaired": true,
+  "uploaded_runtime_fsr_api_mismatch_note": "Current FSR.h uses baselineValid/occupiedByPressure/modelShare while existing FSRML/API expected calibrated/occupied/backContact/pressureShare/NUM_FSR. Main integration aligned consumers to current acquisition fields and added NUM_FSR compatibility alias; trained FSR model data was not changed."
+}

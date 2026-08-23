@@ -1,11 +1,13 @@
 SafeSeat Main Hub - CLEAN NO-PIEZO runtime
 ===========================================
 
-Open ONLY:
-  SafeSeat_Runtime_Main_NO_PIEZO.ino
+Open:
+  SafeSeat_Runtime_Main.ino
 
-Do not merge this folder into an older SafeSeat_Runtime_Main folder.
-Arduino compiles every .cpp file in the sketch folder, so stale PiezoComm.cpp/.h
-from an older version will cause compile errors even though Piezo was removed.
+This folder contains the current Main Hub runtime and no active Piezo code.
+Do not merge stale Piezo .cpp/.h files into this sketch folder because Arduino
+compiles every source file in the sketch folder.
 
-This clean folder contains no PiezoComm, PiezoProtocol, Piezo Fusion, or Piezo telemetry code.
+2026-08-23 MLX note:
+  MLX90614 native external-data IF+OCSVM is now active in this Main Hub.
+  See MLX_NATIVE_FINAL_RUNTIME_README.txt.

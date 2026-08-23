@@ -380,9 +380,9 @@ String SafeSeatApi::buildSensorsJson() const
     out += F(",\"deviation_from_baseline_c\":");
     appendJsonFloat(out, in.mlx.context.deviationFromBaselineC, 2);
     out += F("}");
-    out += F(",\"legacy_wesad_model\":");
+    out += F(",\"native_mlx_model\":");
     appendModelEvidence(out, in.mlx.model);
-    out += F(",\"legacy_wesad_model_fusion_role\":\"diagnostic_only\"}");
+    out += F(",\"native_mlx_model_fusion_role\":\"active_conservative_evidence\"}");
 
     // --------------------------------------------------------
     // FSR
@@ -393,11 +393,11 @@ String SafeSeatApi::buildSensorsJson() const
     out += F(",\"connected\":");
     appendJsonBool(out, in.fsr.reading.connected);
     out += F(",\"calibrated\":");
-    appendJsonBool(out, in.fsr.reading.calibrated);
+    appendJsonBool(out, in.fsr.reading.baselineValid);
     out += F(",\"occupied\":");
-    appendJsonBool(out, in.fsr.reading.occupied);
+    appendJsonBool(out, in.fsr.reading.occupiedByPressure);
     out += F(",\"back_contact\":");
-    appendJsonBool(out, in.fsr.reading.backContact);
+    appendJsonBool(out, (in.fsr.reading.backrestTotal > 300.0f));
     out += F(",\"sampling_rate_hz\":");
     appendJsonFloat(out, in.fsr.reading.actualSamplingRateHz, 2);
     out += F(",\"backrest_total\":");
@@ -409,7 +409,7 @@ String SafeSeatApi::buildSensorsJson() const
     out += F(",\"pressure\":");
     appendFloatArray(out, in.fsr.reading.pressure, NUM_FSR, 1);
     out += F(",\"pressure_share\":");
-    appendFloatArray(out, in.fsr.reading.pressureShare, NUM_FSR, 5);
+    appendFloatArray(out, in.fsr.reading.modelShare, NUM_FSR, 5);
     out += F(",\"model\":");
     appendModelEvidence(out, in.fsr.model);
     out += F("}");

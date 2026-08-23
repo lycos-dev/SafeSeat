@@ -67,8 +67,8 @@ struct MLXReading
     // Runtime ambient context
     //
     // This is intentionally retained for SafeSeat deployment.
-    // It is environmental context, not a claim that WESAD
-    // directly trained on MLX ambient temperature.
+    // It is environmental context and is intentionally kept
+    // separate from the native MLX anomaly-model features.
     // --------------------------------------------------------
 
     float objectMinusAmbientC = NAN;

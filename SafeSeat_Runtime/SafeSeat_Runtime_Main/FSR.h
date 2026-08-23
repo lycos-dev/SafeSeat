@@ -52,6 +52,9 @@ enum FSRIndex : uint8_t
     FSR_COUNT     = 9
 };
 
+// Compatibility alias used by the existing validated FSR ML pipeline.
+static constexpr uint8_t NUM_FSR = FSR_COUNT;
+
 enum class FSRStatus
 {
     UNINITIALIZED,

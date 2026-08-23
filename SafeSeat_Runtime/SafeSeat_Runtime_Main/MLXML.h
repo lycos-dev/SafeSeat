@@ -3,16 +3,44 @@
 #include <Arduino.h>
 
 #include "MLX.h"
-#include "MLXFeatureExtractor.h"
-#include "MLXInference.h"
+#include "MLXNativeInference.h"
+
+// ============================================================
+// SAFESEAT MLX90614 NATIVE EXTERNAL MODEL - FINAL RUNTIME
+// 2026-08-23
+//
+// Replaces the retired WESAD / Empatica E4 surrogate.
+//
+// Training source:
+//   CorrectionForeheadTemperature human MLX90614 dataset.
+//
+// Deployment design:
+//   - physical MLX acquisition remains 4 Hz
+//   - 4 accepted samples -> one 1-second measurement block
+//   - block must be thermally qualified and stable
+//   - 30 stable one-second blocks establish a session baseline
+//   - IF + OCSVM then evaluate every stable one-second block
+//
+// MODEL FEATURES ONLY:
+//   1) object temperature - personal/session baseline
+//   2) absolute value of feature 1
+//
+// NOT MODEL FEATURES:
+//   - MLX ambient temperature (Ta)
+//   - Object - ambient
+//   - 1-second measurement standard deviation
+//
+// Those signals remain runtime quality/fusion context only.
+// ============================================================
 
 enum class MLXMLStatus
 {
     WAITING_FOR_SAMPLE,
     SENSOR_UNAVAILABLE,
     WAITING_FOR_WARM_TARGET,
-    COLLECTING_WINDOW,
-    INSUFFICIENT_VALID_DATA,
+    UNSTABLE_TARGET,
+    BUILDING_BASELINE,
+    BASELINE_READY,
     READY_NORMAL,
     READY_WEAK_ANOMALY,
     READY_STRONG_ANOMALY,
@@ -24,29 +52,28 @@ struct MLXMLReading
     bool modelAvailable = true;
     bool valid = false;
 
-    // True only when the MLX sees an object clearly warmer than
-    // ambient. This is a deployment/target qualification gate,
-    // not a medical threshold.
     bool warmTargetQualified = false;
+    bool stabilityQualified = false;
+    bool baselineReady = false;
 
     float targetDeltaC = NAN;
+    float oneSecondObjectMeanC = NAN;
+    float oneSecondAmbientMeanC = NAN;
+    float oneSecondObjectStdC = NAN;
 
-    MLXMLStatus status =
-        MLXMLStatus::WAITING_FOR_SAMPLE;
+    float baselineObjectC = NAN;
+    float deviationFromBaselineC = NAN;
 
-    uint16_t windowSamplesCollected = 0;
-    uint16_t windowSamplesRequired =
-        MLX_ML_WINDOW_SAMPLES;
+    MLXMLStatus status = MLXMLStatus::WAITING_FOR_SAMPLE;
 
-    uint16_t samplesUntilNextInference =
-        MLX_ML_WINDOW_SAMPLES;
+    uint8_t baselineBlocksCollected = 0;
+    uint8_t baselineBlocksRequired = 30;
 
-    uint16_t lastFiniteSampleCount = 0;
+    uint32_t evaluatedBlocks = 0;
+    uint32_t unstableBlocksHeld = 0;
+    uint32_t targetLosses = 0;
 
-    uint32_t windowsEvaluated = 0;
-
-    unsigned long lastProcessedPhysicalSampleCount = 0;
-
+    unsigned long lastProcessedAcceptedSampleCount = 0;
     unsigned long lastInferenceMillis = 0;
 
     float isolationForestDecision = NAN;
@@ -54,7 +81,6 @@ struct MLXMLReading
 
     bool isolationForestAnomaly = false;
     bool oneClassSVMAnomaly = false;
-
     bool bothModelsAnomaly = false;
     bool eitherModelAnomaly = false;
 };
@@ -65,71 +91,35 @@ public:
     MLXML() = default;
 
     void begin();
+    void update(const MLXReading &sensorReading);
 
-    // Call frequently from the main loop.
-    //
-    // A value is consumed only when the MLX physical sample
-    // count (accepted + rejected) changes.
-    void update(
-        const MLXReading &sensorReading
-    );
-
-    const MLXMLReading&
-    getReading() const;
-
-    const char*
-    getStatusText() const;
+    const MLXMLReading& getReading() const;
+    const char* getStatusText() const;
 
 private:
-    static constexpr uint16_t
-        MIN_FINITE_SAMPLES_FOR_INFERENCE = 60;
+    static constexpr uint8_t BLOCK_SAMPLES = 4;
+    static constexpr uint8_t BASELINE_BLOCK_COUNT = 30;
 
-    // MLX90614 sensor-spec physical output range. This is only
-    // used to reject impossible hardware values before feature
-    // extraction. The model's own 20..45 C data-validity
-    // features remain inside MLXFeatureExtractor.
-    static constexpr float
-        PHYSICAL_OBJECT_MIN_C = -40.0f;
+    // Engineering target/quality gates; non-medical.
+    static constexpr float WARM_TARGET_MIN_DELTA_C = 2.0f;
+    static constexpr float MAX_ONE_SECOND_OBJECT_STD_C = 0.50f;
 
-    static constexpr float
-        PHYSICAL_OBJECT_MAX_C = 125.0f;
-
-    // Provisional bench/deployment gate. The current hardware log
-    // showed background near -0.7..0 C delta and a forehead target
-    // around +5..+8 C, so +2 C cleanly rejects obvious room/background
-    // windows. This MUST be revalidated with the final seat/headrest
-    // geometry. It is not a medical temperature threshold.
-    static constexpr float
-        WARM_TARGET_MIN_DELTA_C = 2.0f;
-
-    MLXFeatureExtractor featureExtractor;
-    MLXInference inference;
-
+    MLXNativeInference inference;
     MLXMLReading reading;
 
-    float objectWindow[
-        MLX_ML_WINDOW_SAMPLES
-    ] = {0.0f};
+    float blockObject[BLOCK_SAMPLES] = {0.0f};
+    float blockAmbient[BLOCK_SAMPLES] = {0.0f};
+    uint8_t blockCount = 0;
 
-    uint16_t windowCount = 0;
+    float baselineBlocks[BASELINE_BLOCK_COUNT] = {0.0f};
+    uint8_t baselineCount = 0;
 
-    uint16_t writeIndex = 0;
+    void clearDecision();
+    void resetSessionBaseline(MLXMLStatus status);
+    void consumeAcceptedSample(float objectC, float ambientC);
+    void processOneSecondBlock();
 
-    uint16_t newSamplesSinceInference = 0;
-
-    bool firstInferenceCompleted = false;
-
-    void resetWindow(
-        MLXMLStatus status
-    );
-
-    void addSample(
-        float objectTemperature
-    );
-
-    void copyOrderedWindow(
-        float objectTemperature[MLX_ML_WINDOW_SAMPLES]
-    ) const;
-
-    void runInference();
+    static float mean4(const float values[BLOCK_SAMPLES]);
+    static float std4(const float values[BLOCK_SAMPLES], float mean);
+    static float median30(const float values[BASELINE_BLOCK_COUNT]);
 };

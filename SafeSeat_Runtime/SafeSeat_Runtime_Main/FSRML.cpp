@@ -137,7 +137,7 @@ bool FSRML::sampleIsUsable(
     if (
         !sensorReading.connected
         ||
-        !sensorReading.calibrated
+        !sensorReading.baselineValid
         ||
         !sensorReading.valid
     )
@@ -148,9 +148,9 @@ bool FSRML::sampleIsUsable(
     const bool occupancyQualified =
         occupantPresent
         ||
-        sensorReading.occupied
+        sensorReading.occupiedByPressure
         ||
-        sensorReading.backContact;
+        (sensorReading.backrestTotal > 300.0f);
 
     if (
         !occupancyQualified
@@ -471,7 +471,7 @@ void FSRML::update(
     if (
         !sensorReading.connected
         ||
-        !sensorReading.calibrated
+        !sensorReading.baselineValid
         ||
         !sensorReading.valid
     )
@@ -489,9 +489,9 @@ void FSRML::update(
     const bool occupancyQualified =
         occupantPresent
         ||
-        sensorReading.occupied
+        sensorReading.occupiedByPressure
         ||
-        sensorReading.backContact;
+        (sensorReading.backrestTotal > 300.0f);
 
     if (
         !occupancyQualified

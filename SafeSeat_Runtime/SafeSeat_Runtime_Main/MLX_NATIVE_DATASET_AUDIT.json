@@ -1,0 +1,24 @@
+{
+  "correction_forehead_temperature": {
+    "decision": "PRIMARY TRAINING DATASET",
+    "raw_rows": 73602,
+    "paper_validity_rows_reproduced": 18024,
+    "filtered_rows_used_before_feature_conversion": 5474,
+    "eligible_subjects": 238,
+    "sensor_family": "MLX90614 (per supplied project/paper repository context)",
+    "use": "same-sensor human normal/reference data; converted to subject-baseline-relative object-temperature features"
+  },
+  "patient_covid_19": {
+    "rows": 500,
+    "temperature_min_c": 35.9,
+    "temperature_median_c": 37.6,
+    "temperature_max_c": 39.4,
+    "sampling_from_uploaded_readme": "30 minute interval",
+    "raw_file_has_explicit_case_id": false,
+    "ambient_temperature_available": false,
+    "mlx_repeatability_std_available": false,
+    "distance_available": false,
+    "decision": "EXCLUDED FROM PRIMARY TRAINING",
+    "reason": "The uploaded file targets a different anomaly problem and lacks an explicit case ID in the raw table plus MLX ambient/distance/repeatability fields. Merging it with the forehead MLX90614 data would create incompatible feature semantics. It is retained as supplementary provenance only."
+  }
+}

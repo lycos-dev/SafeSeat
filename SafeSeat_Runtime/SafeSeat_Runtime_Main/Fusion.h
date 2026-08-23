@@ -281,12 +281,14 @@ struct MLXFusionInput
 
     MLXReading reading;
 
-    // Step 5.4.5: deployment-safe MLX context evidence.
-    // Filtered OBJECT temperature is primary; MLX Ta is
-    // context only. The old WESAD model is kept separately
-    // for diagnostics and is intentionally not fused.
+    // Deployment-safe MLX context evidence.
+    // Filtered OBJECT temperature is primary; MLX Ta and
+    // Object-Ta remain context/quality only.
     MLXContextReading context;
 
+    // 2026-08-23: actual-MLX90614 external-data model.
+    // Personal/session-baseline-relative IF + OCSVM evidence is
+    // now eligible for conservative Fusion use.
     ModelEvidence model;
 };
 

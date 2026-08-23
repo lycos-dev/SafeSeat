@@ -1,0 +1,7 @@
+{
+  "heldout_rows": 935,
+  "if_max_abs_decision_error": 9.065010742048685e-09,
+  "svm_max_abs_decision_error": 2.5321719832049894e-06,
+  "if_prediction_match_fraction": 1.0,
+  "svm_prediction_match_fraction": 1.0
+}

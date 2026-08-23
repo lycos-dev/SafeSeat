@@ -374,7 +374,7 @@ void FusionEngine::update(
         fsrUsable
         &&
         (
-            input.fsr.reading.occupied
+            input.fsr.reading.occupiedByPressure
             ||
             input.fsr.reading.wholeSeatTotal
             >
@@ -794,105 +794,92 @@ void FusionEngine::update(
 
 
     // --------------------------------------------------------
-    // MLX temperature - Step 5.4.5
+    // MLX90614 native temperature model + context
+    // 2026-08-23 FINAL ML RUNTIME INTEGRATION
     // --------------------------------------------------------
     //
-    // IMPORTANT:
-    // The WESAD-derived MLX IF/OCSVM is NOT consumed here.
-    // Step 5.4.3 demonstrated that its E4-contact feature
-    // distribution does not transfer safely to a non-contact
-    // MLX90614. The model remains available for diagnostics only.
+    // The previous WESAD / Empatica E4 surrogate is retired.
+    // input.mlx.model now comes from an actual-MLX90614 external
+    // human dataset and operates only on change relative to the
+    // occupant/session baseline.
     //
-    // Fusion instead consumes MLXContextReading:
-    // - filtered OBJECT temperature is the primary signal
-    // - MLX Ta is context only
-    // - Object-Ta is a thermal-contrast quality gate only
-    // - a 30-second filtered-object baseline is established
-    // - +/-1.85 C is a broad FDA repeated-round p99 context
-    //   marker, NOT a medical abnormal-temperature threshold
+    // The model is still conservative evidence, NOT diagnosis:
+    // - both MLX models anomaly -> one STRONG MLX sensor vote
+    // - either-only anomaly     -> one WEAK MLX sensor vote
+    // - both normal             -> one normal MLX sensor vote
     //
-    // A context change NEVER creates anomalyEvidenceCount by
-    // itself. It is supporting context only until real headrest/
-    // nape MLX data can calibrate a deployment-domain model.
+    // MLX ambient temperature, Object-Ta and broad context-change
+    // remain contextual/quality signals; they are NOT additional
+    // independent anomaly votes and are not model inputs.
     // --------------------------------------------------------
 
-    bool mlxStableContext = false;
-    bool mlxContextChanged = false;
+    const bool mlxModelReady =
+        mlxUsable
+        && input.mlx.context.thermalContrastQualified
+        && input.mlx.context.baselineReady
+        && hasModelEvidence(input.mlx.model);
 
-    if (
-        !mlxAvailable
-        ||
-        !mlxUsable
-    )
-    {
-        reading.temperature =
-            FusionTemperatureState::UNKNOWN;
-    }
-    else if (
-        !isfinite(
-            input.mlx.reading.filteredAmbientC
-        )
-        ||
-        !isfinite(
-            input.mlx.reading.filteredObjectC
-        )
-    )
-    {
-        reading.temperature =
-            FusionTemperatureState::INVALID;
-    }
-    else if (
-        !input.mlx.context.thermalContrastQualified
-    )
-    {
-        reading.temperature =
-            FusionTemperatureState::NO_THERMAL_TARGET;
-    }
-    else if (
-        !input.mlx.context.baselineReady
-    )
-    {
-        reading.temperature =
-            FusionTemperatureState::BASELINE_BUILDING;
-    }
-    else if (
+    const bool mlxStrongAnomaly =
+        hasStrongModelAnomaly(input.mlx.model);
+
+    const bool mlxWeakAnomaly =
+        hasWeakModelAnomaly(input.mlx.model);
+
+    const bool mlxModelNormal =
+        mlxModelReady
+        && !input.mlx.model.eitherModelAnomaly;
+
+    const bool mlxContextChanged =
         input.mlx.context.valid
-        &&
-        input.mlx.context.contextChange
-    )
-    {
-        reading.temperature =
-            FusionTemperatureState::CONTEXT_CHANGE;
+        && input.mlx.context.contextChange;
 
-        mlxContextChanged =
-            true;
+    if (!mlxAvailable || !mlxUsable)
+    {
+        reading.temperature = FusionTemperatureState::UNKNOWN;
     }
-    else if (
-        input.mlx.context.valid
-    )
+    else if (!isfinite(input.mlx.reading.filteredAmbientC)
+        || !isfinite(input.mlx.reading.filteredObjectC))
     {
-        reading.temperature =
-            FusionTemperatureState::STABLE;
-
-        mlxStableContext =
-            true;
+        reading.temperature = FusionTemperatureState::INVALID;
+    }
+    else if (!input.mlx.context.thermalContrastQualified)
+    {
+        reading.temperature = FusionTemperatureState::NO_THERMAL_TARGET;
+    }
+    else if (mlxStrongAnomaly || mlxWeakAnomaly)
+    {
+        reading.temperature = FusionTemperatureState::ANOMALOUS;
+    }
+    else if (!input.mlx.context.baselineReady || !mlxModelReady)
+    {
+        reading.temperature = FusionTemperatureState::BASELINE_BUILDING;
+    }
+    else if (mlxContextChanged)
+    {
+        reading.temperature = FusionTemperatureState::CONTEXT_CHANGE;
     }
     else
     {
-        reading.temperature =
-            FusionTemperatureState::UNKNOWN;
+        reading.temperature = FusionTemperatureState::STABLE;
     }
 
-
-    if (
-        mlxStableContext
-    )
+    if (mlxStrongAnomaly)
+    {
+        reading.evidence.anomalyEvidenceCount++;
+        reading.evidence.strongAnomalyEvidenceCount++;
+    }
+    else if (mlxWeakAnomaly)
+    {
+        reading.evidence.anomalyEvidenceCount++;
+    }
+    else if (mlxModelNormal)
     {
         reading.evidence.normalEvidenceCount++;
     }
-    else if (
-        mlxContextChanged
-    )
+
+    // Same MLX signal family: context-change is supporting context
+    // only and never becomes a second independent anomaly vote.
+    if (mlxContextChanged && !mlxStrongAnomaly && !mlxWeakAnomaly)
     {
         reading.evidence.supportingContextCount++;
     }

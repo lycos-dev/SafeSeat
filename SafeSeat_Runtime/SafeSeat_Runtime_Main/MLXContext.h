@@ -18,10 +18,10 @@
 // - Compare current filtered object temperature against that
 //   baseline as CONTEXT only.
 //
-// The old WESAD IF/OCSVM model is retained elsewhere for
-// diagnostics, but Step 5.4.5 intentionally does NOT use its
-// anomaly vote in Fusion because Step 5.4.3 demonstrated a
-// severe contact-E4 vs non-contact-MLX domain mismatch.
+// The retired WESAD/E4 model has been replaced by the native
+// MLX90614 personal-baseline model. This context module remains
+// separate so ambient/thermal-contrast and broad baseline-change
+// evidence are not confused with the IF/OCSVM model inputs.
 // ============================================================
 
 

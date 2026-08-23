@@ -2,568 +2,246 @@
 
 #include <math.h>
 
-// ============================================================
-// INITIALIZATION
-// ============================================================
-
 void MLXML::begin()
 {
-    reading =
-        MLXMLReading{};
-
-    resetWindow(
-        MLXMLStatus::WAITING_FOR_SAMPLE
-    );
+    reading = MLXMLReading{};
+    reading.modelAvailable = true;
+    reading.baselineBlocksRequired = BASELINE_BLOCK_COUNT;
+    resetSessionBaseline(MLXMLStatus::WAITING_FOR_SAMPLE);
 
     Serial.println();
-    Serial.println(
-        "[MLX-ML-DIAG] WESAD surrogate model initialized (diagnostic only; NOT fused)."
-    );
-
-    Serial.println(
-        "[MLX-ML-DIAG] Window: 30 s @ 4 Hz, stride: 15 s."
-    );
-
-    Serial.println(
-        "[MLX-ML-DIAG] Source: qualified MLX90614 object temperature."
-    );
-
-    Serial.println(
-        "[MLX-ML-DIAG] 30-s window is median-centered before 38-feature inference.\n[MLX-ML-DIAG] MLX Ta is not model input."
-    );
-
-    Serial.println(
-        "[MLX-ML-DIAG] Thermal-contrast gate: Object-Ta >= 2.0 C (engineering gate only)."
-    );
-
-    Serial.println(
-        "[MLX-ML-DIAG] Empty/background windows are NOT sent to the diagnostic model."
-    );
-
-    Serial.println(
-        "[MLX-ML-DIAG] Gate is provisional/non-medical; final seat calibration still required."
-    );
-
-    Serial.println(
-        "[MLX-ML-DIAG] Isolation Forest + One-Class SVM ready; Fusion ignores these votes."
-    );
-
+    Serial.println("[MLX-ML] Native MLX90614 model initialized.");
+    Serial.println("[MLX-ML] External source: human MLX90614 dataset (not WESAD/E4).");
+    Serial.println("[MLX-ML] Physical acquisition: 4 Hz -> stable 1-second blocks.");
+    Serial.println("[MLX-ML] 30 stable seconds establish personal/session baseline.");
+    Serial.println("[MLX-ML] Features: delta from session baseline + absolute delta only.");
+    Serial.println("[MLX-ML] Ambient/Object-Ta/stability remain quality/context, not ML features.");
+    Serial.println("[MLX-ML] IF + tuned OCSVM active and available to Fusion.");
 }
 
-
-// ============================================================
-// RESET
-// ============================================================
-
-void MLXML::resetWindow(
-    MLXMLStatus status
-)
+void MLXML::clearDecision()
 {
-    windowCount =
-        0;
-
-    writeIndex =
-        0;
-
-    newSamplesSinceInference =
-        0;
-
-    firstInferenceCompleted =
-        false;
-
-    for (
-        uint16_t i = 0;
-        i < MLX_ML_WINDOW_SAMPLES;
-        i++
-    )
-    {
-        objectWindow[i] =
-            NAN;
-    }
-
-    reading.valid =
-        false;
-
-    reading.warmTargetQualified =
-        false;
-
-    reading.targetDeltaC =
-        NAN;
-
-    reading.status =
-        status;
-
-    reading.windowSamplesCollected =
-        0;
-
-    reading.samplesUntilNextInference =
-        MLX_ML_WINDOW_SAMPLES;
-
-    reading.lastFiniteSampleCount =
-        0;
-
-    reading.isolationForestDecision =
-        NAN;
-
-    reading.oneClassSVMDecision =
-        NAN;
-
-    reading.isolationForestAnomaly =
-        false;
-
-    reading.oneClassSVMAnomaly =
-        false;
-
-    reading.bothModelsAnomaly =
-        false;
-
-    reading.eitherModelAnomaly =
-        false;
+    reading.valid = false;
+    reading.deviationFromBaselineC = NAN;
+    reading.isolationForestDecision = NAN;
+    reading.oneClassSVMDecision = NAN;
+    reading.isolationForestAnomaly = false;
+    reading.oneClassSVMAnomaly = false;
+    reading.bothModelsAnomaly = false;
+    reading.eitherModelAnomaly = false;
 }
 
-
-// ============================================================
-// ADD SAMPLE
-// ============================================================
-
-void MLXML::addSample(
-    float objectTemperature
-)
+void MLXML::resetSessionBaseline(MLXMLStatus status)
 {
-    objectWindow[
-        writeIndex
-    ] =
-        objectTemperature;
+    baselineCount = 0;
+    reading.baselineBlocksCollected = 0;
+    reading.baselineReady = false;
+    reading.baselineObjectC = NAN;
+    reading.warmTargetQualified = false;
+    reading.stabilityQualified = false;
+    clearDecision();
+    reading.status = status;
+}
 
-    writeIndex++;
+float MLXML::mean4(const float values[BLOCK_SAMPLES])
+{
+    return (values[0] + values[1] + values[2] + values[3]) / 4.0f;
+}
 
-    if (
-        writeIndex
-        >=
-        MLX_ML_WINDOW_SAMPLES
-    )
+float MLXML::std4(const float values[BLOCK_SAMPLES], float mean)
+{
+    float sum = 0.0f;
+    for (uint8_t i = 0; i < BLOCK_SAMPLES; ++i)
     {
-        writeIndex =
-            0;
+        const float d = values[i] - mean;
+        sum += d * d;
     }
+    return sqrtf(sum / static_cast<float>(BLOCK_SAMPLES));
+}
 
-    if (
-        windowCount
-        <
-        MLX_ML_WINDOW_SAMPLES
-    )
+float MLXML::median30(const float values[BASELINE_BLOCK_COUNT])
+{
+    float working[BASELINE_BLOCK_COUNT];
+    for (uint8_t i = 0; i < BASELINE_BLOCK_COUNT; ++i)
+        working[i] = values[i];
+
+    for (uint8_t i = 1; i < BASELINE_BLOCK_COUNT; ++i)
     {
-        windowCount++;
-    }
-
-    newSamplesSinceInference++;
-
-    reading.windowSamplesCollected =
-        windowCount;
-
-    if (
-        !firstInferenceCompleted
-    )
-    {
-        reading.samplesUntilNextInference =
-            MLX_ML_WINDOW_SAMPLES
-            -
-            windowCount;
-    }
-    else
-    {
-        uint16_t progress =
-            newSamplesSinceInference;
-
-        if (
-            progress
-            >
-            MLX_ML_STRIDE_SAMPLES
-        )
+        const float key = working[i];
+        int j = static_cast<int>(i) - 1;
+        while (j >= 0 && working[j] > key)
         {
-            progress =
-                MLX_ML_STRIDE_SAMPLES;
+            working[j + 1] = working[j];
+            --j;
         }
-
-        reading.samplesUntilNextInference =
-            MLX_ML_STRIDE_SAMPLES
-            -
-            progress;
+        working[j + 1] = key;
     }
+
+    return 0.5f * (working[14] + working[15]);
 }
 
-
-// ============================================================
-// ORDERED WINDOW
-// ============================================================
-
-void MLXML::copyOrderedWindow(
-    float objectTemperature[MLX_ML_WINDOW_SAMPLES]
-) const
+void MLXML::consumeAcceptedSample(float objectC, float ambientC)
 {
-    if (
-        windowCount
-        <
-        MLX_ML_WINDOW_SAMPLES
-    )
-    {
+    if (!isfinite(objectC) || !isfinite(ambientC))
         return;
-    }
 
-    // Once full, writeIndex points to the oldest sample.
-    for (
-        uint16_t i = 0;
-        i < MLX_ML_WINDOW_SAMPLES;
-        i++
-    )
-    {
-        uint16_t sourceIndex =
-            (
-                writeIndex
-                +
-                i
-            )
-            %
-            MLX_ML_WINDOW_SAMPLES;
+    blockObject[blockCount] = objectC;
+    blockAmbient[blockCount] = ambientC;
+    blockCount++;
 
-        objectTemperature[i] =
-            objectWindow[
-                sourceIndex
-            ];
-    }
+    if (blockCount >= BLOCK_SAMPLES)
+        processOneSecondBlock();
 }
 
-
-// ============================================================
-// RUN INFERENCE
-// ============================================================
-
-void MLXML::runInference()
+void MLXML::processOneSecondBlock()
 {
-    float orderedObjectTemperature[
-        MLX_ML_WINDOW_SAMPLES
-    ];
+    const float objectMean = mean4(blockObject);
+    const float ambientMean = mean4(blockAmbient);
+    const float objectStd = std4(blockObject, objectMean);
+    const float thermalDelta = objectMean - ambientMean;
 
-    copyOrderedWindow(
-        orderedObjectTemperature
-    );
+    blockCount = 0;
 
-    MLXFeatureVector
-        features;
-
-    if (
-        !featureExtractor.extract(
-            orderedObjectTemperature,
-            features
-        )
-        ||
-        !features.valid
-    )
-    {
-        reading.valid =
-            false;
-
-        reading.status =
-            MLXMLStatus::INFERENCE_ERROR;
-
-        return;
-    }
-
-    reading.lastFiniteSampleCount =
-        features.finiteSampleCount;
-
-    // Runtime signal-quality gate. The training configuration
-    // accepted windows with at least 60 samples; do not create
-    // model evidence from a severely missing 30-second window.
-    if (
-        features.finiteSampleCount
-        <
-        MIN_FINITE_SAMPLES_FOR_INFERENCE
-    )
-    {
-        reading.valid =
-            false;
-
-        reading.status =
-            MLXMLStatus::INSUFFICIENT_VALID_DATA;
-
-        firstInferenceCompleted =
-            true;
-
-        newSamplesSinceInference =
-            0;
-
-        reading.samplesUntilNextInference =
-            MLX_ML_STRIDE_SAMPLES;
-
-        return;
-    }
-
-    MLXInferenceResult
-        result;
-
-    if (
-        !inference.predict(
-            features.values,
-            result
-        )
-        ||
-        !result.valid
-    )
-    {
-        reading.valid =
-            false;
-
-        reading.status =
-            MLXMLStatus::INFERENCE_ERROR;
-
-        return;
-    }
-
-    reading.valid =
-        true;
-
-    reading.isolationForestDecision =
-        result.isolationForestDecision;
-
-    reading.oneClassSVMDecision =
-        result.oneClassSVMDecision;
-
-    reading.isolationForestAnomaly =
-        result.isolationForestAnomaly;
-
-    reading.oneClassSVMAnomaly =
-        result.oneClassSVMAnomaly;
-
-    reading.bothModelsAnomaly =
-        result.bothModelsAnomaly;
-
-    reading.eitherModelAnomaly =
-        result.eitherModelAnomaly;
-
-    reading.windowsEvaluated++;
-
-    reading.lastInferenceMillis =
-        millis();
-
-    reading.status =
-        result.bothModelsAnomaly
-            ? MLXMLStatus::READY_STRONG_ANOMALY
-            : (
-                result.eitherModelAnomaly
-                    ? MLXMLStatus::READY_WEAK_ANOMALY
-                    : MLXMLStatus::READY_NORMAL
-            );
-
-    // Step 5.4.3 feature dumps are intentionally disabled in
-    // Step 5.4.5 so later all-sensor dashboard testing remains
-    // compact. The diagnostic model itself still runs.
-
-    firstInferenceCompleted =
-        true;
-
-    newSamplesSinceInference =
-        0;
-
-    reading.samplesUntilNextInference =
-        MLX_ML_STRIDE_SAMPLES;
-}
-
-
-// ============================================================
-// UPDATE
-// ============================================================
-
-void MLXML::update(
-    const MLXReading &sensorReading
-)
-{
-    unsigned long physicalSampleCount =
-        sensorReading.acceptedSampleCount
-        +
-        sensorReading.rejectedSampleCount;
-
-    if (
-        physicalSampleCount
-        ==
-        reading.lastProcessedPhysicalSampleCount
-    )
-    {
-        return;
-    }
-
-    reading.lastProcessedPhysicalSampleCount =
-        physicalSampleCount;
-
-    if (
-        !sensorReading.connected
-    )
-    {
-        resetWindow(
-            MLXMLStatus::SENSOR_UNAVAILABLE
-        );
-
-        reading.lastProcessedPhysicalSampleCount =
-            physicalSampleCount;
-
-        return;
-    }
-
-    // ========================================================
-    // WARM-TARGET QUALIFICATION
-    //
-    // The trained WESAD model represents skin temperature. Do
-    // not ask it to classify an obvious room/background window.
-    // Ambient and Object-Ambient remain runtime/Fusion context;
-    // only raw object temperature is still fed into the model.
-    //
-    // +2 C is a provisional engineering gate based on the current
-    // bench separation. It is NOT a medical threshold and must be
-    // recalibrated on the final seat/headrest geometry.
-    // ========================================================
-
-    float targetDeltaC =
-        sensorReading.objectMinusAmbientC;
-
-    bool warmTargetQualified =
-        sensorReading.valid
-        &&
-        isfinite(
-            targetDeltaC
-        )
-        &&
-        targetDeltaC
-        >=
-        WARM_TARGET_MIN_DELTA_C;
-
-    if (
-        !warmTargetQualified
-    )
-    {
-        resetWindow(
-            MLXMLStatus::WAITING_FOR_WARM_TARGET
-        );
-
-        reading.lastProcessedPhysicalSampleCount =
-            physicalSampleCount;
-
-        reading.warmTargetQualified =
-            false;
-
-        reading.targetDeltaC =
-            targetDeltaC;
-
-        return;
-    }
+    reading.oneSecondObjectMeanC = objectMean;
+    reading.oneSecondAmbientMeanC = ambientMean;
+    reading.oneSecondObjectStdC = objectStd;
+    reading.targetDeltaC = thermalDelta;
 
     reading.warmTargetQualified =
-        true;
+        isfinite(thermalDelta)
+        && thermalDelta >= WARM_TARGET_MIN_DELTA_C;
 
-    reading.targetDeltaC =
-        targetDeltaC;
+    reading.stabilityQualified =
+        isfinite(objectStd)
+        && objectStd <= MAX_ONE_SECOND_OBJECT_STD_C;
 
-    float objectTemperature =
-        sensorReading.rawObjectC;
-
-    // Only reject impossible/non-finite hardware values here.
-    // Values outside the WESAD 20..45 C data range are retained
-    // so the trained validity features can represent them.
-    if (
-        !isfinite(
-            objectTemperature
-        )
-        ||
-        objectTemperature
-        <
-        PHYSICAL_OBJECT_MIN_C
-        ||
-        objectTemperature
-        >
-        PHYSICAL_OBJECT_MAX_C
-    )
+    if (!reading.warmTargetQualified)
     {
-        objectTemperature =
-            NAN;
+        reading.targetLosses++;
+        resetSessionBaseline(MLXMLStatus::WAITING_FOR_WARM_TARGET);
+
+        // resetSessionBaseline clears only model/baseline state; preserve the
+        // just-observed block diagnostics for Serial/API reporting.
+        reading.targetDeltaC = thermalDelta;
+        reading.oneSecondObjectMeanC = objectMean;
+        reading.oneSecondAmbientMeanC = ambientMean;
+        reading.oneSecondObjectStdC = objectStd;
+        reading.warmTargetQualified = false;
+        reading.stabilityQualified = objectStd <= MAX_ONE_SECOND_OBJECT_STD_C;
+        return;
     }
 
-    addSample(
-        objectTemperature
-    );
-
-    reading.status =
-        MLXMLStatus::COLLECTING_WINDOW;
-
-    bool shouldInfer =
-        windowCount
-        >=
-        MLX_ML_WINDOW_SAMPLES
-        &&
-        (
-            !firstInferenceCompleted
-            ||
-            newSamplesSinceInference
-            >=
-            MLX_ML_STRIDE_SAMPLES
-        );
-
-    if (
-        shouldInfer
-    )
+    if (!reading.stabilityQualified)
     {
-        runInference();
+        reading.unstableBlocksHeld++;
+        clearDecision();
+        reading.status = MLXMLStatus::UNSTABLE_TARGET;
+        return;
     }
+
+    if (!reading.baselineReady)
+    {
+        if (baselineCount < BASELINE_BLOCK_COUNT)
+            baselineBlocks[baselineCount++] = objectMean;
+
+        reading.baselineBlocksCollected = baselineCount;
+        reading.status = MLXMLStatus::BUILDING_BASELINE;
+
+        if (baselineCount >= BASELINE_BLOCK_COUNT)
+        {
+            reading.baselineObjectC = median30(baselineBlocks);
+            reading.baselineReady = isfinite(reading.baselineObjectC);
+            reading.status = reading.baselineReady
+                ? MLXMLStatus::BASELINE_READY
+                : MLXMLStatus::INFERENCE_ERROR;
+        }
+        return;
+    }
+
+    const float delta = objectMean - reading.baselineObjectC;
+    const float features[2] = {delta, fabsf(delta)};
+
+    MLXNativeDecision result = inference.predict(features);
+
+    if (!isfinite(result.isolationForestDecision)
+        || !isfinite(result.oneClassSVMDecision))
+    {
+        clearDecision();
+        reading.status = MLXMLStatus::INFERENCE_ERROR;
+        return;
+    }
+
+    reading.valid = true;
+    reading.deviationFromBaselineC = delta;
+    reading.isolationForestDecision = result.isolationForestDecision;
+    reading.oneClassSVMDecision = result.oneClassSVMDecision;
+    reading.isolationForestAnomaly = result.isolationForestAnomaly;
+    reading.oneClassSVMAnomaly = result.oneClassSVMAnomaly;
+    reading.bothModelsAnomaly = result.bothAnomaly;
+    reading.eitherModelAnomaly = result.eitherAnomaly;
+    reading.evaluatedBlocks++;
+    reading.lastInferenceMillis = millis();
+
+    reading.status = result.bothAnomaly
+        ? MLXMLStatus::READY_STRONG_ANOMALY
+        : (result.eitherAnomaly
+            ? MLXMLStatus::READY_WEAK_ANOMALY
+            : MLXMLStatus::READY_NORMAL);
 }
 
+void MLXML::update(const MLXReading &sensorReading)
+{
+    if (!sensorReading.connected)
+    {
+        blockCount = 0;
+        resetSessionBaseline(MLXMLStatus::SENSOR_UNAVAILABLE);
+        return;
+    }
 
-// ============================================================
-// READING ACCESS
-// ============================================================
+    // Consume only each NEW accepted physical 4-Hz sample once.
+    if (!sensorReading.currentSampleAccepted
+        || sensorReading.acceptedSampleCount == reading.lastProcessedAcceptedSampleCount)
+    {
+        return;
+    }
 
-const MLXMLReading&
-MLXML::getReading() const
+    reading.lastProcessedAcceptedSampleCount = sensorReading.acceptedSampleCount;
+
+    consumeAcceptedSample(
+        sensorReading.rawObjectC,
+        sensorReading.rawAmbientC
+    );
+}
+
+const MLXMLReading& MLXML::getReading() const
 {
     return reading;
 }
 
-
-// ============================================================
-// STATUS TEXT
-// ============================================================
-
-const char*
-MLXML::getStatusText() const
+const char* MLXML::getStatusText() const
 {
-    switch (
-        reading.status
-    )
+    switch (reading.status)
     {
         case MLXMLStatus::WAITING_FOR_SAMPLE:
             return "WAITING FOR SAMPLE";
-
         case MLXMLStatus::SENSOR_UNAVAILABLE:
             return "SENSOR UNAVAILABLE";
-
         case MLXMLStatus::WAITING_FOR_WARM_TARGET:
-            return "WAITING FOR WARM TARGET";
-
-        case MLXMLStatus::COLLECTING_WINDOW:
-            return "COLLECTING 30 s WINDOW";
-
-        case MLXMLStatus::INSUFFICIENT_VALID_DATA:
-            return "INSUFFICIENT VALID DATA";
-
+            return "WAITING FOR WARM TARGET - BASELINE RESET";
+        case MLXMLStatus::UNSTABLE_TARGET:
+            return "UNSTABLE TARGET - BLOCK HELD";
+        case MLXMLStatus::BUILDING_BASELINE:
+            return "BUILDING 30 s PERSONAL BASELINE";
+        case MLXMLStatus::BASELINE_READY:
+            return "BASELINE READY";
         case MLXMLStatus::READY_NORMAL:
             return "READY - NORMAL";
-
         case MLXMLStatus::READY_WEAK_ANOMALY:
             return "READY - WEAK ANOMALY";
-
         case MLXMLStatus::READY_STRONG_ANOMALY:
             return "READY - STRONG ANOMALY";
-
         case MLXMLStatus::INFERENCE_ERROR:
             return "INFERENCE ERROR";
-
         default:
             return "UNKNOWN";
     }

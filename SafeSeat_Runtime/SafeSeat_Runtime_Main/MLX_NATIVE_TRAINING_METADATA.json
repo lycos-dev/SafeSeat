@@ -1,0 +1,53 @@
+{
+  "primary_dataset": "CorrectionForeheadTemperature / MLX90614 forehead dataset",
+  "model_role": "personal-baseline-relative MLX90614 object-temperature anomaly candidate",
+  "model_input_policy": {
+    "model_features": [
+      "object_delta_from_baseline_c",
+      "object_abs_delta_from_baseline_c"
+    ],
+    "ambient_temperature": "context only; not a model feature",
+    "object_minus_ambient": "warm-target/context only; not a model feature",
+    "measurement_stability": "runtime quality gate only; not a model feature",
+    "absolute_object_temperature": "used to build session baseline, not directly fed to the model"
+  },
+  "dataset_counts": {
+    "raw_rows": 73602,
+    "paper_validity_rows": 18024,
+    "safeseat_filtered_rows": 5474,
+    "eligible_subjects": 238,
+    "train_subjects": 190,
+    "test_subjects": 48,
+    "train_feature_rows": 3349,
+    "test_feature_rows": 935,
+    "baseline_seed_external_records_per_subject": 5
+  },
+  "isolation_forest": {
+    "n_estimators": 300,
+    "max_samples": 256,
+    "contamination": 0.025,
+    "train_normal_acceptance": 0.9752164825320991,
+    "test_normal_acceptance": 0.9754010695187165,
+    "test_decision_min": -0.09275940633615598,
+    "test_decision_median": 0.22047148495350732,
+    "test_decision_max": 0.2447756212544112
+  },
+  "one_class_svm": {
+    "nu": 0.02,
+    "gamma": 0.03,
+    "support_vectors": 68,
+    "cv_normal_acceptance_mean": 0.9743166376819319,
+    "cv_normal_acceptance_std": 0.02435324527209964,
+    "train_normal_acceptance": 0.9868617497760526,
+    "test_normal_acceptance": 0.9871657754010695,
+    "test_decision_min": -6.877185969519395,
+    "test_decision_median": 2.479864905830162,
+    "test_decision_max": 5.418397036766407
+  },
+  "combined_heldout": {
+    "both_normal_fraction": 0.9754010695187165,
+    "either_anomaly_fraction": 0.02459893048128342,
+    "both_anomaly_fraction": 0.012834224598930482,
+    "model_agreement_fraction": 0.9882352941176471
+  }
+}

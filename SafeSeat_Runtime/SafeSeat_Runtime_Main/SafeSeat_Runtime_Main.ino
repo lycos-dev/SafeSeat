@@ -387,16 +387,17 @@ void setup()
     // ========================================================
     // MLX90614 EMBEDDED ML
     //
-    // Uses the raw object-temperature stream at 4 Hz to match
-    // the WESAD TEMP training feature cadence. Ambient
-    // temperature remains separate runtime context.
+    // Native MLX90614 external-data model. The 4-Hz sensor stream
+    // is aggregated into stable 1-second blocks. A 30-second
+    // occupant/session baseline is built before IF + OCSVM runs.
+    // Ambient temperature remains separate runtime context.
     // ========================================================
 
     mlxML.begin();
 
-    // Step 5.4.5 deployment-safe MLX context evidence.
-    // The WESAD model above remains diagnostic-only; Fusion
-    // consumes mlxContext instead.
+    // Separate MLX thermal context evidence. The native MLX model
+    // above is now eligible for Fusion; ambient/Object-Ta remain
+    // context/quality rather than ML features.
     mlxContext.begin();
 
 
@@ -694,13 +695,10 @@ void loop()
     fusionInput.mlx.context =
         tx;
 
-    // MLX WESAD model evidence is retained for diagnostics.
-    // Step 5.4.5 Fusion intentionally ignores this model because
-    // the contact-E4 -> non-contact-MLX domain mismatch was
-    // demonstrated in Step 5.4.3.
-    //
-    // MLX model evidence is produced by the sensor-specific
-    // MLX ML pipeline. Ambient temperature is not model input.
+    // Native MLX90614 model evidence is produced locally.
+    // Training uses actual MLX90614 human data and deployment
+    // features are relative to the current session baseline.
+    // Ambient temperature/Object-Ta/stability are not ML inputs.
     fusionInput.mlx.model.available =
         tml.modelAvailable;
 
@@ -1107,172 +1105,80 @@ void loop()
     Serial.println();
 
     Serial.println(
-        "MLX WESAD ML (DIAGNOSTIC ONLY - NOT FUSED):"
+        "MLX NATIVE ML (ACTIVE IN FUSION):"
     );
 
-    Serial.print(
-        "  Status       : "
-    );
+    Serial.print("  Status       : ");
+    Serial.println(mlxML.getStatusText());
 
-    Serial.println(
-        mlxML.getStatusText()
-    );
+    Serial.print("  Target gate  : ");
+    Serial.println(tml.warmTargetQualified ? "QUALIFIED" : "NOT QUALIFIED");
 
-    Serial.print(
-        "  Target gate  : "
-    );
+    Serial.print("  Stability    : ");
+    Serial.println(tml.stabilityQualified ? "QUALIFIED" : "NOT QUALIFIED / WAITING");
 
-    Serial.println(
-        tml.warmTargetQualified
-            ? "QUALIFIED"
-            : "NOT QUALIFIED"
-    );
-
-    if (
-        isfinite(
-            tml.targetDeltaC
-        )
-    )
+    if (isfinite(tml.targetDeltaC))
     {
-        Serial.print(
-            "  Gate delta   : "
-        );
-
-        Serial.print(
-            tml.targetDeltaC,
-            2
-        );
-
-        Serial.println(
-            " C (provisional min +2.00 C)"
-        );
+        Serial.print("  Object-Ta    : ");
+        Serial.print(tml.targetDeltaC, 2);
+        Serial.println(" C (quality gate; not ML feature)");
     }
 
-    Serial.print(
-        "  Window       : "
-    );
-
-    Serial.print(
-        tml.windowSamplesCollected
-    );
-
-    Serial.print(
-        " / "
-    );
-
-    Serial.println(
-        tml.windowSamplesRequired
-    );
-
-    Serial.print(
-        "  Next infer   : "
-    );
-
-    Serial.print(
-        tml.samplesUntilNextInference
-    );
-
-    Serial.println(
-        " sample(s)"
-    );
-
-    Serial.print(
-        "  Windows      : "
-    );
-
-    Serial.println(
-        tml.windowsEvaluated
-    );
-
-    if (
-        tml.lastFiniteSampleCount
-        >
-        0
-    )
+    if (isfinite(tml.oneSecondObjectStdC))
     {
-        Serial.print(
-            "  Finite data  : "
-        );
-
-        Serial.print(
-            tml.lastFiniteSampleCount
-        );
-
-        Serial.print(
-            " / "
-        );
-
-        Serial.println(
-            MLX_ML_WINDOW_SAMPLES
-        );
+        Serial.print("  1-s obj std  : ");
+        Serial.print(tml.oneSecondObjectStdC, 3);
+        Serial.println(" C (quality only)");
     }
 
-    if (
-        tml.valid
-    )
+    Serial.print("  Baseline     : ");
+    Serial.print(tml.baselineBlocksCollected);
+    Serial.print(" / ");
+    Serial.print(tml.baselineBlocksRequired);
+    Serial.print(" stable sec");
+
+    if (tml.baselineReady && isfinite(tml.baselineObjectC))
     {
-        Serial.print(
-            "  IF decision  : "
-        );
+        Serial.print(" | ");
+        Serial.print(tml.baselineObjectC, 2);
+        Serial.print(" C");
+    }
+    Serial.println();
 
-        Serial.print(
-            tml.isolationForestDecision,
-            6
-        );
+    Serial.print("  Eval blocks  : ");
+    Serial.println(tml.evaluatedBlocks);
 
-        Serial.println(
-            tml.isolationForestAnomaly
-                ? "  [ANOMALY]"
-                : "  [NORMAL]"
-        );
+    Serial.print("  Held blocks  : ");
+    Serial.println(tml.unstableBlocksHeld);
 
-        Serial.print(
-            "  SVM decision : "
-        );
+    Serial.print("  Target losses: ");
+    Serial.println(tml.targetLosses);
 
-        Serial.print(
-            tml.oneClassSVMDecision,
-            6
-        );
+    if (tml.valid)
+    {
+        Serial.print("  Delta base   : ");
+        Serial.print(tml.deviationFromBaselineC, 3);
+        Serial.println(" C");
 
-        Serial.println(
-            tml.oneClassSVMAnomaly
-                ? "  [ANOMALY]"
-                : "  [NORMAL]"
-        );
+        Serial.print("  IF decision  : ");
+        Serial.print(tml.isolationForestDecision, 6);
+        Serial.println(tml.isolationForestAnomaly ? "  [ANOMALY]" : "  [NORMAL]");
 
-        Serial.print(
-            "  Diagnostic   : "
-        );
+        Serial.print("  SVM decision : ");
+        Serial.print(tml.oneClassSVMDecision, 6);
+        Serial.println(tml.oneClassSVMAnomaly ? "  [ANOMALY]" : "  [NORMAL]");
 
-        if (
-            tml.bothModelsAnomaly
-        )
-        {
-            Serial.println(
-                "STRONG ANOMALY (NOT FUSED)"
-            );
-        }
-        else if (
-            tml.eitherModelAnomaly
-        )
-        {
-            Serial.println(
-                "WEAK ANOMALY (NOT FUSED)"
-            );
-        }
+        Serial.print("  Fusion vote  : ");
+        if (tml.bothModelsAnomaly)
+            Serial.println("STRONG MLX ANOMALY EVIDENCE");
+        else if (tml.eitherModelAnomaly)
+            Serial.println("WEAK MLX ANOMALY EVIDENCE");
         else
-        {
-            Serial.println(
-                "NORMAL (NOT FUSED)"
-            );
-        }
+            Serial.println("NORMAL MLX EVIDENCE");
     }
     else
     {
-        Serial.println(
-            "  Model result : not ready"
-        );
+        Serial.println("  Model result : not ready / held");
     }
 
 
@@ -2204,11 +2110,11 @@ void loop()
 
 
     Serial.println(
-        "ML inference   : C1001 REMOTE + FSR + MPU ACTIVE; MLX WESAD diagnostic-only"
+        "ML inference   : C1001 REMOTE + MLX NATIVE + FSR + MPU ACTIVE"
     );
 
     Serial.println(
-        "Fusion         : active; C1001 + MLX context + FSR + MPU context + camera verification"
+        "Fusion         : active; C1001 + MLX native/context + FSR + MPU context + camera verification"
     );
 
     Serial.println(
