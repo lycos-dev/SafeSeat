@@ -1,0 +1,364 @@
+--- Step_5.9.8.14/SafeSeat_Runtime_Main.ino
++++ Step_5.9.8.18/SafeSeat_Runtime_Main.ino
+@@ -1,5 +1,7 @@
+ #include <Arduino.h>
+ #include <Wire.h>
++#include <freertos/FreeRTOS.h>
++#include <freertos/task.h>
+ 
+ #include "Config.h"
+ 
+@@ -233,7 +235,7 @@
+     );
+ 
+     Serial.println(
+-        " Step 5.9.8.14 - compile-fixed no-reboot runtime + compact diagnostics"
++        " Step 5.9.8.18 - stack-safe FSR ML + MLX target hold + MPU80"
+     );
+ 
+     Serial.println(
+@@ -242,6 +244,8 @@
+     Serial.println("[SERIAL] Runtime baud: 460800. Upload Speed is independent.");
+     Serial.println("[SAFETY] Application watchdog reboot is DISABLED.");
+     Serial.println("[SAFETY] Giant periodic dashboard is DISABLED; compact telemetry is used.");
++    Serial.println("[MEMORY] FSR ML scratch moved off loopTask stack.");
++    Serial.println("[MLX-TARGET] Invalid/lean-away target is HELD and excluded from Fusion.");
+ // ========================================================
+     // ONE SHARED I2C BUS
+     //
+@@ -650,11 +654,15 @@
+     const FSRReading &f =
+         fsr.getReading();
+ 
+-    // Combined-runtime thermal session:
+-    // occupancy establishes that a person is actually in the seat.
+-    // MLX ambient/Object-Ta are confidence/context only and are
+-    // never allowed to repeatedly destroy the personal baseline.
+-    const bool mlxSeatOccupied =
++    // ========================================================
++    // MLX SESSION / TARGET QUALIFICATION
++    //
++    // Seat occupancy and optical target visibility are separate.
++    // This block intentionally uses the EXISTING MLXML API and does
++    // not alter any MLX class/struct layout.
++    // ========================================================
++
++    const bool rawSeatOccupied =
+         occupantPresent
+         ||
+         (
+@@ -666,18 +674,91 @@
+             &&
+             f.occupiedByPressure
+         );
+-    mlxML.update(
+-        t,
+-        mlxSeatOccupied
+-    );
++
++    // A lingering single FSR after the passenger physically leaves
++    // is mechanical relaxation, not permission to keep thermal evidence.
++    // This affects ONLY the thermal session; Fusion/FSR occupancy remains
++    // on its already-proven code path in this stability build.
++    const bool likelySeatExit =
++        !occupantPresent
++        &&
++        fsrInitialized
++        &&
++        f.connected
++        &&
++        f.valid
++        &&
++        f.wholeSeatTotal <= 12000.0f
++        &&
++        f.activeSensorCount <= 1;
++
++    const bool thermalOccupancy =
++        rawSeatOccupied
++        &&
++        !likelySeatExit;
++
++    // Target-quality gate only -- NOT a medical temperature threshold.
++    // Require a plausible nearby skin-surface signal and meaningful
++    // backrest contact for the headrest-mounted MLX.
++    const bool mlxTargetVisible =
++        thermalOccupancy
++        &&
++        mlxInitialized
++        &&
++        t.connected
++        &&
++        t.valid
++        &&
++        t.filteredObjectC >= 28.0f
++        &&
++        t.filteredObjectC <= 40.0f
++        &&
++        f.backrestTotal >= 1500.0f;
++
++    // Read current ML state BEFORE deciding whether to advance it.
++    const MLXMLReading &tmlBefore =
++        mlxML.getReading();
++
++    if (!thermalOccupancy)
++    {
++        // True seat exit: use the proven existing reset path.
++        mlxML.update(
++            t,
++            false
++        );
++    }
++    else if (mlxTargetVisible)
++    {
++        // Valid nape/headrest target: normal MLX acquisition/inference.
++        mlxML.update(
++            t,
++            true
++        );
++    }
++    else if (!tmlBefore.baselineReady)
++    {
++        // Occupied but no valid nape target yet:
++        // never build a background/chair baseline.
++        mlxML.update(
++            t,
++            false
++        );
++    }
++    else
++    {
++        // Baseline already exists but target left the FOV (e.g. lean forward).
++        // Deliberately DO NOT feed background samples into MLXML and do not
++        // destroy the established baseline. Fusion is gated below.
++    }
+ 
+     const MLXMLReading &tml =
+         mlxML.getReading();
+ 
++    // Context is considered usable only while the intended target is visible.
+     mlxContext.update(
+         t,
+         tml,
+-        mlxSeatOccupied
++        mlxTargetVisible
+     );
+ 
+     if (mpuInitialized)
+@@ -744,7 +825,9 @@
+         tml.modelAvailable;
+ 
+     fusionInput.mlx.model.valid =
+-        tml.valid;
++        tml.valid
++        &&
++        mlxTargetVisible;
+ 
+     fusionInput.mlx.model.isolationForestAnomaly =
+         tml.isolationForestAnomaly;
+@@ -765,7 +848,11 @@
+         tml.oneClassSVMDecision;
+ 
+     fusionInput.mlx.model.confidence =
+-        tml.valid
++        (
++            tml.valid
++            &&
++            mlxTargetVisible
++        )
+             ? 1.0f
+             : 0.0f;
+ 
+@@ -941,14 +1028,26 @@
+         Serial.print(" P=");
+         Serial.print(f.wholeSeatTotal, 0);
+         Serial.print(" MLX=");
+-        Serial.print(mlxSeatOccupied ? "SESSION" : "IDLE");
++        Serial.print(
++            mlxTargetVisible
++                ? "TARGET"
++                : (
++                    thermalOccupancy
++                        ? "HELD"
++                        : "IDLE"
++                )
++        );
+         Serial.print(" base=");
+         Serial.print(tml.baselineBlocksCollected);
+         Serial.print("/30");
+         Serial.print(" FSRwin=");
+         Serial.print(fml.windowsEvaluated);
+         Serial.print(" MPUwin=");
+-        Serial.println(mml.windowsEvaluated);
++        Serial.print(mml.windowsEvaluated);
++        Serial.print(" stackHW=");
++        Serial.println(
++            uxTaskGetStackHighWaterMark(NULL)
++        );
+     }
+ 
+     // ========================================================
+
+--- Step_5.9.8.14/FSRFeatureExtractor.cpp
++++ Step_5.9.8.18/FSRFeatureExtractor.cpp
+@@ -14,7 +14,8 @@
+     double quantile
+ ) const
+ {
+-    double sorted[FSR_ML_WINDOW_SAMPLES];
++    // Single-threaded runtime: keep percentile scratch out of loopTask stack.
++    static double sorted[FSR_ML_WINDOW_SAMPLES];
+ 
+     for (
+         uint16_t i = 0;
+@@ -493,7 +494,8 @@
+     output =
+         FSRFeatureVector{};
+ 
+-    double shares[
++    // ~1.7 KB. Static avoids exhausting the Arduino loopTask stack.
++    static double shares[
+         FSR_ML_WINDOW_SAMPLES
+     ][
+         NUM_FSR
+@@ -576,7 +578,7 @@
+     // 54 per-sensor share features
+     // --------------------------------------------------------
+ 
+-    double series[
++    static double series[
+         FSR_ML_WINDOW_SAMPLES
+     ];
+ 
+@@ -609,51 +611,51 @@
+     // Derived per-frame spatial series
+     // --------------------------------------------------------
+ 
+-    double back[
+-        FSR_ML_WINDOW_SAMPLES
+-    ];
+-
+-    double cushion[
+-        FSR_ML_WINDOW_SAMPLES
+-    ];
+-
+-    double backLR[
+-        FSR_ML_WINDOW_SAMPLES
+-    ];
+-
+-    double cushionLR[
+-        FSR_ML_WINDOW_SAMPLES
+-    ];
+-
+-    double cushionCenter[
+-        FSR_ML_WINDOW_SAMPLES
+-    ];
+-
+-    double upperBack[
+-        FSR_ML_WINDOW_SAMPLES
+-    ];
+-
+-    double middleBack[
+-        FSR_ML_WINDOW_SAMPLES
+-    ];
+-
+-    double lowerBack[
+-        FSR_ML_WINDOW_SAMPLES
+-    ];
+-
+-    double globalLeft[
+-        FSR_ML_WINDOW_SAMPLES
+-    ];
+-
+-    double entropy[
+-        FSR_ML_WINDOW_SAMPLES
+-    ];
+-
+-    double copX[
+-        FSR_ML_WINDOW_SAMPLES
+-    ];
+-
+-    double copY[
++    static double back[
++        FSR_ML_WINDOW_SAMPLES
++    ];
++
++    static double cushion[
++        FSR_ML_WINDOW_SAMPLES
++    ];
++
++    static double backLR[
++        FSR_ML_WINDOW_SAMPLES
++    ];
++
++    static double cushionLR[
++        FSR_ML_WINDOW_SAMPLES
++    ];
++
++    static double cushionCenter[
++        FSR_ML_WINDOW_SAMPLES
++    ];
++
++    static double upperBack[
++        FSR_ML_WINDOW_SAMPLES
++    ];
++
++    static double middleBack[
++        FSR_ML_WINDOW_SAMPLES
++    ];
++
++    static double lowerBack[
++        FSR_ML_WINDOW_SAMPLES
++    ];
++
++    static double globalLeft[
++        FSR_ML_WINDOW_SAMPLES
++    ];
++
++    static double entropy[
++        FSR_ML_WINDOW_SAMPLES
++    ];
++
++    static double copX[
++        FSR_ML_WINDOW_SAMPLES
++    ];
++
++    static double copY[
+         FSR_ML_WINDOW_SAMPLES
+     ];
+ 
+
+--- Step_5.9.8.14/FSRML.cpp
++++ Step_5.9.8.18/FSRML.cpp
+@@ -342,7 +342,9 @@
+ 
+ void FSRML::runInference()
+ {
+-    float orderedPressure[
++    // Large inference scratch is static so it does not stack on top of
++    // FSRFeatureExtractor's working memory inside Arduino loopTask.
++    static float orderedPressure[
+         FSR_ML_WINDOW_SAMPLES
+     ][
+         NUM_FSR
+@@ -352,7 +354,7 @@
+         orderedPressure
+     );
+ 
+-    FSRFeatureVector
++    static FSRFeatureVector
+         features;
+ 
+     if (
+
+--- Step_5.9.8.14/FSRInference.cpp
++++ Step_5.9.8.18/FSRInference.cpp
+@@ -354,7 +354,8 @@
+     result =
+         FSRInferenceResult{};
+ 
+-    float scaled[
++    // Reusable inference scratch; single-threaded in Main.
++    static float scaled[
+         FSR_MODEL_FEATURE_COUNT
+     ];
+ 

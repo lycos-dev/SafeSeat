@@ -1,0 +1,10 @@
+{
+  "runtime_460800": true,
+  "application_wdt_removed": true,
+  "rtc_stage_removed": true,
+  "live_heartbeat": true,
+  "compact_detail": true,
+  "verbose_dashboard_disabled": true,
+  "cooperative_yield": true,
+  "mpu80_code_preserved": true
+}

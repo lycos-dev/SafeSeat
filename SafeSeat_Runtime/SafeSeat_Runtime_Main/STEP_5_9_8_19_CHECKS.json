@@ -1,0 +1,13 @@
+{
+  "runtime_baud_115200": true,
+  "custom_tx_buffer_removed": true,
+  "detail_runtime_output_removed": true,
+  "fsr9_runtime_output_removed": true,
+  "stackHW_runtime_output_removed": true,
+  "heartbeat_2s": true,
+  "verbose_dashboard_disabled": true,
+  "no_watchdog": true,
+  "mlx_target_logic_preserved": true,
+  "fsr_stack_safety_preserved": true,
+  "brace_balance": true
+}

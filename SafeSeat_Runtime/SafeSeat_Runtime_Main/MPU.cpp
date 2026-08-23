@@ -275,17 +275,42 @@ bool MPUSensor::begin()
     int16_t gz;
 
 
-    if (
-        !readMotionRegisters(
-            ax,
-            ay,
-            az,
-            temperature,
-            gx,
-            gy,
-            gz
+    bool initialReadOk = false;
+
+    // Shared-I2C startup can occasionally miss the first MPU transaction
+    // after MLX/ADS activity. Retry the exact same 14-byte operation a few
+    // times before declaring the MPU unavailable.
+    for (uint8_t attempt = 1; attempt <= 5; ++attempt)
+    {
+        if (
+            readMotionRegisters(
+                ax,
+                ay,
+                az,
+                temperature,
+                gx,
+                gy,
+                gz
+            )
         )
-    )
+        {
+            initialReadOk = true;
+            break;
+        }
+
+        Serial.print("[MPU6050] Startup read retry ");
+        Serial.print(attempt);
+        Serial.println("/5...");
+
+        // Reassert the proven wake/range configuration, then give the
+        // shared 100 kHz bus a short quiet interval.
+        writeRegister(0x6B, 0x00);
+        writeRegister(0x1B, 0x00);
+        writeRegister(0x1C, 0x00);
+        delay(25);
+    }
+
+    if (!initialReadOk)
     {
         reading.connected =
             false;
@@ -300,7 +325,7 @@ bool MPUSensor::begin()
 
 
         Serial.println(
-            "[MPU6050] ERROR: 14-byte motion read failed."
+            "[MPU6050] ERROR: 14-byte motion read failed after 5 attempts."
         );
 
 

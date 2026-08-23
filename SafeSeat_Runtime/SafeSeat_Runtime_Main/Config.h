@@ -87,7 +87,14 @@ constexpr uint8_t MPU6050_ADDRESS = 0x68;
 // SERIAL DASHBOARD
 // ============================================================
 
-constexpr unsigned long MAIN_PRINT_INTERVAL_MS = 1000UL;
+// Full dashboard output is intentionally low-rate. At 115200 baud the
+// multi-kilobyte dashboard blocked acquisition for hundreds of ms and
+// cut the MPU to ~40-42 Hz. Combined runtime now uses 921600 baud and
+// prints the full dashboard every 5 s so high-rate acquisition wins.
+constexpr unsigned long MAIN_PRINT_INTERVAL_MS = 10000UL;
+constexpr unsigned long MAIN_LIVE_INTERVAL_MS = 1000UL;
+constexpr unsigned long MAIN_DETAIL_INTERVAL_MS = 5000UL;
+constexpr bool MAIN_VERBOSE_DASHBOARD_ENABLED = false;
 
 
 // ============================================================

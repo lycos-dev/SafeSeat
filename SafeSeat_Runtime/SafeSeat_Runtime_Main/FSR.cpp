@@ -45,7 +45,18 @@ bool FSRSensor::initADS1()
 
     if (ok)
     {
-        ads1.setGain(GAIN_TWOTHIRDS);
+        // IMPORTANT SCALE FIX (2026-08-23):
+        // GAIN_TWOTHIRDS uses a +/-6.144 V full-scale range. On a
+        // 3.3 V FSR divider that limits the largest possible ADC code
+        // to only ~17.6k, exactly matching the 16-17k ceiling seen in
+        // INT-HW-03. GAIN_ONE (+/-4.096 V) is safe for 3.3 V and
+        // yields ~26.4k counts, matching the validated ~25-26k range.
+        ads1.setGain(GAIN_ONE);
+
+        // Faster conversion prevents eight sequential ADS channels
+        // from starving the 80 Hz MPU scheduler. FSR frame cadence
+        // remains 220 ms; only each ADC conversion is shorter.
+        ads1.setDataRate(RATE_ADS1115_860SPS);
     }
 
     reading.ads1Connected = ok;
@@ -59,7 +70,8 @@ bool FSRSensor::initADS2()
 
     if (ok)
     {
-        ads2.setGain(GAIN_TWOTHIRDS);
+        ads2.setGain(GAIN_ONE);
+        ads2.setDataRate(RATE_ADS1115_860SPS);
     }
 
     reading.ads2Connected = ok;
@@ -92,6 +104,11 @@ bool FSRSensor::begin()
     );
 
     Serial.println("GPIO34 Ready - Cushion FSR3");
+    Serial.println("[FSR] ADS gain: GAIN_ONE (+/-4.096 V) -> ~26k counts at 3.3 V.");
+    Serial.println("[FSR] ADS data rate: 860 SPS (frame cadence still ~4.5 Hz).");
+    Serial.println("[FSR] Empty-seat drift tracker: ACTIVE until pressure occupancy is confirmed.");
+    Serial.println("[FSR] Occupancy: >=12k total + >=2 active sensors for 3 frames.");
+    Serial.println("[FSR] Exit: hard-empty, residual-release, or sustained <=30% seated-peak collapse.");
 
     initialized = ads1OK && ads2OK;
     reading.connected = initialized;
@@ -247,7 +264,7 @@ bool FSRSensor::calibrateEmptySeat()
     Serial.println(" FSR EMPTY-SEAT CALIBRATION");
     Serial.println("========================================");
     Serial.println("Keep the backrest and cushion EMPTY.");
-    Serial.println("Calibration begins in 3 seconds...");
+    Serial.println("Calibration begins after a 4-second empty-seat settle...");
 
     delay(CALIBRATION_SETTLE_MS);
 
@@ -269,7 +286,7 @@ bool FSRSensor::calibrateEmptySeat()
         }
 
         Serial.print(".");
-        delay(20);
+        delay(30);
     }
 
     Serial.println();
@@ -398,10 +415,18 @@ void FSRSensor::processFrame(
     bool occupantPresent
 )
 {
+    bool anyEmptyTracking = false;
+
     for (int e = 0; e < FSR_COUNT; ++e)
     {
-        reading.electricalRaw[e] = electricalRaw[e];
+        reading.electricalRaw[e] =
+            electricalRaw[e];
 
+        // ----------------------------------------------------
+        // FIRST PASS: evaluate the channel against the current
+        // baseline. If this is only unloaded-seat drift, follow
+        // it quickly. If it is a strong press, freeze baseline.
+        // ----------------------------------------------------
         float normalized =
             normalizeElectricalChannel(
                 static_cast<uint8_t>(e),
@@ -409,33 +434,64 @@ void FSRSensor::processFrame(
                 reading.electricalBaseline[e]
             );
 
-        const float commonLoad =
-            normalized * COMMON_PRESSURE_SCALE;
+        float commonLoad =
+            normalized
+            *
+            COMMON_PRESSURE_SCALE;
 
-        electricalFilteredLoad[e] =
-            FILTER_ALPHA * commonLoad
-            +
-            (1.0f - FILTER_ALPHA) * electricalFilteredLoad[e];
-
-        // Very slow baseline drift compensation ONLY while the C1001 says
-        // the seat is not occupied and this channel is effectively unloaded.
-        //
-        // This avoids the dangerous behavior of learning an occupant's
-        // seated pressure as the new zero.
-        if (
+        const bool mayTrackEmptyBaseline =
             !occupantPresent
             &&
-            electricalFilteredLoad[e] < 120.0f
-        )
+            !pressureOccupancyLatched
+            &&
+            commonLoad
+                <
+            EMPTY_TRACK_CHANNEL_FREEZE_LOAD;
+
+        if (mayTrackEmptyBaseline)
         {
             reading.electricalBaseline[e] =
-                (1.0f - BASELINE_DRIFT_ALPHA)
-                * reading.electricalBaseline[e]
+                (1.0f - EMPTY_BASELINE_TRACK_ALPHA)
+                *
+                reading.electricalBaseline[e]
                 +
-                BASELINE_DRIFT_ALPHA
-                * electricalRaw[e];
+                EMPTY_BASELINE_TRACK_ALPHA
+                *
+                electricalRaw[e];
+
+            // Recompute after moving the baseline so the displayed
+            // empty-seat pressure falls toward zero immediately.
+            normalized =
+                normalizeElectricalChannel(
+                    static_cast<uint8_t>(e),
+                    electricalRaw[e],
+                    reading.electricalBaseline[e]
+                );
+
+            commonLoad =
+                normalized
+                *
+                COMMON_PRESSURE_SCALE;
+
+            anyEmptyTracking = true;
         }
+
+        electricalFilteredLoad[e] =
+            FILTER_ALPHA
+            *
+            commonLoad
+            +
+            (1.0f - FILTER_ALPHA)
+            *
+            electricalFilteredLoad[e];
     }
+
+    reading.emptyBaselineTracking =
+        anyEmptyTracking
+        &&
+        !pressureOccupancyLatched
+        &&
+        !occupantPresent;
 
     float logicalRaw[FSR_COUNT] = {0};
     float logicalBaseline[FSR_COUNT] = {0};
@@ -458,11 +514,21 @@ void FSRSensor::processFrame(
 
     for (int i = 0; i < FSR_COUNT; ++i)
     {
-        reading.raw[i] = logicalRaw[i];
-        reading.baseline[i] = logicalBaseline[i];
-        reading.pressure[i] = logicalPressure[i];
+        reading.raw[i] =
+            logicalRaw[i];
+
+        reading.baseline[i] =
+            logicalBaseline[i];
+
+        reading.pressure[i] =
+            logicalPressure[i];
+
         reading.normalized[i] =
-            clamp01(logicalPressure[i] / COMMON_PRESSURE_SCALE);
+            clamp01(
+                logicalPressure[i]
+                /
+                COMMON_PRESSURE_SCALE
+            );
     }
 
     updateDerivedQuantities();
@@ -536,10 +602,116 @@ void FSRSensor::updateDerivedQuantities()
         }
     }
 
-    reading.occupiedByPressure =
-        reading.wholeSeatTotal >= OCCUPANCY_TOTAL_THRESHOLD
+    // --------------------------------------------------------
+    // PRESSURE OCCUPANCY HYSTERESIS + PERSISTENCE
+    //
+    // Do NOT equate low residual pressure with occupancy.
+    // Entry requires a strong multi-sensor seated pattern for
+    // three consecutive completed FSR frames (~0.7 s).
+    // Exit requires sustained unloading for eight frames (~1.8 s).
+    // --------------------------------------------------------
+    const bool enterCandidate =
+        reading.wholeSeatTotal
+            >=
+        OCCUPANCY_ENTER_TOTAL
         &&
-        reading.activeSensorCount >= OCCUPANCY_ACTIVE_SENSOR_MIN;
+        reading.activeSensorCount
+            >=
+        OCCUPANCY_ACTIVE_SENSOR_MIN;
+
+    if (!pressureOccupancyLatched)
+    {
+        occupancyExitStreak = 0;
+        occupancyPeakTotal = 0.0f;
+
+        if (enterCandidate)
+        {
+            if (occupancyEnterStreak < OCCUPANCY_ENTER_FRAMES)
+            {
+                occupancyEnterStreak++;
+            }
+        }
+        else
+        {
+            occupancyEnterStreak = 0;
+        }
+
+        if (occupancyEnterStreak >= OCCUPANCY_ENTER_FRAMES)
+        {
+            pressureOccupancyLatched = true;
+            occupancyEnterStreak = 0;
+            occupancyPeakTotal = reading.wholeSeatTotal;
+        }
+    }
+    else
+    {
+        occupancyEnterStreak = 0;
+
+        if (reading.wholeSeatTotal > occupancyPeakTotal)
+        {
+            occupancyPeakTotal = reading.wholeSeatTotal;
+        }
+
+        const bool hardEmptyCandidate =
+            reading.wholeSeatTotal <= OCCUPANCY_EXIT_TOTAL;
+
+        const bool residualReleaseCandidate =
+            reading.wholeSeatTotal <= OCCUPANCY_RESIDUAL_EXIT_TOTAL
+            &&
+            reading.activeSensorCount <= OCCUPANCY_RESIDUAL_MAX_ACTIVE;
+
+        const float relativeExitThreshold =
+            (
+                occupancyPeakTotal * OCCUPANCY_DROP_EXIT_RATIO
+                >
+                OCCUPANCY_RESIDUAL_EXIT_TOTAL
+            )
+                ? occupancyPeakTotal * OCCUPANCY_DROP_EXIT_RATIO
+                : OCCUPANCY_RESIDUAL_EXIT_TOTAL;
+
+        const bool departureCollapseCandidate =
+            occupancyPeakTotal >= OCCUPANCY_DROP_MIN_PEAK
+            &&
+            reading.wholeSeatTotal <= relativeExitThreshold
+            &&
+            reading.backrestTotal <= OCCUPANCY_DROP_BACKREST_MAX
+            &&
+            reading.activeSensorCount <= OCCUPANCY_DROP_MAX_ACTIVE;
+
+        if (
+            hardEmptyCandidate
+            ||
+            residualReleaseCandidate
+            ||
+            departureCollapseCandidate
+        )
+        {
+            if (occupancyExitStreak < OCCUPANCY_EXIT_FRAMES)
+            {
+                occupancyExitStreak++;
+            }
+        }
+        else
+        {
+            occupancyExitStreak = 0;
+        }
+
+        if (occupancyExitStreak >= OCCUPANCY_EXIT_FRAMES)
+        {
+            pressureOccupancyLatched = false;
+            occupancyExitStreak = 0;
+            occupancyPeakTotal = 0.0f;
+        }
+    }
+
+    reading.occupiedByPressure =
+        pressureOccupancyLatched;
+
+    reading.occupancyEnterStreak =
+        occupancyEnterStreak;
+
+    reading.occupancyExitStreak =
+        occupancyExitStreak;
 
     if (reading.wholeSeatTotal > 1.0f)
     {
@@ -887,6 +1059,16 @@ void FSRSensor::forceRecalibration()
 
         previousWholeSeatTotal = 0.0f;
         suddenZeroStreak = 0;
+
+        pressureOccupancyLatched = false;
+        occupancyEnterStreak = 0;
+        occupancyExitStreak = 0;
+
+        reading.occupiedByPressure = false;
+        reading.emptyBaselineTracking = false;
+        reading.occupancyEnterStreak = 0;
+        reading.occupancyExitStreak = 0;
+
         reading.valid = false;
 
         setStatus(FSRStatus::READING);
@@ -1011,13 +1193,13 @@ const char* FSRSensor::getElectricalSource(int logicalIndex) const
             return "ADS1 A2 / electrical Backrest FSR3";
 
         case CUSHION_FSR1:
-            return "ADS2 A2";
+            return "GPIO34 / electrical Cushion FSR3 / physical LEFT";
 
         case CUSHION_FSR2:
-            return "ADS2 A3";
+            return "ADS2 A3 / electrical Cushion FSR2 / physical CENTER";
 
         case CUSHION_FSR3:
-            return "GPIO34";
+            return "ADS2 A2 / electrical Cushion FSR1 / physical RIGHT";
 
         default:
             return "unknown";

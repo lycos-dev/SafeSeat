@@ -1,0 +1,8 @@
+{
+  "runtime_baud_460800": true,
+  "tx_buffer_8192": true,
+  "live_1s": true,
+  "full_dashboard_10s": true,
+  "watchdog_8s": true,
+  "rtc_stall_stage": true
+}

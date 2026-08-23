@@ -130,7 +130,15 @@ struct FSRReading
     float backrestToCushionRatio = 0.0f;
 
     uint8_t activeSensorCount = 0;
+
+    // Debounced pressure occupancy. This is the ONLY FSR signal
+    // that may open the MLX thermal session when C1001 is absent.
     bool occupiedByPressure = false;
+
+    // Diagnostics for empty-seat baseline tracking.
+    bool emptyBaselineTracking = false;
+    uint8_t occupancyEnterStreak = 0;
+    uint8_t occupancyExitStreak = 0;
 
     uint32_t sampleCount = 0;
     uint32_t recoveryCount = 0;
@@ -176,10 +184,17 @@ private:
     static constexpr unsigned long HEALTH_CHECK_INTERVAL_MS = 2000UL;
     static constexpr unsigned long RECOVERY_COOLDOWN_MS = 2000UL;
 
-    static constexpr int CALIBRATION_SAMPLES = 30;
-    static constexpr unsigned long CALIBRATION_SETTLE_MS = 3000UL;
+    // The ADS gain change exposed a slow empty-seat settling/drift
+    // on the cushion channels. Give the hardware more time and use
+    // a longer calibration sample set before normal runtime starts.
+    static constexpr int CALIBRATION_SAMPLES = 60;
+    static constexpr unsigned long CALIBRATION_SETTLE_MS = 4000UL;
 
     static constexpr float COMMON_PRESSURE_SCALE = 26000.0f;
+    // ADS1115 is configured at GAIN_ONE (+/-4.096 V). With the
+    // SafeSeat 3.3 V divider, full physical pressure is about
+    // 3.3/4.096*32767 = 26400 counts. The runtime intentionally
+    // maps ~26000 counts to the common 0..26000 pressure scale.
     static constexpr float ADS_EXPECTED_PRESS_MAX = 26000.0f;
     static constexpr float GPIO_EXPECTED_PRESS_MAX = 4095.0f;
 
@@ -187,11 +202,42 @@ private:
     static constexpr float GPIO_DEADBAND_RAW = 18.0f;
 
     static constexpr float FILTER_ALPHA = 0.35f;
-    static constexpr float BASELINE_DRIFT_ALPHA = 0.0007f;
+
+    // Empty-seat adaptive baseline:
+    // The previous alpha (0.0007) was far too slow. In the combined
+    // run, unloaded cushion channels drifted by thousands of common
+    // pressure units and falsely created occupancy. While the seat
+    // is NOT pressure-latched and C1001 does not confirm a person,
+    // low/moderate per-channel drift is followed quickly.
+    static constexpr float EMPTY_BASELINE_TRACK_ALPHA = 0.12f;
+
+    // Never learn a genuine strong press into the baseline.
+    // One deliberately pressed FSR can still be displayed/tested
+    // without being absorbed as "empty".
+    static constexpr float EMPTY_TRACK_CHANNEL_FREEZE_LOAD = 6000.0f;
 
     static constexpr float ACTIVE_NORMALIZED_THRESHOLD = 0.025f;
-    static constexpr float OCCUPANCY_TOTAL_THRESHOLD = 1800.0f;
+
+    // Occupancy is deliberately much stricter than "some pressure".
+    // This prevents foam/preload/electrical drift from starting MLX.
+    // With the corrected 0..26000 common scale, normal seated loads
+    // observed during combined validation are far above this value.
+    static constexpr float OCCUPANCY_ENTER_TOTAL = 12000.0f;
+    static constexpr float OCCUPANCY_EXIT_TOTAL = 2500.0f;
     static constexpr uint8_t OCCUPANCY_ACTIVE_SENSOR_MIN = 2;
+    static constexpr uint8_t OCCUPANCY_ENTER_FRAMES = 3;
+
+    // Faster but conservative exit:
+    // - hard empty, OR
+    // - one-sensor residual relaxation, OR
+    // - a large sustained drop from the seated peak with backrest released.
+    static constexpr uint8_t OCCUPANCY_EXIT_FRAMES = 6;
+    static constexpr float OCCUPANCY_RESIDUAL_EXIT_TOTAL = 12000.0f;
+    static constexpr uint8_t OCCUPANCY_RESIDUAL_MAX_ACTIVE = 1;
+    static constexpr float OCCUPANCY_DROP_EXIT_RATIO = 0.30f;
+    static constexpr float OCCUPANCY_DROP_MIN_PEAK = 20000.0f;
+    static constexpr float OCCUPANCY_DROP_BACKREST_MAX = 2000.0f;
+    static constexpr uint8_t OCCUPANCY_DROP_MAX_ACTIVE = 3;
 
     // An empty-seat baseline this close to ADC full pressure is suspicious.
     static constexpr float SATURATED_BASELINE_FRACTION = 0.92f;
@@ -212,6 +258,11 @@ private:
 
     uint8_t suddenZeroStreak = 0;
     float previousWholeSeatTotal = 0.0f;
+
+    bool pressureOccupancyLatched = false;
+    uint8_t occupancyEnterStreak = 0;
+    uint8_t occupancyExitStreak = 0;
+    float occupancyPeakTotal = 0.0f;
 
     bool i2cProbe(uint8_t address);
     bool initADS1();

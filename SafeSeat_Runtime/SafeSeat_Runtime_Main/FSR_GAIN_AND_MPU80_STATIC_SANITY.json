@@ -1,0 +1,12 @@
+{
+  "gain_one_ads1": true,
+  "gain_one_ads2": true,
+  "no_gain_twothirds": true,
+  "ads_860_ads1": true,
+  "ads_860_ads2": true,
+  "mpu_12500us": true,
+  "serial_921600": true,
+  "dashboard_5000ms": true,
+  "cushion_left_gpio34_diagnostic": true,
+  "mlx_geometry_guard_preserved": true
+}

@@ -148,9 +148,7 @@ bool FSRML::sampleIsUsable(
     const bool occupancyQualified =
         occupantPresent
         ||
-        sensorReading.occupiedByPressure
-        ||
-        (sensorReading.backrestTotal > 300.0f);
+        sensorReading.occupiedByPressure;
 
     if (
         !occupancyQualified
@@ -344,7 +342,9 @@ void FSRML::copyOrderedWindow(
 
 void FSRML::runInference()
 {
-    float orderedPressure[
+    // Large inference scratch is static so it does not stack on top of
+    // FSRFeatureExtractor's working memory inside Arduino loopTask.
+    static float orderedPressure[
         FSR_ML_WINDOW_SAMPLES
     ][
         NUM_FSR
@@ -354,7 +354,7 @@ void FSRML::runInference()
         orderedPressure
     );
 
-    FSRFeatureVector
+    static FSRFeatureVector
         features;
 
     if (
@@ -489,9 +489,7 @@ void FSRML::update(
     const bool occupancyQualified =
         occupantPresent
         ||
-        sensorReading.occupiedByPressure
-        ||
-        (sensorReading.backrestTotal > 300.0f);
+        sensorReading.occupiedByPressure;
 
     if (
         !occupancyQualified

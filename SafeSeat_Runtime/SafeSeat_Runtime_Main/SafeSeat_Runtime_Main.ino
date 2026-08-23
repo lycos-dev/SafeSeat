@@ -69,6 +69,8 @@ bool safeSeatApiInitialized = false;
 // ============================================================
 
 unsigned long lastPrintTime = 0;
+unsigned long lastLivePrintTime = 0;
+unsigned long lastDetailPrintTime = 0;
 
 
 // ============================================================
@@ -117,6 +119,7 @@ FusionSensorHealth mapSensorHealth(
 
     return FusionSensorHealth::VALID;
 }
+
 
 
 void printInitializationSummary()
@@ -208,8 +211,10 @@ void printInitializationSummary()
 
 void setup()
 {
+    // Keep output tiny, but use 460800 to leave plenty of UART headroom
+    // while the MPU runs near its trained ~80 Hz domain.
     Serial.begin(
-        115200
+        460800
     );
 
     delay(
@@ -226,15 +231,16 @@ void setup()
     );
 
     Serial.println(
-        " Step 5.9.8.8 - MLX geometry guard + anomaly persistence"
+        " Step 5.9.8.21 - stable runtime + tiny ML status heartbeat"
     );
 
     Serial.println(
         "=========================================="
     );
-
-
-    // ========================================================
+    Serial.println("[SERIAL] Runtime baud: 460800. Upload Speed is independent.");
+    Serial.println("[SAFETY] Application watchdog reboot is DISABLED.");
+    Serial.println("[SAFETY] Giant periodic dashboard is DISABLED; compact telemetry is used.");
+// ========================================================
     // ONE SHARED I2C BUS
     //
     // This mirrors the proven combined sketch:
@@ -540,6 +546,7 @@ void setup()
     }
 
     printInitializationSummary();
+    Serial.println("[LIVE] Tiny 1-second ML-status heartbeat enabled.");
 }
 
 
@@ -549,6 +556,10 @@ void setup()
 
 void loop()
 {
+    // Cooperative yield keeps Wi-Fi/ESP-NOW/system tasks responsive without
+    // subscribing loopTask to a panic/reboot watchdog.
+    delay(1);
+
     if (safeSeatAccessPointInitialized)
     {
         safeSeatAccessPoint.update();
@@ -561,34 +572,35 @@ void loop()
     // data. Their reading structures remain available for the
     // dashboard and, later, Fusion validity gating.
     // ========================================================
-
     if (
         c1001CommInitialized
     )
     {
         c1001Comm.update();
     }
-
-
     if (
         cameraCommInitialized
     )
     {
         cameraComm.update();
     }
-
     if (
         mpuInitialized
     )
     {
         mpu.update();
     }
-
     if (
         mlxInitialized
     )
     {
         mlx.update();
+    }
+
+    // Cooperative high-rate service checkpoint.
+    if (mpuInitialized)
+    {
+        mpu.update();
     }
 
     const C1001RemoteStatus &c1001Remote =
@@ -607,7 +619,6 @@ void loop()
         c1001Remote.connected
         &&
         c.present;
-
     if (
         fsrInitialized
     )
@@ -636,11 +647,15 @@ void loop()
     const FSRReading &f =
         fsr.getReading();
 
-    // Combined-runtime thermal session:
-    // occupancy establishes that a person is actually in the seat.
-    // MLX ambient/Object-Ta are confidence/context only and are
-    // never allowed to repeatedly destroy the personal baseline.
-    const bool mlxSeatOccupied =
+    // ========================================================
+    // MLX SESSION / TARGET QUALIFICATION
+    //
+    // Seat occupancy and optical target visibility are separate.
+    // This block intentionally uses the EXISTING MLXML API and does
+    // not alter any MLX class/struct layout.
+    // ========================================================
+
+    const bool rawSeatOccupied =
         occupantPresent
         ||
         (
@@ -650,41 +665,117 @@ void loop()
             &&
             f.valid
             &&
-            (
-                f.occupiedByPressure
-                ||
-                f.wholeSeatTotal > 300.0f
-            )
+            f.occupiedByPressure
         );
 
-    mlxML.update(
-        t,
-        mlxSeatOccupied
-    );
+    // A lingering single FSR after the passenger physically leaves
+    // is mechanical relaxation, not permission to keep thermal evidence.
+    // This affects ONLY the thermal session; Fusion/FSR occupancy remains
+    // on its already-proven code path in this stability build.
+    const bool likelySeatExit =
+        !occupantPresent
+        &&
+        fsrInitialized
+        &&
+        f.connected
+        &&
+        f.valid
+        &&
+        f.wholeSeatTotal <= 12000.0f
+        &&
+        f.activeSensorCount <= 1;
+
+    const bool thermalOccupancy =
+        rawSeatOccupied
+        &&
+        !likelySeatExit;
+
+    // Target-quality gate only -- NOT a medical temperature threshold.
+    // Require a plausible nearby skin-surface signal and meaningful
+    // backrest contact for the headrest-mounted MLX.
+    const bool mlxTargetVisible =
+        thermalOccupancy
+        &&
+        mlxInitialized
+        &&
+        t.connected
+        &&
+        t.valid
+        &&
+        t.filteredObjectC >= 28.0f
+        &&
+        t.filteredObjectC <= 40.0f
+        &&
+        f.backrestTotal >= 1500.0f;
+
+    // Read current ML state BEFORE deciding whether to advance it.
+    const MLXMLReading &tmlBefore =
+        mlxML.getReading();
+
+    if (!thermalOccupancy)
+    {
+        // True seat exit: use the proven existing reset path.
+        mlxML.update(
+            t,
+            false
+        );
+    }
+    else if (mlxTargetVisible)
+    {
+        // Valid nape/headrest target: normal MLX acquisition/inference.
+        mlxML.update(
+            t,
+            true
+        );
+    }
+    else if (!tmlBefore.baselineReady)
+    {
+        // Occupied but no valid nape target yet:
+        // never build a background/chair baseline.
+        mlxML.update(
+            t,
+            false
+        );
+    }
+    else
+    {
+        // Baseline already exists but target left the FOV (e.g. lean forward).
+        // Deliberately DO NOT feed background samples into MLXML and do not
+        // destroy the established baseline. Fusion is gated below.
+    }
 
     const MLXMLReading &tml =
         mlxML.getReading();
 
+    // Context is considered usable only while the intended target is visible.
     mlxContext.update(
         t,
         tml,
-        mlxSeatOccupied
+        mlxTargetVisible
     );
+
+    if (mpuInitialized)
+    {
+        mpu.update();
+    }
 
     const MLXContextReading &tx =
         mlxContext.getReading();
-
     fsrML.update(
         f,
         occupantPresent
     );
+
+    if (mpuInitialized)
+    {
+        mpu.update();
+    }
 
     const FSRMLReading &fml =
         fsrML.getReading();
 
     const MPUReading &m =
         mpu.getReading();
-
     mpuML.update(
         m
     );
@@ -727,7 +818,9 @@ void loop()
         tml.modelAvailable;
 
     fusionInput.mlx.model.valid =
-        tml.valid;
+        tml.valid
+        &&
+        mlxTargetVisible;
 
     fusionInput.mlx.model.isolationForestAnomaly =
         tml.isolationForestAnomaly;
@@ -748,7 +841,11 @@ void loop()
         tml.oneClassSVMDecision;
 
     fusionInput.mlx.model.confidence =
-        tml.valid
+        (
+            tml.valid
+            &&
+            mlxTargetVisible
+        )
             ? 1.0f
             : 0.0f;
 
@@ -847,6 +944,10 @@ void loop()
     fusionInput.camera =
         cameraComm.getFusionEvidence();
 
+    if (mpuInitialized)
+    {
+        mpu.update();
+    }
     fusion.update(
         fusionInput
     );
@@ -871,7 +972,6 @@ void loop()
     // API sees the latest authoritative system state and current
     // camera transaction status. This copy is read-only.
     // ========================================================
-
     safeSeatTelemetry.capture(
         fusionInput,
         fusionReading,
@@ -888,6 +988,11 @@ void loop()
         safeSeatApi.update();
     }
 
+    if (mpuInitialized)
+    {
+        mpu.update();
+    }
+
 
     // ========================================================
     // SERIAL DASHBOARD
@@ -895,6 +1000,150 @@ void loop()
 
     unsigned long now =
         millis();
+
+    // ========================================================
+    // MINIMAL SERIAL HEARTBEAT
+    //
+    // One short line every 2 seconds. No FSR array dump, no
+    // verbose model text, no stack telemetry.
+    // ========================================================
+    if (now - lastLivePrintTime >= MAIN_LIVE_INTERVAL_MS)
+    {
+        lastLivePrintTime = now;
+
+        Serial.print("[LIVE] t=");
+        Serial.print(now / 1000UL);
+        Serial.print("s MPU=");
+        Serial.print(m.actualSamplingRateHz, 1);
+        Serial.print("Hz FSR=");
+        Serial.print(f.actualSamplingRateHz, 2);
+        Serial.print("Hz occ=");
+        Serial.print(f.occupiedByPressure ? "YES" : "NO");
+        Serial.print(" P=");
+        Serial.print(f.wholeSeatTotal, 0);
+        Serial.print(" act=");
+        Serial.print(f.activeSensorCount);
+        Serial.print(" exit=");
+        Serial.print(f.occupancyExitStreak);
+        Serial.print("/6");
+        Serial.print(" MLX=");
+        Serial.print(
+            mlxTargetVisible
+                ? "TARGET"
+                : (
+                    thermalOccupancy
+                        ? "HELD"
+                        : "IDLE"
+                )
+        );
+        Serial.print(" base=");
+        Serial.print(tml.baselineBlocksCollected);
+        Serial.print("/30");
+
+        // ----------------------------------------------------
+        // Tiny model-status summary.
+        // These labels are DISPLAY ONLY. They do not alter model
+        // inputs, decisions, thresholds, or Fusion evidence.
+        // ----------------------------------------------------
+        Serial.print(" FSRML=");
+        if (!fml.modelAvailable)
+        {
+            Serial.print("OFF");
+        }
+        else if (!fml.valid)
+        {
+            Serial.print("WAIT");
+        }
+        else if (fml.bothModelsAnomaly)
+        {
+            Serial.print("STRONG");
+        }
+        else if (fml.eitherModelAnomaly)
+        {
+            Serial.print("WEAK");
+        }
+        else
+        {
+            Serial.print("NORMAL");
+        }
+
+        Serial.print(" MPUL=");
+        if (!mpuInitialized || !mml.modelAvailable)
+        {
+            Serial.print("OFF");
+        }
+        else if (!mml.stationaryBaselineReady)
+        {
+            Serial.print("CAL");
+        }
+        else if (!mml.valid)
+        {
+            Serial.print("WAIT");
+        }
+        else if (mml.bothModelsAnomaly)
+        {
+            Serial.print("ROAD++");
+        }
+        else if (mml.eitherModelAnomaly)
+        {
+            Serial.print("ROAD+");
+        }
+        else
+        {
+            Serial.print("NORMAL");
+        }
+
+        Serial.print(" MLXML=");
+        if (!thermalOccupancy)
+        {
+            Serial.print("IDLE");
+        }
+        else if (!mlxTargetVisible)
+        {
+            // If baseline was already completed, it is intentionally
+            // preserved while target/FOV is temporarily unavailable.
+            Serial.print(
+                tml.baselineReady
+                    ? "HOLD"
+                    : "NO-TARGET"
+            );
+        }
+        else if (!tml.baselineReady)
+        {
+            Serial.print("BASE");
+        }
+        else if (!tml.valid)
+        {
+            Serial.print("WAIT");
+        }
+        else if (tml.bothModelsAnomaly)
+        {
+            Serial.print("STRONG");
+        }
+        else if (tml.eitherModelAnomaly)
+        {
+            Serial.print("WEAK");
+        }
+        else
+        {
+            Serial.print("NORMAL");
+        }
+
+        Serial.print(" FUS=");
+        Serial.println(
+            fusion.getLevelText(
+                fusionReading.level
+            )
+        );
+    }
+
+    // Production-safe default: do not periodically print the giant
+    // multi-kilobyte dashboard. The local HTTP API still exposes the
+    // full telemetry snapshot when detailed data is needed.
+    if (!MAIN_VERBOSE_DASHBOARD_ENABLED)
+    {
+        return;
+    }
 
     if (
         now
@@ -909,7 +1158,6 @@ void loop()
 
     lastPrintTime =
         now;
-
 
 
     const CameraRemoteStatus &cameraStatus =
@@ -1429,6 +1677,41 @@ void loop()
     Serial.println(
         " Hz"
     );
+
+    Serial.print(
+        "Pressure occ   : "
+    );
+    Serial.println(
+        f.occupiedByPressure
+            ? "OCCUPIED (LATCHED)"
+            : "EMPTY / NOT CONFIRMED"
+    );
+
+    Serial.print(
+        "Baseline track : "
+    );
+    Serial.println(
+        f.emptyBaselineTracking
+            ? "ACTIVE - FOLLOWING EMPTY-SEAT DRIFT"
+            : "FROZEN / NOT NEEDED"
+    );
+
+    if (
+        !f.occupiedByPressure
+        &&
+        f.occupancyEnterStreak > 0
+    )
+    {
+        Serial.print(
+            "Occupancy arm  : "
+        );
+        Serial.print(
+            f.occupancyEnterStreak
+        );
+        Serial.println(
+            " / 3 frames"
+        );
+    }
 
     if (
         fsrInitialized

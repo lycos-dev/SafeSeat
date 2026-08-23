@@ -104,19 +104,18 @@ private:
             131.0f;
 
 
-    // Acquisition request interval remains 10 ms.
+    // Step 5.6 model contract is exactly 80 Hz.
     //
-    // In the full SafeSeat main-loop workload this request has
-    // empirically yielded ~80-81 Hz actual MPU acquisition, which
-    // is the cadence used for Step 5.6 model retraining.
+    // Combined testing exposed that the old 10 ms request was not
+    // actually producing 80 Hz: long Serial dashboards plus slow
+    // default ADS1115 conversions starved the cooperative loop and
+    // the measured MPU rate settled near 40-42 Hz.
     //
-    // We intentionally preserve the proven 10 ms request here
-    // instead of blindly changing it to 12.5 ms; doing so would
-    // risk pushing the real shared-loop cadence below 80 Hz.
-    // The final all-sensor test will verify Actual Fs again.
+    // Those blockers are fixed in the Main runtime, so schedule the
+    // physical MPU acquisition at the real model interval: 12.5 ms.
     static constexpr uint32_t
         SAMPLE_INTERVAL_US =
-            10000UL;
+            12500UL;
 
 
     MPUReading reading;

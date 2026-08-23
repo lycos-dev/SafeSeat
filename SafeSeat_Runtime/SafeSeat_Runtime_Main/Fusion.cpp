@@ -377,13 +377,7 @@ void FusionEngine::update(
     const bool fsrOccupied =
         fsrUsable
         &&
-        (
-            input.fsr.reading.occupiedByPressure
-            ||
-            input.fsr.reading.wholeSeatTotal
-            >
-            300.0f
-        );
+        input.fsr.reading.occupiedByPressure;
 
     const bool fsrSaysEmpty =
         fsrUsable

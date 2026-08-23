@@ -1,0 +1,12 @@
+{
+  "idf_version_header": true,
+  "core3_wdt_config_api": true,
+  "core2_wdt_fallback": true,
+  "bad_m_actualFs_removed": true,
+  "bad_f_actualFs_removed": true,
+  "mpu_rate_field_correct": true,
+  "fsr_rate_field_correct": true,
+  "runtime_serial_460800_preserved": true,
+  "heartbeat_preserved": true,
+  "watchdog_preserved": true
+}

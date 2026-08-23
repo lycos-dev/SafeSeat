@@ -14,7 +14,8 @@ double FSRFeatureExtractor::percentile(
     double quantile
 ) const
 {
-    double sorted[FSR_ML_WINDOW_SAMPLES];
+    // Single-threaded runtime: keep percentile scratch out of loopTask stack.
+    static double sorted[FSR_ML_WINDOW_SAMPLES];
 
     for (
         uint16_t i = 0;
@@ -493,7 +494,8 @@ bool FSRFeatureExtractor::extract(
     output =
         FSRFeatureVector{};
 
-    double shares[
+    // ~1.7 KB. Static avoids exhausting the Arduino loopTask stack.
+    static double shares[
         FSR_ML_WINDOW_SAMPLES
     ][
         NUM_FSR
@@ -576,7 +578,7 @@ bool FSRFeatureExtractor::extract(
     // 54 per-sensor share features
     // --------------------------------------------------------
 
-    double series[
+    static double series[
         FSR_ML_WINDOW_SAMPLES
     ];
 
@@ -609,51 +611,51 @@ bool FSRFeatureExtractor::extract(
     // Derived per-frame spatial series
     // --------------------------------------------------------
 
-    double back[
+    static double back[
         FSR_ML_WINDOW_SAMPLES
     ];
 
-    double cushion[
+    static double cushion[
         FSR_ML_WINDOW_SAMPLES
     ];
 
-    double backLR[
+    static double backLR[
         FSR_ML_WINDOW_SAMPLES
     ];
 
-    double cushionLR[
+    static double cushionLR[
         FSR_ML_WINDOW_SAMPLES
     ];
 
-    double cushionCenter[
+    static double cushionCenter[
         FSR_ML_WINDOW_SAMPLES
     ];
 
-    double upperBack[
+    static double upperBack[
         FSR_ML_WINDOW_SAMPLES
     ];
 
-    double middleBack[
+    static double middleBack[
         FSR_ML_WINDOW_SAMPLES
     ];
 
-    double lowerBack[
+    static double lowerBack[
         FSR_ML_WINDOW_SAMPLES
     ];
 
-    double globalLeft[
+    static double globalLeft[
         FSR_ML_WINDOW_SAMPLES
     ];
 
-    double entropy[
+    static double entropy[
         FSR_ML_WINDOW_SAMPLES
     ];
 
-    double copX[
+    static double copX[
         FSR_ML_WINDOW_SAMPLES
     ];
 
-    double copY[
+    static double copY[
         FSR_ML_WINDOW_SAMPLES
     ];
 

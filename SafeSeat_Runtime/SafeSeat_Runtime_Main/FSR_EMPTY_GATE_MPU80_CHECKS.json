@@ -1,0 +1,35 @@
+{
+  "static_checks": {
+    "gain_one_preserved": true,
+    "ads_860_preserved": true,
+    "mpu80_contract_preserved": true,
+    "main_300_fallback_removed": true,
+    "fusion_300_occupancy_removed": true,
+    "fsrml_300_fallback_removed": true,
+    "mlx_uses_debounced_fsr_occupancy": true,
+    "adaptive_empty_baseline_present": true,
+    "occupancy_hysteresis_present": true
+  },
+  "host_syntax": {
+    "FSR.cpp": {
+      "status": "PASS",
+      "stderr": ""
+    },
+    "FSRML.cpp": {
+      "status": "PASS",
+      "stderr": ""
+    },
+    "Fusion.cpp": {
+      "status": "PASS",
+      "stderr": ""
+    },
+    "MLXML.cpp": {
+      "status": "PASS",
+      "stderr": ""
+    },
+    "MLXContext.cpp": {
+      "status": "PASS",
+      "stderr": ""
+    }
+  }
+}

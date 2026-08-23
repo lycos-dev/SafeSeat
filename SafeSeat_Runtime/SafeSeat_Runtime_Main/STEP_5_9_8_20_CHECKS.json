@@ -1,0 +1,28 @@
+{
+  "checks": {
+    "runtime_460800": true,
+    "minimal_serial_only": true,
+    "heartbeat_1s": true,
+    "pressure_exit_diagnostics": true,
+    "no_watchdog": true,
+    "fsr_peak_private_only": true,
+    "fsr_public_struct_unchanged": true,
+    "fsr_hard_exit": true,
+    "fsr_residual_exit": true,
+    "fsr_relative_drop_exit": true,
+    "mpu_five_retries": true,
+    "mlx_target_logic_preserved": true,
+    "fsr_stack_safety_preserved": true,
+    "braces_ok": true
+  },
+  "host_syntax": {
+    "FSR.cpp": {
+      "status": "PASS",
+      "stderr": ""
+    },
+    "MPU.cpp": {
+      "status": "FAIL",
+      "stderr": "TwoWire\u2019 has no member named \u2018read\u2019\n  175 |                 Wire.read()\n      |                      ^~~~\n/mnt/data/SafeSeat_Runtime_FSR_EXIT_MPU_RETRY_460800_2026-08-23_build/SafeSeat_Runtime/SafeSeat_Runtime_Main/MPU.cpp:180:18: error: \u2018struct TwoWire\u2019 has no member named \u2018read\u2019\n  180 |             Wire.read()\n      |                  ^~~~\n/mnt/data/SafeSeat_Runtime_FSR_EXIT_MPU_RETRY_460800_2026-08-23_build/SafeSeat_Runtime/SafeSeat_Runtime_Main/MPU.cpp:187:22: error: \u2018struct TwoWire\u2019 has no member named \u2018read\u2019\n  187 |                 Wire.read()\n      |                      ^~~~\n/mnt/data/SafeSeat_Runtime_FSR_EXIT_MPU_RETRY_460800_2026-08-23_build/SafeSeat_Runtime/SafeSeat_Runtime_Main/MPU.cpp:192:18: error: \u2018struct TwoWire\u2019 has no member named \u2018read\u2019\n  192 |             Wire.read()\n      |                  ^~~~\n/mnt/data/SafeSeat_Runtime_FSR_EXIT_MPU_RETRY_460800_2026-08-23_build/SafeSeat_Runtime/SafeSeat_Runtime_Main/MPU.cpp: In member function \u2018bool MPUSensor::begin()\u2019:\n/mnt/data/SafeSeat_Runtime_FSR_EXIT_MPU_RETRY_460800_2026-08-23_build/SafeSeat_Runtime/SafeSeat_Runtime_Main/MPU.cpp:372:9: error: \u2018micros\u2019 was not declared in this scope\n  372 |         micros();\n      |         ^~~~~~\n/mnt/data/SafeSeat_Runtime_FSR_EXIT_MPU_RETRY_460800_2026-08-23_build/SafeSeat_Runtime/SafeSeat_Runtime_Main/MPU.cpp: In member function \u2018void MPUSensor::update()\u2019:\n/mnt/data/SafeSeat_Runtime_FSR_EXIT_MPU_RETRY_460800_2026-08-23_build/SafeSeat_Runtime/SafeSeat_Runtime_Main/MPU.cpp:585:9: error: \u2018micros\u2019 was not declared in this scope\n  585 |         micros();\n      |         ^~~~~~\n/mnt/data/SafeSeat_Runtime_FSR_EXIT_MPU_RETRY_460800_2026-08-23_build/SafeSeat_Runtime/SafeSeat_Runtime_Main/MPU.cpp: In member function \u2018void MPUSensor::resetSamplingDiagnostics()\u2019:\n/mnt/data/SafeSeat_Runtime_FSR_EXIT_MPU_RETRY_460800_2026-08-23_build/SafeSeat_Runtime/SafeSeat_Runtime_Main/MPU.cpp:726:9: error: \u2018micros\u2019 was not declared in this scope\n  726 |         micros();\n      |         ^~~~~~\n"
+    }
+  }
+}

@@ -1,0 +1,59 @@
+SAFESEAT STEP 5.9.8.18 — STACK-SAFE FSR ML + MLX TARGET HOLD
+2026-08-23
+==============================================================
+
+WHY THIS PATCH IS DIFFERENT
+---------------------------
+The repeated LoadProhibited/stall behavior changed when only small Main-loop
+edits were made. That is a classic sign of latent memory/stack corruption.
+
+A concrete risk was found in the proven code:
+
+FSRFeatureExtractor::extract() placed roughly 4 KB of temporary DOUBLE arrays
+on Arduino loopTask stack:
+- shares[23][9]                       ~1656 bytes
+- series[23]                          ~184 bytes
+- 12 derived 23-double arrays         ~2208 bytes
+
+Nested on top of that:
+- FSRML::runInference orderedPressure ~828 bytes
+- FSRFeatureVector                    ~372 bytes
+- FSRInference scaled buffer          ~372 bytes
+- percentile scratch                  ~184 bytes
+- normal call frames + Main locals
+
+That is well over 5 KB of inference scratch before the rest of the Main loop
+stack is counted. An ESP32 loopTask stack can therefore be pushed dangerously
+close to its limit. Small unrelated source edits can change register spilling /
+stack layout enough to make a latent overflow appear or disappear.
+
+FIX
+---
+All large FSR-ML scratch buffers were moved to static RAM. FSR ML is
+single-threaded in Main, so reusing static scratch is safe and does not change
+the mathematical model.
+
+MLX TARGET BEHAVIOR
+-------------------
+- Initial baseline starts only with:
+    occupied + 28..40 C object + backrestTotal >=1500.
+- If a valid baseline already exists and the passenger leans forward:
+    MLXML is NOT fed background samples;
+    baseline is preserved;
+    MLX context/model evidence is invalidated to Fusion.
+- If pressure collapses to <=12000 with <=1 active FSR and C1001 is absent:
+    thermal session is treated as seat-exit and reset.
+- Fusion FSR occupancy itself is NOT modified in this stability patch.
+
+LIVE DIAGNOSTIC
+---------------
+Each [LIVE] line now includes:
+    stackHW=<value>
+
+The absolute interpretation is platform-dependent, but it should remain
+nonzero and stable. More headroom is better.
+
+SERIAL
+------
+Upload Speed   : 115200 recommended
+Serial Monitor : 460800

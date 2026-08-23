@@ -354,7 +354,8 @@ bool FSRInference::predict(
     result =
         FSRInferenceResult{};
 
-    float scaled[
+    // Reusable inference scratch; single-threaded in Main.
+    static float scaled[
         FSR_MODEL_FEATURE_COUNT
     ];
 

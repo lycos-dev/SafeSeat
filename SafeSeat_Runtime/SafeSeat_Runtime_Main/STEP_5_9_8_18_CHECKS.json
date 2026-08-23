@@ -1,0 +1,34 @@
+{
+  "checks": {
+    "built_from_proven_59814": true,
+    "no_watchdog": true,
+    "fusion_occupancy_not_overridden": true,
+    "mlx_structs_unchanged": true,
+    "mlx_impl_unchanged": true,
+    "mlx_context_unchanged": true,
+    "mpu_code_unchanged": true,
+    "target_gate_present": true,
+    "lean_away_hold_present": true,
+    "fusion_mlx_validity_gated": true,
+    "stack_highwater_telemetry": true,
+    "shares_static": true,
+    "derived_arrays_static": true,
+    "ordered_pressure_static": true,
+    "feature_vector_static": true,
+    "scaled_static": true
+  },
+  "host_syntax": {
+    "FSRFeatureExtractor.cpp": {
+      "status": "PASS",
+      "stderr": ""
+    },
+    "FSRInference.cpp": {
+      "status": "PASS",
+      "stderr": ""
+    },
+    "FSRML.cpp": {
+      "status": "PASS",
+      "stderr": ""
+    }
+  }
+}

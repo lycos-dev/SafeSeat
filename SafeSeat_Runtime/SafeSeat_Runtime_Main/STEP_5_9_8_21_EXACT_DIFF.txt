@@ -1,0 +1,125 @@
+--- Step_5.9.8.20/SafeSeat_Runtime_Main.ino
++++ Step_5.9.8.21/SafeSeat_Runtime_Main.ino
+@@ -231,7 +231,7 @@
+     );
+ 
+     Serial.println(
+-        " Step 5.9.8.20 - robust FSR exit + MPU retry + 460800 minimal serial"
++        " Step 5.9.8.21 - stable runtime + tiny ML status heartbeat"
+     );
+ 
+     Serial.println(
+@@ -546,7 +546,7 @@
+     }
+ 
+     printInitializationSummary();
+-    Serial.println("[LIVE] Minimal 2-second heartbeat enabled.");
++    Serial.println("[LIVE] Tiny 1-second ML-status heartbeat enabled.");
+ }
+ 
+ 
+@@ -1038,7 +1038,103 @@
+         );
+         Serial.print(" base=");
+         Serial.print(tml.baselineBlocksCollected);
+-        Serial.println("/30");
++        Serial.print("/30");
++
++        // ----------------------------------------------------
++        // Tiny model-status summary.
++        // These labels are DISPLAY ONLY. They do not alter model
++        // inputs, decisions, thresholds, or Fusion evidence.
++        // ----------------------------------------------------
++        Serial.print(" FSRML=");
++        if (!fml.modelAvailable)
++        {
++            Serial.print("OFF");
++        }
++        else if (!fml.valid)
++        {
++            Serial.print("WAIT");
++        }
++        else if (fml.bothModelsAnomaly)
++        {
++            Serial.print("STRONG");
++        }
++        else if (fml.eitherModelAnomaly)
++        {
++            Serial.print("WEAK");
++        }
++        else
++        {
++            Serial.print("NORMAL");
++        }
++
++        Serial.print(" MPUL=");
++        if (!mpuInitialized || !mml.modelAvailable)
++        {
++            Serial.print("OFF");
++        }
++        else if (!mml.stationaryBaselineReady)
++        {
++            Serial.print("CAL");
++        }
++        else if (!mml.valid)
++        {
++            Serial.print("WAIT");
++        }
++        else if (mml.bothModelsAnomaly)
++        {
++            Serial.print("ROAD++");
++        }
++        else if (mml.eitherModelAnomaly)
++        {
++            Serial.print("ROAD+");
++        }
++        else
++        {
++            Serial.print("NORMAL");
++        }
++
++        Serial.print(" MLXML=");
++        if (!thermalOccupancy)
++        {
++            Serial.print("IDLE");
++        }
++        else if (!mlxTargetVisible)
++        {
++            // If baseline was already completed, it is intentionally
++            // preserved while target/FOV is temporarily unavailable.
++            Serial.print(
++                tml.baselineReady
++                    ? "HOLD"
++                    : "NO-TARGET"
++            );
++        }
++        else if (!tml.baselineReady)
++        {
++            Serial.print("BASE");
++        }
++        else if (!tml.valid)
++        {
++            Serial.print("WAIT");
++        }
++        else if (tml.bothModelsAnomaly)
++        {
++            Serial.print("STRONG");
++        }
++        else if (tml.eitherModelAnomaly)
++        {
++            Serial.print("WEAK");
++        }
++        else
++        {
++            Serial.print("NORMAL");
++        }
++
++        Serial.print(" FUS=");
++        Serial.println(
++            fusion.getLevelText(
++                fusionReading.level
++            )
++        );
+     }
+ 
+     // Production-safe default: do not periodically print the giant

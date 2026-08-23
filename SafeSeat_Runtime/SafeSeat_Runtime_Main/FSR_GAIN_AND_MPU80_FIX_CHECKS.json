@@ -1,0 +1,16 @@
+{
+  "date": "2026-08-23",
+  "parent": "SafeSeat_Runtime_MLX_GEOMETRY_GUARD_2026-08-23.zip",
+  "fsr_root_cause": "GAIN_TWOTHIRDS (+/-6.144V) on 3.3V divider mathematically limits ADS1115 code to ~17600",
+  "fsr_gain_before": "GAIN_TWOTHIRDS",
+  "fsr_gain_after": "GAIN_ONE",
+  "fsr_theoretical_3v3_code_after": 26399.194335937496,
+  "fsr_common_output_max": 26000,
+  "ads_data_rate_after_sps": 860,
+  "mpu_old_observed_combined_hz": "about 40-42",
+  "mpu_model_contract_hz": 80,
+  "mpu_interval_after_us": 12500,
+  "serial_baud_after": 921600,
+  "dashboard_interval_after_ms": 5000,
+  "models_retrained": false
+}

@@ -1,0 +1,13 @@
+{
+  "readyText_defined": true,
+  "mapSensorHealth_defined": true,
+  "bad_dynamicAccelG_removed": true,
+  "dynamicAcceleration_used": true,
+  "application_watchdog_still_removed": true,
+  "runtime_baud_460800_preserved": true,
+  "live_heartbeat_preserved": true,
+  "compact_diagnostics_preserved": true,
+  "mpu_dynamicAcceleration_exists_in_struct": true,
+  "mpu_sampling_rate_field_exists": true,
+  "fsr_sampling_rate_field_exists": true
+}

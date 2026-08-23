@@ -1,0 +1,154 @@
+--- Step_5.9.8.18/SafeSeat_Runtime_Main.ino
++++ Step_5.9.8.19/SafeSeat_Runtime_Main.ino
+@@ -1,7 +1,5 @@
+ #include <Arduino.h>
+ #include <Wire.h>
+-#include <freertos/FreeRTOS.h>
+-#include <freertos/task.h>
+ 
+ #include "Config.h"
+ 
+@@ -213,12 +211,9 @@
+ 
+ void setup()
+ {
+-    // Larger TX buffer + a slightly lower runtime baud gives better
+-    // USB-UART/Windows stability while keeping Serial non-blocking enough
+-    // for the ~80 Hz MPU contract.
+-    Serial.setTxBufferSize(8192);
++    // Stability-first console: standard baud + very small output.
+     Serial.begin(
+-        460800
++        115200
+     );
+ 
+     delay(
+@@ -235,17 +230,15 @@
+     );
+ 
+     Serial.println(
+-        " Step 5.9.8.18 - stack-safe FSR ML + MLX target hold + MPU80"
++        " Step 5.9.8.19 - 115200 minimal serial + stable detection"
+     );
+ 
+     Serial.println(
+         "=========================================="
+     );
+-    Serial.println("[SERIAL] Runtime baud: 460800. Upload Speed is independent.");
++    Serial.println("[SERIAL] Runtime baud: 115200. Upload Speed is independent.");
+     Serial.println("[SAFETY] Application watchdog reboot is DISABLED.");
+     Serial.println("[SAFETY] Giant periodic dashboard is DISABLED; compact telemetry is used.");
+-    Serial.println("[MEMORY] FSR ML scratch moved off loopTask stack.");
+-    Serial.println("[MLX-TARGET] Invalid/lean-away target is HELD and excluded from Fusion.");
+ // ========================================================
+     // ONE SHARED I2C BUS
+     //
+@@ -552,8 +545,7 @@
+     }
+ 
+     printInitializationSummary();
+-    Serial.println("[LIVE] Compact 1-second heartbeat enabled.");
+-    Serial.println("[DETAIL] Compact 5-second sensor snapshot enabled.");
++    Serial.println("[LIVE] Minimal 2-second heartbeat enabled.");
+ }
+ 
+ 
+@@ -1009,7 +1001,10 @@
+         millis();
+ 
+     // ========================================================
+-    // 1-SECOND HEARTBEAT
++    // MINIMAL SERIAL HEARTBEAT
++    //
++    // One short line every 2 seconds. No FSR array dump, no
++    // verbose model text, no stack telemetry.
+     // ========================================================
+     if (now - lastLivePrintTime >= MAIN_LIVE_INTERVAL_MS)
+     {
+@@ -1017,16 +1012,12 @@
+ 
+         Serial.print("[LIVE] t=");
+         Serial.print(now / 1000UL);
+-        Serial.print("s heap=");
+-        Serial.print(ESP.getFreeHeap());
+-        Serial.print(" MPU=");
++        Serial.print("s MPU=");
+         Serial.print(m.actualSamplingRateHz, 1);
+         Serial.print("Hz FSR=");
+         Serial.print(f.actualSamplingRateHz, 2);
+         Serial.print("Hz occ=");
+         Serial.print(f.occupiedByPressure ? "YES" : "NO");
+-        Serial.print(" P=");
+-        Serial.print(f.wholeSeatTotal, 0);
+         Serial.print(" MLX=");
+         Serial.print(
+             mlxTargetVisible
+@@ -1039,67 +1030,7 @@
+         );
+         Serial.print(" base=");
+         Serial.print(tml.baselineBlocksCollected);
+-        Serial.print("/30");
+-        Serial.print(" FSRwin=");
+-        Serial.print(fml.windowsEvaluated);
+-        Serial.print(" MPUwin=");
+-        Serial.print(mml.windowsEvaluated);
+-        Serial.print(" stackHW=");
+-        Serial.println(
+-            uxTaskGetStackHighWaterMark(NULL)
+-        );
+-    }
+-
+-    // ========================================================
+-    // COMPACT 5-SECOND DIAGNOSTIC
+-    //
+-    // The old several-kilobyte dashboard could fill the UART TX
+-    // buffer and block loopTask long enough for the added watchdog
+-    // to panic/reboot. This compact output keeps the values needed
+-    // for validation without stalling acquisition.
+-    // ========================================================
+-    if (now - lastDetailPrintTime >= MAIN_DETAIL_INTERVAL_MS)
+-    {
+-        lastDetailPrintTime = now;
+-
+-        Serial.print("[DETAIL] Fusion=");
+-        Serial.print(fusion.getLevelText(fusionReading.level));
+-        Serial.print(" Pressure=");
+-        Serial.print(fusion.getPressureText(fusionReading.pressure));
+-        Serial.print(" Temp=");
+-        Serial.print(fusion.getTemperatureText(fusionReading.temperature));
+-        Serial.print(" Motion=");
+-        Serial.println(fusion.getMotionText(fusionReading.motion));
+-
+-        Serial.print("[MLX] A=");
+-        Serial.print(t.filteredAmbientC, 2);
+-        Serial.print(" O=");
+-        Serial.print(t.filteredObjectC, 2);
+-        Serial.print(" base=");
+-        if (tml.baselineReady)
+-            Serial.print(tml.baselineObjectC, 2);
+-        else
+-            Serial.print("NA");
+-        Serial.print(" status=");
+-        Serial.println(mlxML.getStatusText());
+-
+-        Serial.print("[FSR9] ");
+-        for (int i = 0; i < FSR_COUNT; ++i)
+-        {
+-            if (i > 0) Serial.print(',');
+-            Serial.print(f.pressure[i], 0);
+-        }
+-        Serial.print(" | total=");
+-        Serial.print(f.wholeSeatTotal, 0);
+-        Serial.print(" occ=");
+-        Serial.println(f.occupiedByPressure ? "YES" : "NO");
+-
+-        Serial.print("[MPU] Fs=");
+-        Serial.print(m.actualSamplingRateHz, 2);
+-        Serial.print("Hz dyn=");
+-        Serial.print(m.dynamicAcceleration, 4);
+-        Serial.print("g status=");
+-        Serial.println(mpuML.getStatusText());
++        Serial.println("/30");
+     }
+ 
+     // Production-safe default: do not periodically print the giant
