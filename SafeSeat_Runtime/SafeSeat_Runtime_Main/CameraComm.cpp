@@ -44,9 +44,13 @@ void CameraComm::update()
             ? now - lastPacketMillis
             : 0UL;
 
+    status.stale =
+        lastPacketMillis > 0
+        && status.packetAgeMillis > CAMERA_COMM_STALE_AFTER_MS;
+
     status.connected =
         lastPacketMillis > 0
-        && status.packetAgeMillis <= CAMERA_COMM_FRESHNESS_TIMEOUT_MS;
+        && status.packetAgeMillis <= CAMERA_COMM_DISCONNECT_TIMEOUT_MS;
 
     if (status.requestActive)
     {
@@ -222,6 +226,7 @@ CameraFusionEvidence CameraComm::getFusionEvidence() const
     CameraFusionEvidence evidence;
     evidence.available = status.initialized;
     evidence.connected = status.connected
+        && !status.stale
         && status.modelReady
         && status.cameraReady
         && status.psramReady;

@@ -146,6 +146,10 @@ void printInitializationSummary()
         )
     );
 
+    Serial.println(
+        "           (transport only; see C1=WAIT/ON/STALE/OFF in [LIVE])"
+    );
+
     Serial.print(
         "MLX90614 : "
     );
@@ -181,6 +185,10 @@ void printInitializationSummary()
         readyText(
             cameraCommInitialized
         )
+    );
+
+    Serial.println(
+        "           (transport only; see CAM=WAIT/ON/STALE/OFF in [LIVE])"
     );
 
     Serial.print(
@@ -231,7 +239,7 @@ void setup()
     );
 
     Serial.println(
-        " Step 5.9.8.22 - stable ML heartbeat + FSR anti-rebound rearm"
+        " Step 5.9.8.24 - anti-flap C1001 + camera link health"
     );
 
     Serial.println(
@@ -546,7 +554,7 @@ void setup()
     }
 
     printInitializationSummary();
-    Serial.println("[LIVE] Tiny 1-second ML-status heartbeat enabled.");
+    Serial.println("[LIVE] 1-second ML/status heartbeat enabled (C1001 + Camera included).");
 }
 
 
@@ -1002,10 +1010,13 @@ void loop()
         millis();
 
     // ========================================================
-    // MINIMAL SERIAL HEARTBEAT
+    // COMPACT SERIAL HEARTBEAT
     //
-    // One short line every 2 seconds. No FSR array dump, no
-    // verbose model text, no stack telemetry.
+    // One line every MAIN_LIVE_INTERVAL_MS. In addition to local
+    // sensor/model state, Step 5.9.8.24 exposes the remote C1001
+    // ESP-NOW link + live values + remote ML state and the camera
+    // heartbeat/readiness state. DISPLAY ONLY: these prints do not
+    // alter acquisition, ML, Fusion, or camera transactions.
     // ========================================================
     if (now - lastLivePrintTime >= MAIN_LIVE_INTERVAL_MS)
     {
@@ -1127,6 +1138,198 @@ void loop()
         else
         {
             Serial.print("NORMAL");
+        }
+
+        // ----------------------------------------------------
+        // REMOTE C1001 LINK + LIVE VALUES + REMOTE ML
+        //
+        // WAIT = receiver ready but no valid C1001 packet has
+        //        ever arrived.
+        // ON    = packet age is within the normal tolerance.
+        // STALE = packet gap is longer than normal; evidence is withheld,
+        //         but we do NOT call it disconnected yet.
+        // OFF   = sustained packet loss passed the hard timeout.
+        // ----------------------------------------------------
+        Serial.print(" C1=");
+        if (!c1001CommInitialized || !c1001Remote.initialized)
+        {
+            Serial.print("OFF");
+        }
+        else if (c1001Remote.packetsReceived == 0)
+        {
+            Serial.print("WAIT");
+        }
+        else if (!c1001Remote.connected)
+        {
+            Serial.print("OFF");
+            Serial.print(" age=");
+            Serial.print(c1001Remote.packetAgeMillis);
+            Serial.print("ms");
+        }
+        else if (c1001Remote.stale)
+        {
+            Serial.print("STALE");
+            Serial.print(" age=");
+            Serial.print(c1001Remote.packetAgeMillis);
+            Serial.print("ms");
+        }
+        else
+        {
+            Serial.print("ON");
+            Serial.print(" age=");
+            Serial.print(c1001Remote.packetAgeMillis);
+            Serial.print("ms seq=");
+            Serial.print(c1001Remote.lastSequence);
+            Serial.print(" Pres=");
+            Serial.print(c.present ? "Y" : "N");
+            Serial.print(" Mot=");
+            Serial.print(c.motion);
+            Serial.print(" Rng=");
+            Serial.print(c.moveRange);
+            Serial.print(" C1S=");
+            Serial.print(c1001StatusText(c.status));
+
+            if (c.trustedVitalsAvailable
+                && isfinite(c.filteredRespiration)
+                && isfinite(c.filteredHeartRate))
+            {
+                Serial.print(" RR=");
+                Serial.print(c.filteredRespiration, 1);
+                Serial.print(" HR=");
+                Serial.print(c.filteredHeartRate, 1);
+            }
+            else
+            {
+                Serial.print(" RRraw=");
+                Serial.print(c.rawRespiration);
+                Serial.print(" HRraw=");
+                Serial.print(c.rawHeartRate);
+            }
+
+            if (c.status == C1001Status::WARMING_UP)
+            {
+                Serial.print(" warm=");
+                Serial.print(c.warmupRemainingSeconds);
+                Serial.print("s");
+            }
+
+            Serial.print(" C1ML=");
+            if (!cml.available)
+            {
+                Serial.print("OFF");
+            }
+            else
+            {
+                Serial.print(
+                    c1001RemoteMLStatusShort(
+                        c1001Remote.remoteMLStatus
+                    )
+                );
+            }
+            Serial.print(" win=");
+            Serial.print(c1001Remote.remoteWindowSamplesCollected);
+            Serial.print("/");
+            Serial.print(c1001Remote.remoteWindowSamplesRequired);
+
+            if (cml.valid)
+            {
+                Serial.print(" IF=");
+                Serial.print(cml.isolationForestScore, 3);
+                Serial.print(
+                    cml.isolationForestAnomaly
+                        ? "A"
+                        : "N"
+                );
+                Serial.print(" SVM=");
+                Serial.print(cml.oneClassSVMScore, 3);
+                Serial.print(
+                    cml.oneClassSVMAnomaly
+                        ? "A"
+                        : "N"
+                );
+            }
+        }
+
+        // ----------------------------------------------------
+        // ESP32-S3 CAMERA LINK - ADDED IN ADVANCE
+        //
+        // Camera is not required for the current C1001 test. The
+        // heartbeat remains visible now so later camera bring-up
+        // immediately shows transport + hardware/model readiness.
+        // ----------------------------------------------------
+        const CameraRemoteStatus &liveCameraStatus =
+            cameraComm.getStatus();
+
+        Serial.print(" CAM=");
+        const uint32_t cameraPacketsSeen =
+            liveCameraStatus.statusPacketsReceived
+            + liveCameraStatus.resultPacketsReceived;
+
+        if (!cameraCommInitialized || !liveCameraStatus.initialized)
+        {
+            Serial.print("OFF");
+        }
+        else if (cameraPacketsSeen == 0)
+        {
+            Serial.print("WAIT");
+        }
+        else if (!liveCameraStatus.connected)
+        {
+            Serial.print("OFF");
+            Serial.print(" age=");
+            Serial.print(liveCameraStatus.packetAgeMillis);
+            Serial.print("ms");
+        }
+        else if (liveCameraStatus.stale)
+        {
+            Serial.print("STALE");
+            Serial.print(" age=");
+            Serial.print(liveCameraStatus.packetAgeMillis);
+            Serial.print("ms");
+        }
+        else
+        {
+            Serial.print("ON");
+            Serial.print(" age=");
+            Serial.print(liveCameraStatus.packetAgeMillis);
+            Serial.print("ms HW=");
+            Serial.print(liveCameraStatus.cameraReady ? "OK" : "NO");
+            Serial.print(" PS=");
+            Serial.print(liveCameraStatus.psramReady ? "OK" : "NO");
+            Serial.print(" CML=");
+            Serial.print(liveCameraStatus.modelReady ? "READY" : "WAIT");
+            Serial.print(" CSTATE=");
+            Serial.print(
+                liveCameraStatus.busy
+                    ? "BUSY"
+                    : (
+                        liveCameraStatus.requestActive
+                            ? "VERIFY"
+                            : "IDLE"
+                    )
+            );
+
+            if (liveCameraStatus.requestActive)
+            {
+                Serial.print(" req=");
+                Serial.print(liveCameraStatus.activeRequestId);
+            }
+
+            if (liveCameraStatus.lastResultRequestId != 0)
+            {
+                Serial.print(" Post=");
+                Serial.print(
+                    cameraPostureText(
+                        liveCameraStatus.lastPosture
+                    )
+                );
+                Serial.print(" Conf=");
+                Serial.print(
+                    liveCameraStatus.lastConfidence * 100.0f,
+                    0
+                );
+                Serial.print("%");
+            }
         }
 
         Serial.print(" FUS=");

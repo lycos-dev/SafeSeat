@@ -26,7 +26,12 @@ enum class C1001Status
     FILTER_INITIALIZED,
     TRUSTED,
     SUSTAINED_CHANGE,
-    HOLDING_LAST_VALUE
+    HOLDING_LAST_VALUE,
+
+    // Appended to preserve the numeric values used by the
+    // dedicated C1001 node wire protocol.
+    REACQUIRING_TARGET,
+    REACQUIRING_REBASELINE
 };
 
 struct C1001Reading
@@ -82,6 +87,8 @@ inline const char* c1001StatusText(C1001Status status)
         case C1001Status::TRUSTED: return "TRUSTED";
         case C1001Status::SUSTAINED_CHANGE: return "SUSTAINED CHANGE";
         case C1001Status::HOLDING_LAST_VALUE: return "HOLDING LAST VALUE";
+        case C1001Status::REACQUIRING_TARGET: return "REACQUIRING TARGET";
+        case C1001Status::REACQUIRING_REBASELINE: return "REACQUIRING REBASELINE";
         default: return "UNKNOWN";
     }
 }

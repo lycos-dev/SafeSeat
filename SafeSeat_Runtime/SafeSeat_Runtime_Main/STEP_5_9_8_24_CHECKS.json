@@ -1,0 +1,20 @@
+{
+  "step": "5.9.8.24",
+  "c1001": {
+    "stale_after_ms": 4500,
+    "disconnect_after_ms": 10000,
+    "stale_evidence_withheld": true
+  },
+  "camera": {
+    "stale_after_ms": 5000,
+    "disconnect_after_ms": 12000,
+    "stale_evidence_withheld": true
+  },
+  "live_states": [
+    "WAIT",
+    "ON",
+    "STALE",
+    "OFF"
+  ],
+  "goal": "prevent false OFF/ON flapping from delayed/missed ESP-NOW packets"
+}

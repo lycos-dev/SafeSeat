@@ -326,6 +326,8 @@ String SafeSeatApi::buildSensorsJson() const
     appendJsonString(out, FusionEngine::getSensorHealthText(in.c1001.health));
     out += F(",\"connected\":");
     appendJsonBool(out, s.c1001Link.connected);
+    out += F(",\"stale\":");
+    appendJsonBool(out, s.c1001Link.stale);
     out += F(",\"packet_age_ms\":");
     out += String(s.c1001Link.packetAgeMillis);
     out += F(",\"packets_received\":");
@@ -464,6 +466,10 @@ String SafeSeatApi::buildCameraJson() const
     appendJsonBool(out, e.available);
     out += F(",\"connected\":");
     appendJsonBool(out, e.connected);
+    out += F(",\"transport_connected\":");
+    appendJsonBool(out, r.connected);
+    out += F(",\"stale\":");
+    appendJsonBool(out, r.stale);
     out += F(",\"camera_ready\":");
     appendJsonBool(out, r.cameraReady);
     out += F(",\"model_ready\":");

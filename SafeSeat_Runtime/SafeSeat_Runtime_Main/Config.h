@@ -115,13 +115,24 @@ constexpr bool ENABLE_DEBUG_SERIAL = true;
 
 constexpr uint8_t SAFESEAT_ESPNOW_DEFAULT_CHANNEL = 6;
 constexpr unsigned long SAFESEAT_ESPNOW_HUB_BEACON_INTERVAL_MS = 250UL;
-constexpr unsigned long C1001_COMM_FRESHNESS_TIMEOUT_MS = 2500UL;
+// Link-health hysteresis. The remote C1001 nominally transmits often, but
+// real ESP-NOW delivery can arrive in bursts. Do not flap OFF/ON on one
+// delayed/missed packet.
+//
+// <= STALE_AFTER: transport is ON
+// > STALE_AFTER and <= DISCONNECT: transport is STALE (evidence withheld)
+// > DISCONNECT: transport is OFF
+constexpr unsigned long C1001_COMM_STALE_AFTER_MS = 4500UL;
+constexpr unsigned long C1001_COMM_DISCONNECT_TIMEOUT_MS = 10000UL;
 
 // ============================================================
 // ESP32-CAM VERIFICATION LINK - STEP 5.9.4
 // ============================================================
 
-constexpr unsigned long CAMERA_COMM_FRESHNESS_TIMEOUT_MS = 3000UL;
+// Camera uses the same anti-flap policy in advance. A delayed heartbeat
+// first becomes STALE; only a sustained gap is reported as OFF.
+constexpr unsigned long CAMERA_COMM_STALE_AFTER_MS = 5000UL;
+constexpr unsigned long CAMERA_COMM_DISCONNECT_TIMEOUT_MS = 12000UL;
 constexpr unsigned long CAMERA_RESULT_FRESHNESS_TIMEOUT_MS = 5000UL;
 constexpr unsigned long CAMERA_TRIGGER_RETRY_MS = 500UL;
 constexpr unsigned long CAMERA_REQUEST_TIMEOUT_MS = 12000UL;

@@ -10,6 +10,7 @@ struct CameraRemoteStatus
 {
     bool initialized = false;
     bool connected = false;
+    bool stale = false;
     bool modelReady = false;
     bool cameraReady = false;
     bool psramReady = false;

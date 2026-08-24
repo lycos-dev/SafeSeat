@@ -77,6 +77,33 @@ static_assert(
     "Unexpected C1001WirePacket size"
 );
 
+// ============================================================
+// REMOTE C1001 ML STATUS DISPLAY HELPERS
+//
+// The dedicated C1001 node sends its C1001MLStatus enum as the
+// numeric mlStatus field. These values mirror the remote enum
+// without pulling the full ML implementation into the Main Hub.
+// DISPLAY ONLY: no inference/fusion behavior depends on this.
+// ============================================================
+inline const char *c1001RemoteMLStatusShort(uint8_t status)
+{
+    switch (status)
+    {
+        case 0: return "WAIT-SAMPLE";
+        case 1: return "WAIT-OCC";
+        case 2: return "WARM";
+        case 3: return "INVALID";
+        case 4: return "MOTION-HOLD";
+        case 5: return "BUILD";
+        case 6: return "NORMAL";
+        case 7: return "WEAK";
+        case 8: return "STRONG";
+        case 9: return "ERROR";
+        case 10: return "REACQ-HOLD";
+        default: return "UNKNOWN";
+    }
+}
+
 inline uint16_t c1001PacketChecksum(
     const C1001WirePacket &packet
 )

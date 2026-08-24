@@ -11,6 +11,7 @@ struct C1001RemoteStatus
 {
     bool initialized = false;
     bool connected = false;
+    bool stale = false;
 
     uint32_t packetsReceived = 0;
     uint32_t badPackets = 0;

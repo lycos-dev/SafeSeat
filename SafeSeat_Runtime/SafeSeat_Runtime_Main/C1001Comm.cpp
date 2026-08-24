@@ -39,18 +39,24 @@ void C1001Comm::update()
     if (packetReceived)
     {
         status.packetAgeMillis = now - status.lastPacketMillis;
+        status.stale =
+            status.packetAgeMillis > C1001_COMM_STALE_AFTER_MS;
         status.connected =
-            status.packetAgeMillis <= C1001_COMM_FRESHNESS_TIMEOUT_MS;
+            status.packetAgeMillis <= C1001_COMM_DISCONNECT_TIMEOUT_MS;
     }
     else
     {
         status.packetAgeMillis = 0;
         status.connected = false;
+        status.stale = false;
     }
 
     status.linkChannel = wireless.getStatus().channel;
 
-    if (!status.connected)
+    // Safety rule: a transport can remain logically connected during a
+    // short packet gap, but stale physiological/model evidence must never
+    // be used by Fusion.
+    if (!status.connected || status.stale)
     {
         invalidateStaleEvidence();
     }
@@ -94,6 +100,7 @@ void C1001Comm::processPacket(
     status.lastPacketMillis = millis();
     status.packetAgeMillis = 0;
     status.connected = true;
+    status.stale = false;
     status.remoteMLStatus = packet.mlStatus;
     status.remoteWindowSamplesCollected = packet.windowSamplesCollected;
     status.remoteSamplesUntilNextInference = packet.samplesUntilNextInference;
@@ -171,6 +178,12 @@ C1001FusionInput C1001Comm::getFusionInput() const
     if (!status.initialized || !status.connected)
     {
         input.health = FusionSensorHealth::UNAVAILABLE;
+        return input;
+    }
+
+    if (status.stale)
+    {
+        input.health = FusionSensorHealth::DEGRADED;
         return input;
     }
 
