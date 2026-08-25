@@ -1,8 +1,0 @@
-SafeSeat Final Architecture Note
-================================
-
-This ESP32-S3 WROOM camera node remains part of the final deployed system.
-It joins the Main Hub SafeSeat Wi-Fi network and uses ESP-NOW for
-event-triggered posture verification transactions.
-
-The removed PVDF/Piezo node is not required by this camera runtime.

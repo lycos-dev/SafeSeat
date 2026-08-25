@@ -1,0 +1,95 @@
+{
+  "status": "PASS",
+  "purpose": "quantization fidelity only; not a new subject-independent validation claim",
+  "model_bytes": 117824,
+  "classes": [
+    "leaning_backward",
+    "leaning_forward",
+    "leaning_left",
+    "leaning_right",
+    "upright"
+  ],
+  "input": {
+    "shape": [
+      1,
+      64,
+      64,
+      3
+    ],
+    "dtype": "<class 'numpy.int8'>",
+    "scale": 0.003921568859368563,
+    "zero_point": -128,
+    "normalization": "RGB uint8 -> float32 / 255.0 -> INT8 quantization"
+  },
+  "output": {
+    "shape": [
+      1,
+      5
+    ],
+    "dtype": "<class 'numpy.int8'>",
+    "scale": 0.03957529366016388,
+    "zero_point": -5
+  },
+  "operators": [
+    "PAD",
+    "CONV_2D",
+    "PAD",
+    "CONV_2D",
+    "PAD",
+    "CONV_2D",
+    "PAD",
+    "CONV_2D",
+    "PAD",
+    "CONV_2D",
+    "MEAN",
+    "FULLY_CONNECTED",
+    "DELEGATE"
+  ],
+  "no_flex_ops": true,
+  "parity_images": 150,
+  "float_vs_int8_argmax_agreement": 0.9933333333333333,
+  "mean_max_abs_logit_error": 0.08544687720636526,
+  "max_abs_logit_error": 0.2467360496520996,
+  "float_accuracy_on_parity_subset": 0.9466666666666667,
+  "int8_accuracy_on_parity_subset": 0.94,
+  "int8_macro_f1_on_parity_subset": 0.9390328384329987,
+  "int8_confusion_matrix": [
+    [
+      22,
+      8,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      30,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      30,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      30,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      1,
+      29
+    ]
+  ],
+  "int8_5frame_vote_accuracy": 0.9666666666666667,
+  "int8_5frame_vote_macro_f1": 0.9664335664335664
+}

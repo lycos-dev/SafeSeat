@@ -1,11 +1,7 @@
 #pragma once
 
-// ============================================================
-// SAFESEAT ESP32-S3 WROOM CAMERA PIN MAP - STEP 5.9.5
-//
-// This is the exact pin mapping from the user's confirmed-working
-// ESP32-S3 WROOM camera diagnostic sketch.
-// ============================================================
+// SafeSeat ESP32-S3 WROOM camera pin map
+// Confirmed working diagnostic mapping.
 
 #define PWDN_GPIO_NUM     -1
 #define RESET_GPIO_NUM    -1
