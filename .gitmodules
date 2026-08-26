@@ -1,3 +1,6 @@
 [submodule "SafeSeat_ML"]
 	path = SafeSeat_ML
 	url = https://github.com/lycos-dev/SafeSeat-ML.git
+[submodule "safeseat-app"]
+	path = safeseat-app
+	url = https://github.com/ollymt/safeseat-app.git
