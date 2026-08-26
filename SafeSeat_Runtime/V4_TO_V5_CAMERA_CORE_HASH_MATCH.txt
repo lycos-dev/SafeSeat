@@ -1,0 +1,18 @@
+V4 VALIDATED CORE vs V5 INTEGRATED CAMERA — SHA256 MATCH
+
+safeseat_pose_anomaly.cpp: MATCH
+  9f83024c3a1736eb9996b76cc1836a18bef0fc3e5dacd7891820040161fc066e
+safeseat_pose_anomaly.hpp: MATCH
+  09a816e8aa63321990e578ffe88bdcb1b6bfe1c5b0cf22915b7ee95b6349da55
+safeseat_temporal_filter.cpp: MATCH
+  5bbed705451f3116d7659eed4dca96dd5eb08df56a7c926bfb0f26913f4ca4d3
+safeseat_temporal_filter.hpp: MATCH
+  ff8e26f94cf3a0b027f9c29903b362f3ae5091d7a881125901c9dbba8c56339a
+frame_quality.cpp: MATCH
+  3f70bfd7b8498c0b2bc4cbaeb35307d91e202e90b7439e8d4495a251e5594ecd
+frame_quality.hpp: MATCH
+  f917a6a13face0a5d78ba25cdd96c988763ebb56284d585231681970001e1b27
+model_data.cpp: MATCH
+  5b3cd7a74fdec6cfe99cdfa5a374ffbfbafcb8c2065f7cd9ebc9c1188ec1981d
+model_data.hpp: MATCH
+  32239b00ae31619733619ec5298d14f1916042bb82f77920536da3ac78f6d5b4

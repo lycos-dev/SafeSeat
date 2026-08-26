@@ -1,0 +1,15 @@
+{
+  "SafeSeat_Runtime_Main_unchanged_from_v5_1": true,
+  "SafeSeat_Runtime_Main_changed_files": [],
+  "SafeSeat_Runtime_C1001_unchanged_from_v5_1": true,
+  "SafeSeat_Runtime_C1001_changed_files": [],
+  "camera_protocol_unchanged": true,
+  "camera_model_data_unchanged_from_v4_1": true,
+  "camera_core_shared_exact": true,
+  "host_core_test_pass": true,
+  "standalone_app_stub_syntax_pass": true,
+  "integrated_app_stub_syntax_pass": true,
+  "forward_fallback_threshold": "both shoulder span and box area >=1.30x calibrated baseline; missing nose only",
+  "integrated_upright_confirmation": "two clean NORMAL observations; mixed evidence not allowed to clear",
+  "espnow_wire_protocol_version": 2
+}

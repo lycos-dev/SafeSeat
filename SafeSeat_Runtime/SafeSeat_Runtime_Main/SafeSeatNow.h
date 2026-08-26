@@ -17,8 +17,8 @@ struct SafeSeatNowStatus
     uint32_t c1001PacketsQueued = 0;
     uint32_t cameraStatusPacketsQueued = 0;
     uint32_t cameraResultPacketsQueued = 0;
-    uint32_t cameraTriggersSent = 0;
-    uint32_t cameraTriggerSendErrors = 0;
+    uint32_t cameraCommandsSent = 0;
+    uint32_t cameraCommandSendErrors = 0;
     uint32_t unknownPacketsIgnored = 0;
 };
 
@@ -46,8 +46,8 @@ public:
         uint8_t sourceMac[6]
     );
 
-    bool sendCameraTrigger(
-        const CameraTriggerPacket &packet
+    bool sendCameraCommand(
+        const CameraCommandPacket &packet
     );
 
     const SafeSeatNowStatus& getStatus() const { return status; }

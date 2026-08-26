@@ -1,0 +1,100 @@
+{
+  "package_step": "5.9.9",
+  "date": "2026-08-26",
+  "scope": "Main Hub + ESP32-S3 camera ESP-NOW passenger-session integration around validated V4 Robust 7D camera core",
+  "camera_model_changed": false,
+  "camera_model_note": "Validated V4 Robust 7D IF+OCSVM core is byte-for-byte preserved; only command/session/ESP-NOW lifecycle is added.",
+  "protocol": {
+    "wire_version": 2,
+    "status_packet_bytes": 30,
+    "command_packet_bytes": 18,
+    "result_packet_bytes": 36,
+    "cross_side_verify_crc_hex": "1d19",
+    "wifi_channel": 6
+  },
+  "lifecycle": {
+    "occupancy_enter_debounce_ms": 3000,
+    "occupancy_exit_debounce_ms": 5000,
+    "calibration_samples": 5,
+    "calibration_background_on_camera_node": true,
+    "camera_idle_after_calibration": true,
+    "verification_trigger_authority": "Main Hub Fusion",
+    "verify_max_pose_attempts": 3,
+    "normal_can_finish_after_valid_pose_attempts": 1,
+    "non_upright_confirmation_requires_valid_abnormal_observations": 2,
+    "unknown_votes_anomaly": false
+  },
+  "host_test_results": {
+    "protocol_main_sizes": "30,18,36",
+    "protocol_camera_sizes": "30,18,36",
+    "cross_crc_main": "1d19",
+    "cross_crc_camera": "1d19",
+    "main_camera_state_simulation": "PASS",
+    "camera_numeric_equivalence": "max_if=4.8560247e-08; max_oc=2.38662901e-06",
+    "camera_structural": "PASS",
+    "camera_app_stub_syntax": "PASS (empty output from -fsyntax-only)",
+    "main_camera_stub_compile": "PASS (empty compiler output)"
+  },
+  "static_checks": {
+    "no_old_5class_directional_camera_enum_refs": true,
+    "no_old_camera_trigger_packet_refs": true,
+    "no_active_piezo_code_in_main": true,
+    "v4_validated_core_byte_identical_in_integrated_camera": true,
+    "coco_pose_partition_4mb": true,
+    "no_bad_integer_float_literals": false,
+    "no_xtensa_eps_collision": true,
+    "no_strncpy_in_camera_app": true,
+    "protocol_packet_sizes_expected": true,
+    "protocol_cross_crc_expected": true,
+    "main_camera_state_simulation_pass": true,
+    "camera_numeric_equivalence_pass": true,
+    "camera_structural_test_pass": true
+  },
+  "validated_core_hashes": {
+    "safeseat_pose_anomaly.cpp": {
+      "v4_sha256": "9f83024c3a1736eb9996b76cc1836a18bef0fc3e5dacd7891820040161fc066e",
+      "integrated_v5_sha256": "9f83024c3a1736eb9996b76cc1836a18bef0fc3e5dacd7891820040161fc066e",
+      "match": true
+    },
+    "safeseat_pose_anomaly.hpp": {
+      "v4_sha256": "09a816e8aa63321990e578ffe88bdcb1b6bfe1c5b0cf22915b7ee95b6349da55",
+      "integrated_v5_sha256": "09a816e8aa63321990e578ffe88bdcb1b6bfe1c5b0cf22915b7ee95b6349da55",
+      "match": true
+    },
+    "safeseat_temporal_filter.cpp": {
+      "v4_sha256": "5bbed705451f3116d7659eed4dca96dd5eb08df56a7c926bfb0f26913f4ca4d3",
+      "integrated_v5_sha256": "5bbed705451f3116d7659eed4dca96dd5eb08df56a7c926bfb0f26913f4ca4d3",
+      "match": true
+    },
+    "safeseat_temporal_filter.hpp": {
+      "v4_sha256": "ff8e26f94cf3a0b027f9c29903b362f3ae5091d7a881125901c9dbba8c56339a",
+      "integrated_v5_sha256": "ff8e26f94cf3a0b027f9c29903b362f3ae5091d7a881125901c9dbba8c56339a",
+      "match": true
+    },
+    "frame_quality.cpp": {
+      "v4_sha256": "3f70bfd7b8498c0b2bc4cbaeb35307d91e202e90b7439e8d4495a251e5594ecd",
+      "integrated_v5_sha256": "3f70bfd7b8498c0b2bc4cbaeb35307d91e202e90b7439e8d4495a251e5594ecd",
+      "match": true
+    },
+    "frame_quality.hpp": {
+      "v4_sha256": "f917a6a13face0a5d78ba25cdd96c988763ebb56284d585231681970001e1b27",
+      "integrated_v5_sha256": "f917a6a13face0a5d78ba25cdd96c988763ebb56284d585231681970001e1b27",
+      "match": true
+    },
+    "model_data.cpp": {
+      "v4_sha256": "5b3cd7a74fdec6cfe99cdfa5a374ffbfbafcb8c2065f7cd9ebc9c1188ec1981d",
+      "integrated_v5_sha256": "5b3cd7a74fdec6cfe99cdfa5a374ffbfbafcb8c2065f7cd9ebc9c1188ec1981d",
+      "match": true
+    },
+    "model_data.hpp": {
+      "v4_sha256": "32239b00ae31619733619ec5298d14f1916042bb82f77920536da3ac78f6d5b4",
+      "integrated_v5_sha256": "32239b00ae31619733619ec5298d14f1916042bb82f77920536da3ac78f6d5b4",
+      "match": true
+    }
+  },
+  "limitations": [
+    "The complete Main Hub Arduino sketch was not compiled in this container because the user Arduino board package/libraries are not installed here; camera communication files were host-compiled/stub-tested and existing FSR/MLX/MPU/Fusion source files were preserved byte-for-byte.",
+    "The integrated ESP-IDF camera project still needs one build/flash on the user ESP-IDF v5.5.5 toolchain and physical ESP-NOW test with both boards.",
+    "Five-sample calibration still takes multiple pose inferences; it is moved to passenger-entry background setup and is not repeated at every emergency verification."
+  ]
+}

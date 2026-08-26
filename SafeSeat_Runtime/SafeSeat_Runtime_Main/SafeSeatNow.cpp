@@ -287,8 +287,8 @@ bool SafeSeatNow::takeLatestCameraResult(
     return true;
 }
 
-bool SafeSeatNow::sendCameraTrigger(
-    const CameraTriggerPacket &packet
+bool SafeSeatNow::sendCameraCommand(
+    const CameraCommandPacket &packet
 )
 {
     if (!status.initialized)
@@ -304,10 +304,10 @@ bool SafeSeatNow::sendCameraTrigger(
 
     if (result == ESP_OK)
     {
-        status.cameraTriggersSent++;
+        status.cameraCommandsSent++;
         return true;
     }
 
-    status.cameraTriggerSendErrors++;
+    status.cameraCommandSendErrors++;
     return false;
 }

@@ -133,8 +133,17 @@ constexpr unsigned long C1001_COMM_DISCONNECT_TIMEOUT_MS = 10000UL;
 // first becomes STALE; only a sustained gap is reported as OFF.
 constexpr unsigned long CAMERA_COMM_STALE_AFTER_MS = 5000UL;
 constexpr unsigned long CAMERA_COMM_DISCONNECT_TIMEOUT_MS = 12000UL;
-constexpr unsigned long CAMERA_RESULT_FRESHNESS_TIMEOUT_MS = 5000UL;
-constexpr unsigned long CAMERA_TRIGGER_RETRY_MS = 500UL;
-constexpr unsigned long CAMERA_REQUEST_TIMEOUT_MS = 12000UL;
-constexpr uint8_t CAMERA_VERIFY_FRAME_COUNT = 3;
-constexpr uint8_t CAMERA_VERIFY_MIN_VALID_FRAMES = 2;
+constexpr unsigned long CAMERA_RESULT_FRESHNESS_TIMEOUT_MS = 10000UL;
+
+// One YOLO11n-Pose inference is ~28 s on the ESP32-S3. Normal posture can
+// return after one valid inference; confirmed non-upright posture requires
+// two valid abnormal observations and may span ~60 s.
+constexpr unsigned long CAMERA_TRIGGER_RETRY_MS = 5000UL;
+constexpr unsigned long CAMERA_REQUEST_TIMEOUT_MS = 105000UL;
+constexpr unsigned long CAMERA_REQUEST_COOLDOWN_MS = 10000UL;
+
+// Passenger/session lifecycle. These debounces prevent a momentary FSR/C1001
+// occupancy flap from creating or destroying a camera baseline.
+constexpr unsigned long CAMERA_OCCUPANCY_ENTER_DEBOUNCE_MS = 3000UL;
+constexpr unsigned long CAMERA_OCCUPANCY_EXIT_DEBOUNCE_MS = 5000UL;
+constexpr unsigned long CAMERA_SESSION_COMMAND_RETRY_MS = 3000UL;

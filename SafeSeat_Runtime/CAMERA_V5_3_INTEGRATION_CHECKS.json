@@ -1,0 +1,13 @@
+{
+  "version": "V5.3_ESPNOW_SEAT_OCCUPANT_LOCKED",
+  "host_occupant_anchor_test": "PASS",
+  "main_hub_changed_from_v5_2": false,
+  "c1001_changed_from_v5_2": false,
+  "espnow_wire_protocol_changed": false,
+  "if_ocsvm_model_changed": false,
+  "forward_fallback_changed": false,
+  "temporal_filter_changed": false,
+  "new_nvs_key": "baseline_v53",
+  "background_only_semantics": "UNKNOWN",
+  "ambiguous_identity_semantics": "UNKNOWN"
+}

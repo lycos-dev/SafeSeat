@@ -1,0 +1,43 @@
+{
+  "runtime_version": "V5_3_ESPNOW_SEAT_OCCUPANT_LOCKED",
+  "model_changed_from_v4_2": false,
+  "raw_pose_source": "17-keypoint COCO pose",
+  "model_feature_count": 7,
+  "required_primary_landmarks": [
+    "nose",
+    "left_shoulder",
+    "right_shoulder"
+  ],
+  "eyes_optional": true,
+  "burst_frame_count": 3,
+  "blur_gate": 300.0,
+  "runtime_person_score_min": 0.35,
+  "calibration_valid_frames": 5,
+  "baseline_persistence": "session-tagged ESP32 NVS baseline_v53; cleared/reset by passenger session lifecycle",
+  "seat_occupant_anchor": [
+    "box_cx_norm",
+    "box_cy_norm",
+    "box_area_ratio",
+    "shoulder_cx_norm",
+    "shoulder_cy_norm",
+    "shoulder_width_ratio"
+  ],
+  "calibration_foreground_gate": {
+    "min_box_area_ratio": 0.08,
+    "min_shoulder_width_ratio": 0.08
+  },
+  "runtime_anchor_gate": {
+    "box_area_scale_min": 0.28,
+    "box_area_scale_max": 3.2,
+    "box_center_delta_max_each_axis": 0.38,
+    "shoulder_scale_min": 0.35,
+    "shoulder_scale_max": 2.5
+  },
+  "background_person_rule": "does not match calibrated seat anchor => UNKNOWN; never substitute background person for missing occupant",
+  "ambiguous_two_person_rule": "if two distinct candidates match anchor nearly equally, UNKNOWN",
+  "forward_missing_nose_fallback": "retained from V4.2: shoulders+box growth >=1.30x each, temporal confirmation still required",
+  "temporal_confirmation": "retained V4.2 A-N-A tolerant pending behavior; two abnormal observations confirm; two normals clear",
+  "wifi_diagnostic_ap": null,
+  "diagnostic_url": null,
+  "espnow_protocol_version": 2
+}

@@ -1,0 +1,21 @@
+{
+  "safeseat_pose_anomaly.cpp": true,
+  "safeseat_pose_anomaly.hpp": true,
+  "safeseat_temporal_filter.cpp": true,
+  "safeseat_temporal_filter.hpp": true,
+  "frame_quality.cpp": true,
+  "frame_quality.hpp": true,
+  "model_data.cpp": true,
+  "model_data.hpp": true,
+  "main_hub_byte_identical_to_v52": true,
+  "c1001_byte_identical_to_v52": true,
+  "piezo_absent": true,
+  "standalone_v43_nvs": true,
+  "integrated_v53_nvs": true,
+  "old_selector_removed_standalone": true,
+  "old_selector_removed_integrated": true,
+  "helper_in_cmake_standalone": true,
+  "helper_in_cmake_integrated": true,
+  "camera_protocol_v2_unchanged": true,
+  "all_pass": true
+}

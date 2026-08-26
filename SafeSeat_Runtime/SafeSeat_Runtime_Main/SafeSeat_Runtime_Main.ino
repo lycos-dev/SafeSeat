@@ -239,7 +239,7 @@ void setup()
     );
 
     Serial.println(
-        " Step 5.9.8.24 - anti-flap C1001 + camera link health"
+        " Step 5.9.9 - V4 camera ESP-NOW passenger-session integration"
     );
 
     Serial.println(
@@ -697,6 +697,14 @@ void loop()
         rawSeatOccupied
         &&
         !likelySeatExit;
+
+    // Camera passenger/session lifecycle. Calibration starts only after a
+    // stable occupied transition and runs on the separate camera ESP32-S3.
+    // The Main Hub sensor pipelines continue normally while it calibrates.
+    if (cameraCommInitialized)
+    {
+        cameraComm.serviceOccupancySession(thermalOccupancy);
+    }
 
     // Target-quality gate only -- NOT a medical temperature threshold.
     // Require a plausible nearby skin-surface signal and meaningful
@@ -1300,14 +1308,29 @@ void loop()
             Serial.print(liveCameraStatus.modelReady ? "READY" : "WAIT");
             Serial.print(" CSTATE=");
             Serial.print(
-                liveCameraStatus.busy
-                    ? "BUSY"
+                liveCameraStatus.calibrating
+                    ? "CAL"
                     : (
-                        liveCameraStatus.requestActive
-                            ? "VERIFY"
-                            : "IDLE"
+                        liveCameraStatus.busy
+                            ? "BUSY"
+                            : (
+                                liveCameraStatus.requestActive
+                                    ? "VERIFY"
+                                    : (liveCameraStatus.baselineReady ? "IDLE" : "WAIT_BASE")
+                            )
                     )
             );
+            Serial.print(" BASE=");
+            if (liveCameraStatus.baselineReady)
+            {
+                Serial.print(liveCameraStatus.baselineProvisional ? "PROV" : "READY");
+            }
+            else
+            {
+                Serial.print(liveCameraStatus.calibrationCount);
+                Serial.print('/');
+                Serial.print(liveCameraStatus.calibrationTarget);
+            }
 
             if (liveCameraStatus.requestActive)
             {
@@ -2615,7 +2638,29 @@ void loop()
     Serial.print("PSRAM          : ");
     Serial.println(cameraStatus.psramReady ? "READY" : "NOT READY");
     Serial.print("Remote busy    : ");
-    Serial.println(cameraStatus.busy ? "YES - VERIFYING" : "NO / IDLE");
+    Serial.println(cameraStatus.busy ? "YES" : "NO / IDLE");
+    Serial.print("Passenger sess.: ");
+    Serial.print(cameraStatus.sessionActive ? "ACTIVE" : "NONE");
+    Serial.print(" remote=");
+    Serial.print(cameraStatus.remoteSessionId);
+    Serial.print(" local=");
+    Serial.println(cameraStatus.localSessionId);
+    Serial.print("Upright base   : ");
+    if (cameraStatus.baselineReady)
+    {
+        Serial.println(cameraStatus.baselineProvisional ? "READY (PROVISIONAL)" : "READY");
+    }
+    else if (cameraStatus.calibrating)
+    {
+        Serial.print("CALIBRATING ");
+        Serial.print(cameraStatus.calibrationCount);
+        Serial.print('/');
+        Serial.println(cameraStatus.calibrationTarget);
+    }
+    else
+    {
+        Serial.println("NOT READY");
+    }
     Serial.print("Status RX      : ");
     Serial.println(cameraStatus.statusPacketsReceived);
     Serial.print("Results RX     : ");
@@ -2650,7 +2695,7 @@ void loop()
             Serial.println(
                 cameraEvidence.postureNormal
                     ? "UPRIGHT / NORMAL VERIFICATION"
-                    : "LEANING / ABNORMAL VERIFICATION"
+                    : "NON-UPRIGHT / ABNORMAL VERIFICATION"
             );
         }
         else
