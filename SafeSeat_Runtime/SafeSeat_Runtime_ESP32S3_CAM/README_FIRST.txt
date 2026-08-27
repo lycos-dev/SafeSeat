@@ -1,20 +1,31 @@
-SAFESEAT CAMERA V5.3 — ESP-NOW INTEGRATED SEAT-OCCUPANT LOCK
-=================================================================
+SAFESEAT CAMERA V5.3.2 — ESP-NOW VERIFICATION-SAFE INTEGRATED RUNTIME
+====================================================================
 
-This supersedes V5.2 camera runtime. Main Hub, C1001, Fusion, FSR, MLX, MPU, and the ESP-NOW wire protocol are unchanged.
+This supersedes V5.3.1 camera runtime.
 
-Camera change only
-------------------
-- The 5-pose passenger calibration now also builds a seat-occupant anchor.
-- Verification selects the detection matching that passenger anchor instead of accepting any visible person.
-- Tiny/distant background people are rejected. If the seat occupant is missed and only a background person remains, result is UNKNOWN.
-- Multiple people are okay when one clearly matches the calibrated seat occupant; genuinely ambiguous identity stays UNKNOWN.
-- V4.2 forward fallback and temporal handling are retained unchanged.
+Camera behavior
+---------------
+- Triggered only by Main Hub VERIFY_POSTURE requests; no continuous pose ML.
+- Passenger calibration remains 5 valid upright poses plus seat-occupant anchor.
+- Runtime selects the calibrated seat occupant and rejects background people.
+- V4.2 forward fallback and temporal filtering remain unchanged.
+- V4.3.2 verification-safe contract is now explicit in the ESP-NOW runtime:
+    UNKNOWN -> never clear
+    confirmed deviation -> NON_UPRIGHT
+    UPRIGHT -> only after current RAW=NORMAL + FILTER=NORMAL + two clean normals
 
-Passenger/session lifecycle remains the same
---------------------------------------------
-Stable FSR occupancy -> Main Hub creates new session -> CALIBRATE_UPRIGHT -> camera collects 5 valid upright poses + occupant anchor -> READY.
-Stable seat exit -> RESET_SESSION -> camera clears session baseline/anchor.
-Next occupant -> new session -> new calibration.
+Passenger/session lifecycle
+---------------------------
+Stable FSR occupancy -> Main Hub starts new session -> CALIBRATE_UPRIGHT ->
+5 valid upright poses + occupant anchor -> READY.
 
-V5.3 uses NVS key baseline_v53. Older V5.2 saved camera baselines are ignored because they do not contain the occupant anchor.
+Stable seat exit -> RESET_SESSION -> camera clears passenger session state.
+Next occupant -> new session -> fresh calibration.
+
+Compatibility
+-------------
+- ESP-NOW camera wire protocol remains version 2.
+- NVS baseline schema/key remains baseline_v53.
+- IF/OCSVM model, thresholds, canonical 7D features, forward fallback,
+  temporal filter, occupant anchor, camera pins, partitions, and SDK defaults
+  are unchanged from V5.3.1.

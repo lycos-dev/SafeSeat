@@ -1,5 +1,5 @@
 {
-  "runtime_version": "V5_3_ESPNOW_SEAT_OCCUPANT_LOCKED",
+  "runtime_version": "V5_3_2_ESPNOW_VERIFICATION_SAFE",
   "model_changed_from_v4_2": false,
   "raw_pose_source": "17-keypoint COCO pose",
   "model_feature_count": 7,
@@ -39,5 +39,17 @@
   "temporal_confirmation": "retained V4.2 A-N-A tolerant pending behavior; two abnormal observations confirm; two normals clear",
   "wifi_diagnostic_ap": null,
   "diagnostic_url": null,
-  "espnow_protocol_version": 2
+  "espnow_protocol_version": 2,
+  "verification_safe_contract": {
+    "unknown_never_clears": true,
+    "upright_requires_current_raw_normal": true,
+    "upright_requires_filtered_normal": true,
+    "integrated_clean_normal_streak_required": 2,
+    "integrated_abnormal_streak_required_for_clear": 0,
+    "confirmed_deviation_result": "NON_UPRIGHT",
+    "unresolved_after_attempts": "UNKNOWN"
+  },
+  "model_changed_from_v5_3_1": false,
+  "wire_protocol_changed_from_v5_3_1": false,
+  "nvs_schema_changed_from_v5_3_1": false
 }

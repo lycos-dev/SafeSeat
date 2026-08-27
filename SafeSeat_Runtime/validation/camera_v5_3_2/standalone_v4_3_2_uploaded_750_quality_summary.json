@@ -1,0 +1,73 @@
+{
+  "total_images": 750,
+  "readable_images": 750,
+  "unreadable_images": 0,
+  "dimensions": {
+    "320x240": 750
+  },
+  "participants": {
+    "P01": 250,
+    "P02": 250,
+    "P03": 250
+  },
+  "classes": {
+    "leaning_backward": 150,
+    "leaning_forward": 150,
+    "leaning_left": 150,
+    "leaning_right": 150,
+    "upright": 150
+  },
+  "aggregate_sha256": "9ce090c8e694b4c6f04a82cece956c5ac29aeffda765fd053411ceff2e1d929d",
+  "runtime_sharpness_threshold": 300.0,
+  "runtime_quality_accepted": 750,
+  "runtime_quality_rejected": 0,
+  "sharpness": {
+    "min": 635.0086891225059,
+    "p01": 647.6208420939713,
+    "median": 850.2181130658657,
+    "mean": 850.4065344346706,
+    "max": 1201.079221197168
+  },
+  "per_class": {
+    "leaning_backward": {
+      "n": 150,
+      "mean": 849.69803475649,
+      "median": 854.7205535292856,
+      "min": 727.0717657155117,
+      "max": 986.4139133233211,
+      "rejected_below_300": 0
+    },
+    "leaning_forward": {
+      "n": 150,
+      "mean": 774.6155338625474,
+      "median": 798.0689766144603,
+      "min": 635.0086891225059,
+      "max": 899.10389401416,
+      "rejected_below_300": 0
+    },
+    "leaning_left": {
+      "n": 150,
+      "mean": 913.3624336694558,
+      "median": 943.0632643209613,
+      "min": 738.5371701351642,
+      "max": 1065.495816348423,
+      "rejected_below_300": 0
+    },
+    "leaning_right": {
+      "n": 150,
+      "mean": 803.1170203103769,
+      "median": 833.5961435314309,
+      "min": 668.5665629693199,
+      "max": 948.1065222055353,
+      "rejected_below_300": 0
+    },
+    "upright": {
+      "n": 150,
+      "mean": 911.2396495744832,
+      "median": 938.1695719802617,
+      "min": 714.7594400343274,
+      "max": 1201.079221197168,
+      "rejected_below_300": 0
+    }
+  }
+}

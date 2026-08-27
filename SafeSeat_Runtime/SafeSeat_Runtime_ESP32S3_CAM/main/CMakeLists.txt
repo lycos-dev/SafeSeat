@@ -4,6 +4,7 @@ idf_component_register(
         "safeseat_pose_anomaly.cpp"
         "safeseat_occupant_anchor.cpp"
         "safeseat_temporal_filter.cpp"
+        "safeseat_verification.cpp"
         "frame_quality.cpp"
         "model_data.cpp"
     INCLUDE_DIRS "."

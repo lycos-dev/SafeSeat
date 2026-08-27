@@ -5,7 +5,7 @@
 #include <vector>
 
 namespace {
-constexpr float EPS = 1e-6f;
+constexpr float SAFESEAT_ANCHOR_EPS = 1e-6f;
 constexpr int K_NOSE = 0;
 constexpr int K_LEFT_SHOULDER = 5;
 constexpr int K_RIGHT_SHOULDER = 6;
@@ -28,7 +28,7 @@ float box_iou(const dl::detect::result_t &a, const dl::detect::result_t &b)
     const float aa=std::max(0.0f,ax2-ax1)*std::max(0.0f,ay2-ay1);
     const float ba=std::max(0.0f,bx2-bx1)*std::max(0.0f,by2-by1);
     const float uni=aa+ba-inter;
-    return uni>EPS ? inter/uni : 0.0f;
+    return uni>SAFESEAT_ANCHOR_EPS ? inter/uni : 0.0f;
 }
 
 bool full_calibration_pose(const dl::detect::result_t &p)
@@ -56,7 +56,7 @@ bool safeseat_make_occupant_anchor_observation(
     if (image_width <= 0 || image_height <= 0 || pose.box.size() < 4) return false;
     const float x1=pose.box[0], y1=pose.box[1], x2=pose.box[2], y2=pose.box[3];
     const float bw=x2-x1, bh=y2-y1;
-    if (bw <= EPS || bh <= EPS) return false;
+    if (bw <= SAFESEAT_ANCHOR_EPS || bh <= SAFESEAT_ANCHOR_EPS) return false;
 
     out = {};
     out.box_cx_norm = ((x1+x2)*0.5f) / static_cast<float>(image_width);
@@ -80,7 +80,7 @@ bool safeseat_make_occupant_anchor_observation(
     }
 
     return std::isfinite(out.box_cx_norm) && std::isfinite(out.box_cy_norm)
-        && std::isfinite(out.box_area_ratio) && out.box_area_ratio > EPS
+        && std::isfinite(out.box_area_ratio) && out.box_area_ratio > SAFESEAT_ANCHOR_EPS
         && std::isfinite(out.shoulder_cx_norm) && std::isfinite(out.shoulder_cy_norm)
         && std::isfinite(out.shoulder_width_ratio);
 }
@@ -119,7 +119,7 @@ SafeSeatOccupantSelection safeseat_select_calibration_occupant(
     if (cands.size()==1) { out.pose=cands[0].pose; return out; }
 
     const Candidate &best=cands[0], &second=cands[1];
-    const float area_ratio = best.obs.box_area_ratio / std::max(second.obs.box_area_ratio,EPS);
+    const float area_ratio = best.obs.box_area_ratio / std::max(second.obs.box_area_ratio,SAFESEAT_ANCHOR_EPS);
     const float best_center = std::fabs(best.obs.box_cx_norm-0.5f);
     const float second_center = std::fabs(second.obs.box_cx_norm-0.5f);
     const bool duplicate = box_iou(*best.pose,*second.pose) >= 0.15f;
@@ -145,7 +145,7 @@ SafeSeatOccupantSelection safeseat_select_tracked_occupant(
     float min_person_score)
 {
     SafeSeatOccupantSelection out;
-    if (anchor.box_area_ratio <= EPS) { out.ambiguous=true; return out; }
+    if (anchor.box_area_ratio <= SAFESEAT_ANCHOR_EPS) { out.ambiguous=true; return out; }
 
     std::vector<Candidate> cands;
     for (const auto &p : poses) {
@@ -156,7 +156,7 @@ SafeSeatOccupantSelection safeseat_select_tracked_occupant(
             continue;
         }
 
-        const float area_scale = obs.box_area_ratio/std::max(anchor.box_area_ratio,EPS);
+        const float area_scale = obs.box_area_ratio/std::max(anchor.box_area_ratio,SAFESEAT_ANCHOR_EPS);
         const float dx = std::fabs(obs.box_cx_norm-anchor.box_cx_norm);
         const float dy = std::fabs(obs.box_cy_norm-anchor.box_cy_norm);
         if (area_scale < 0.28f || area_scale > 3.20f || dx > 0.38f || dy > 0.38f) {
@@ -165,7 +165,7 @@ SafeSeatOccupantSelection safeseat_select_tracked_occupant(
         }
 
         float shoulder_cost = 0.0f;
-        if (obs.shoulder_width_ratio > EPS && anchor.shoulder_width_ratio > EPS) {
+        if (obs.shoulder_width_ratio > SAFESEAT_ANCHOR_EPS && anchor.shoulder_width_ratio > SAFESEAT_ANCHOR_EPS) {
             const float shoulder_scale = obs.shoulder_width_ratio/anchor.shoulder_width_ratio;
             const float sdx = std::fabs(obs.shoulder_cx_norm-anchor.shoulder_cx_norm);
             const float sdy = std::fabs(obs.shoulder_cy_norm-anchor.shoulder_cy_norm);
@@ -174,12 +174,12 @@ SafeSeatOccupantSelection safeseat_select_tracked_occupant(
                 continue;
             }
             shoulder_cost = 0.45f*(sdx/0.40f) + 0.25f*(sdy/0.40f)
-                + 0.35f*std::fabs(std::log(std::max(shoulder_scale,EPS)));
+                + 0.35f*std::fabs(std::log(std::max(shoulder_scale,SAFESEAT_ANCHOR_EPS)));
         }
 
         Candidate c; c.pose=&p; c.obs=obs; c.area_scale=area_scale;
         c.cost = 1.20f*(dx/0.38f) + 0.80f*(dy/0.38f)
-            + 0.60f*std::fabs(std::log(std::max(area_scale,EPS)))
+            + 0.60f*std::fabs(std::log(std::max(area_scale,SAFESEAT_ANCHOR_EPS)))
             + shoulder_cost
             + 0.12f*(1.0f-std::max(0.0f,std::min(1.0f,p.score)));
         cands.push_back(c);

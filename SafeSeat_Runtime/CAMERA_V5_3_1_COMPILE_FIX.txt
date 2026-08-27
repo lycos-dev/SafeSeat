@@ -1,0 +1,11 @@
+SAFESEAT CAMERA RUNTIME V5.3.1 — ESP-IDF 5.5.5 COMPILE FIX
+===========================================================
+
+This patch does NOT change camera behavior, thresholds, models, occupant-lock logic,
+or ESP-NOW semantics.
+
+Fix:
+- Renamed local EPS constant in safeseat_occupant_anchor.cpp to
+  SAFESEAT_ANCHOR_EPS because the ESP32-S3 Xtensa toolchain defines EPS=192.
+
+This mirrors the already-correct V4.3.1 standalone fix.

@@ -1,0 +1,46 @@
+SAFESEAT CAMERA INTEGRATED V5.3.2 — VERIFICATION-SAFE VALIDATION SUMMARY
+============================================================================
+
+RESULT: PASS FOR INTEGRATED ESP32-S3 BUILD + LIVE SYSTEM TEST
+
+WHAT CHANGED
+------------
+V5.3.2 mirrors the final standalone V4.3.2 safety contract into the ESP-NOW camera runtime.
+UNKNOWN can never produce an UPRIGHT clearance. UPRIGHT requires current RAW=NORMAL,
+FILTER=NORMAL, at least two consecutive clean normal observations, and abnormal_streak=0.
+
+PRESERVED
+---------
+IF/OCSVM model: unchanged
+Canonical 7D features: unchanged
+Forward fallback: unchanged
+Temporal filter: unchanged
+Seat-occupant anchor: unchanged
+ESP-NOW packet layouts/protocol v2: unchanged
+NVS baseline_v53 schema: unchanged
+ESP-IDF Xtensa EPS compile fix: preserved
+
+HOST/STATIC REGRESSION
+----------------------
+Host integrated verification contract: PASS
+Bare EPS macro token: absent
+Core camera model/runtime files compared against V5.3.1: unchanged
+
+750-IMAGE EVIDENCE CARRIED FORWARD
+----------------------------------
+Because the model and pose pipeline are byte-identical, the final standalone 750-image
+contract replay remains applicable to the verification semantics:
+- 600 non-upright source images: 0 unsafe CLEAR_UPRIGHT
+- 599 HOLD_DEVIATION + 1 HOLD_UNKNOWN
+- 150 upright source images: 128 CLEAR_UPRIGHT + 22 conservative holds
+
+LATEST LIVE V4.3.2 STANDALONE EVIDENCE
+--------------------------------------
+The accepted live ESP32-S3 run contained 2 CLEAR_UPRIGHT events, 11 HOLD_DEVIATION
+events, and 3 HOLD_UNKNOWN events. All 3 raw UNKNOWN observations remained HOLD_UNKNOWN.
+
+NEXT REQUIRED TEST
+------------------
+Build/flash the integrated camera and run a real Main Hub VERIFY_POSTURE transaction.
+Verify that the Main Hub clears only on CameraPostureClass::UPRIGHT and never on UNKNOWN,
+NOT_READY, or DEVIATION_PENDING.

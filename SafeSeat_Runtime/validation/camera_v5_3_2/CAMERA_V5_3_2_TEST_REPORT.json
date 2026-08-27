@@ -1,0 +1,42 @@
+{
+  "version": "SafeSeat Camera Integrated V5.3.2 ESP-NOW Verification-Safe",
+  "purpose": "Mirror the final standalone V4.3.2 UNKNOWN-safe verification contract into the ESP-NOW camera runtime without changing the model, pose features, occupant lock, temporal filter, or wire protocol.",
+  "changes": {
+    "verification_contract_helper_added": true,
+    "unknown_never_clears": true,
+    "upright_requires_current_raw_normal_and_filtered_normal": true,
+    "integrated_upright_requires_two_clean_normal_observations": true,
+    "if_ocsvm_model_changed": false,
+    "pose_feature_logic_changed": false,
+    "forward_fallback_changed": false,
+    "temporal_filter_changed": false,
+    "occupant_anchor_changed": false,
+    "espnow_wire_protocol_changed": false,
+    "nvs_schema_changed": false,
+    "nvs_key": "baseline_v53"
+  },
+  "host_integrated_contract_test": "PASS",
+  "static_checks": "PASS",
+  "standalone_750_evidence_carried_forward": {
+    "basis": "Model/pose/temporal/occupant-anchor files are unchanged; this is a decision-contract sync, not model retraining.",
+    "non_upright_source_images": 600,
+    "unsafe_non_upright_clearances": 0,
+    "non_upright_hold_deviation": 599,
+    "non_upright_hold_unknown": 1,
+    "upright_source_images": 150,
+    "upright_clear_upright": 128
+  },
+  "latest_live_standalone_v4_3_2_evidence": {
+    "clear_upright_events": 2,
+    "hold_deviation_events": 11,
+    "hold_unknown_events": 3,
+    "raw_unknown_events": 3,
+    "unknown_clearance_observed": false
+  },
+  "limitations": [
+    "The integrated ESP-NOW firmware has not been flashed/executed on the physical ESP32-S3 in this packaging environment.",
+    "Full-system acceptance still requires a Main Hub transaction test proving UNKNOWN/NOT_READY/PENDING never clears the suspected emergency.",
+    "The 750-image evidence is carried forward because the camera model and pose pipeline are byte-identical; V5.3.2 changes only the verification decision contract in the integrated runtime."
+  ],
+  "acceptance": "PASS_FOR_INTEGRATED_ESP32S3_BUILD_AND_LIVE_TEST"
+}

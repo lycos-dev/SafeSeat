@@ -1,0 +1,17 @@
+SAFESEAT CAMERA V5.3.2 — INTEGRATED LIVE CHECK
+===============================================
+
+1. Overlay this ZIP into the existing SafeSeat_Runtime folder and replace files.
+2. Build/flash only SafeSeat_Runtime_ESP32S3_CAM first.
+3. With the full system running, create a NEW passenger occupancy session or
+   explicitly reset/recalibrate if testing with a different occupant.
+4. Confirm camera status reaches BASELINE_READY for that session.
+5. Trigger a real Main Hub VERIFY_POSTURE transaction while testing:
+   - Upright -> final CameraPostureClass::UPRIGHT only after two clean normals.
+   - Left/right/forward abnormal -> NON_UPRIGHT when confirmed.
+   - Lost pose/occlusion/poor visibility -> UNKNOWN, never UPRIGHT.
+6. Confirm the Main Hub does not clear a suspected emergency on UNKNOWN,
+   NOT_READY, or DEVIATION_PENDING.
+
+Expected camera serial banner:
+SafeSeat ESP32-S3 Camera V5.3.2 - ESP-NOW VERIFICATION-SAFE Integrated

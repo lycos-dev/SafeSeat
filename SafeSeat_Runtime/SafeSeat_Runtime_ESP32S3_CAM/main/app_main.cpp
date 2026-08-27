@@ -21,6 +21,7 @@
 #include "safeseat_pose_anomaly.hpp"
 #include "safeseat_occupant_anchor.hpp"
 #include "safeseat_temporal_filter.hpp"
+#include "safeseat_verification.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -716,9 +717,12 @@ void verify_request(COCOPose *pose, const CameraCommandPacket &command)
         }
 
         if (!obs.sharp_enough || obs.person_score < RUNTIME_MIN_PERSON_SCORE) {
-            g_temporal.update(false, SafeSeatPoseState::UNKNOWN);
-            ESP_LOGW(TAG, "VERIFY request=%lu attempt=%d UNKNOWN (sharp=%.1f score=%.3f).",
-                     (unsigned long)command.requestId, attempt + 1, obs.sharpness, obs.person_score);
+            const SafeSeatTemporalStatus temporal = g_temporal.update(false, SafeSeatPoseState::UNKNOWN);
+            const SafeSeatVerificationState contract = safeseat_verification_decide(
+                true, true, false, SafeSeatPoseState::UNKNOWN, temporal.state);
+            ESP_LOGW(TAG, "VERIFY request=%lu attempt=%d UNKNOWN (sharp=%.1f score=%.3f) contract=%s | UNKNOWN NEVER CLEARS.",
+                     (unsigned long)command.requestId, attempt + 1, obs.sharpness, obs.person_score,
+                     safeseat_verification_state_name(contract));
             continue;
         }
 
@@ -726,21 +730,27 @@ void verify_request(COCOPose *pose, const CameraCommandPacket &command)
         if (obs.pose_valid) last_result = safeseat_evaluate_pose(obs.features, baseline);
         else last_result = obs.fallback_result;
         if (!last_result.valid_pose) {
-            g_temporal.update(false, SafeSeatPoseState::UNKNOWN);
-            ESP_LOGW(TAG, "VERIFY request=%lu attempt=%d UNKNOWN: no full pose and forward fallback did not pass.",
-                     (unsigned long)command.requestId, attempt + 1);
+            const SafeSeatTemporalStatus temporal = g_temporal.update(false, SafeSeatPoseState::UNKNOWN);
+            const SafeSeatVerificationState contract = safeseat_verification_decide(
+                true, true, false, SafeSeatPoseState::UNKNOWN, temporal.state);
+            ESP_LOGW(TAG, "VERIFY request=%lu attempt=%d UNKNOWN: no full pose and forward fallback did not pass; contract=%s | UNKNOWN NEVER CLEARS.",
+                     (unsigned long)command.requestId, attempt + 1,
+                     safeseat_verification_state_name(contract));
             continue;
         }
 
         ++valid_observations;
         SafeSeatTemporalStatus temporal = g_temporal.update(true, last_result.state);
+        const SafeSeatVerificationState contract = safeseat_verification_decide(
+            true, true, last_result.valid_pose, last_result.state, temporal.state);
         if (last_result.fallback_used) {
             ESP_LOGW(TAG, "VERIFY request=%lu attempt=%d FORWARD_FALLBACK shoulder_x=%.3f box_x=%.3f.",
                      (unsigned long)command.requestId, attempt + 1,
                      last_result.fallback_shoulder_ratio, last_result.fallback_box_ratio);
         }
 
-        if (temporal.state == SafeSeatFilteredState::DEVIATION_CONFIRMED) {
+        if (contract == SafeSeatVerificationState::HOLD_DEVIATION
+            && temporal.state == SafeSeatFilteredState::DEVIATION_CONFIRMED) {
             send_result(command.requestId, command.sessionId, CameraPostureClass::NON_UPRIGHT,
                         last_result, valid_observations, last_person_score, cumulative_ms);
             ESP_LOGI(TAG, "VERIFY request=%lu -> NON_UPRIGHT_CONFIRMED in %lums.",
@@ -748,12 +758,12 @@ void verify_request(COCOPose *pose, const CameraCommandPacket &command)
             return;
         }
 
-        // V5.3 does not clear a sensor-triggered emergency on the first NORMAL
-        // frame. Require two consecutive clean NORMAL observations and no
-        // pending abnormal evidence in this request. Mixed N-A-N sequences
-        // therefore end UNKNOWN rather than falsely clearing a backward lean.
-        if (last_result.state == SafeSeatPoseState::NORMAL
-            && temporal.state == SafeSeatFilteredState::NORMAL
+        // V5.3.2 mirrors the standalone V4.3.2 verification-safe contract:
+        // UNKNOWN can never clear a sensor-triggered emergency. UPRIGHT is
+        // permitted only when the CURRENT raw observation is explicitly NORMAL,
+        // the temporal filter is NORMAL, and the integrated runtime has two
+        // consecutive clean NORMAL observations with no abnormal streak.
+        if (contract == SafeSeatVerificationState::CLEAR_UPRIGHT
             && temporal.normal_streak >= 2
             && temporal.abnormal_streak == 0)
         {
@@ -766,13 +776,13 @@ void verify_request(COCOPose *pose, const CameraCommandPacket &command)
 
         send_result(command.requestId, command.sessionId, CameraPostureClass::DEVIATION_PENDING,
                     last_result, valid_observations, last_person_score, cumulative_ms);
-        ESP_LOGI(TAG, "VERIFY request=%lu -> PENDING/MIXED; collecting confirmation.",
-                 (unsigned long)command.requestId);
+        ESP_LOGI(TAG, "VERIFY request=%lu -> PENDING/MIXED contract=%s; collecting confirmation.",
+                 (unsigned long)command.requestId, safeseat_verification_state_name(contract));
     }
 
     send_result(command.requestId, command.sessionId, CameraPostureClass::UNKNOWN,
                 last_result, valid_observations, last_person_score, cumulative_ms);
-    ESP_LOGW(TAG, "VERIFY request=%lu -> UNKNOWN after %d attempts.",
+    ESP_LOGW(TAG, "VERIFY request=%lu -> UNKNOWN after %d attempts | UNKNOWN NEVER CLEARS.",
              (unsigned long)command.requestId, VERIFY_MAX_ATTEMPTS);
 }
 
@@ -845,8 +855,8 @@ void handle_command(COCOPose *pose, const CameraCommandPacket &command)
 extern "C" void app_main(void)
 {
     ESP_LOGI(TAG, "====================================================");
-    ESP_LOGI(TAG, "SafeSeat ESP32-S3 Camera V5.3 - ESP-NOW Integrated");
-    ESP_LOGI(TAG, "V4.3 runtime: canonical 7D model + missing-nose forward fallback + mixed-pose guard");
+    ESP_LOGI(TAG, "SafeSeat ESP32-S3 Camera V5.3.2 - ESP-NOW VERIFICATION-SAFE Integrated");
+    ESP_LOGI(TAG, "V4.3.2 camera contract: occupant lock + forward fallback + temporal filter + UNKNOWN never clears");
     ESP_LOGI(TAG, "====================================================");
 
     g_state_mutex = xSemaphoreCreateMutex();
