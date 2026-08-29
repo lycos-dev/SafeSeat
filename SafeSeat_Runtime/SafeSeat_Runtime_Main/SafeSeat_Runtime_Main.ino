@@ -532,11 +532,8 @@ void setup()
     // ========================================================
     // LOCAL TELEMETRY / API - STEP 5.9.8
     //
-    // This is intentionally read-only and backend-agnostic.
-    // It exposes the latest Main Hub/Fusion state to a phone or
-    // future frontend connected to the SafeSeat Wi-Fi network.
-    // No endpoint can trigger/cancel camera verification or alter
-    // the Fusion decision.
+    // Telemetry endpoints remain read-only and backend-agnostic.
+    // Camera verification is requested only by the production Fusion path.
     // ========================================================
 
     if (safeSeatAccessPointInitialized)
@@ -663,47 +660,36 @@ void loop()
     // not alter any MLX class/struct layout.
     // ========================================================
 
-    const bool rawSeatOccupied =
-        occupantPresent
-        ||
-        (
-            fsrInitialized
-            &&
-            f.connected
-            &&
-            f.valid
-            &&
-            f.occupiedByPressure
-        );
-
-    // A lingering single FSR after the passenger physically leaves
-    // is mechanical relaxation, not permission to keep thermal evidence.
-    // This affects ONLY the thermal session; Fusion/FSR occupancy remains
-    // on its already-proven code path in this stability build.
-    const bool likelySeatExit =
-        !occupantPresent
-        &&
+    // ========================================================
+    // AUTHORITATIVE SEAT-SESSION OCCUPANCY
+    //
+    // When the calibrated FSR array is healthy, pressure occupancy is the
+    // authority for starting/stopping occupant-scoped MLX and camera state.
+    // C1001 presence is deliberately NOT allowed to reopen a seat session
+    // while a person is merely standing near an empty seat. If the FSR
+    // module is genuinely unavailable, C1001 presence remains a degraded
+    // fallback so the system does not lose all occupancy context.
+    // ========================================================
+    const bool fsrOccupancyUsable =
         fsrInitialized
-        &&
-        f.connected
-        &&
-        f.valid
-        &&
-        f.wholeSeatTotal <= 12000.0f
-        &&
-        f.activeSensorCount <= 1;
+        && f.connected
+        && f.valid
+        && f.baselineValid;
 
-    const bool thermalOccupancy =
-        rawSeatOccupied
-        &&
-        !likelySeatExit;
+    const bool seatSessionOccupied =
+        fsrOccupancyUsable
+            ? f.occupiedByPressure
+            : occupantPresent;
 
-    // Camera passenger/session lifecycle. Calibration starts only after a
-    // stable occupied transition and runs on the separate camera ESP32-S3.
-    // The Main Hub sensor pipelines continue normally while it calibrates.
+    const bool thermalOccupancy = seatSessionOccupied;
+
+    // Camera passenger/session lifecycle follows the physical seat session,
+    // not radar presence around the seat. The camera transport itself stays
+    // powered/connected while empty; RESET_SESSION clears only passenger
+    // baseline/session state.
     if (cameraCommInitialized)
     {
-        cameraComm.serviceOccupancySession(thermalOccupancy);
+        cameraComm.serviceOccupancySession(seatSessionOccupied);
     }
 
     // Target-quality gate only -- NOT a medical temperature threshold.
@@ -779,7 +765,7 @@ void loop()
         mlxContext.getReading();
     fsrML.update(
         f,
-        occupantPresent
+        seatSessionOccupied
     );
 
     if (mpuInitialized)
@@ -972,7 +958,8 @@ void loop()
         fusion.getReading();
 
     // Trigger/cancel the camera transaction AFTER Fusion computes
-    // whether verification is actually required.
+    // whether verification is actually required. Production Fusion is the
+    // only verification authority in the dry-run/final runtime.
     if (cameraCommInitialized)
     {
         cameraComm.serviceVerificationRequest(
@@ -1306,6 +1293,10 @@ void loop()
             Serial.print(liveCameraStatus.psramReady ? "OK" : "NO");
             Serial.print(" CML=");
             Serial.print(liveCameraStatus.modelReady ? "READY" : "WAIT");
+            Serial.print(" HSESS=");
+            Serial.print(liveCameraStatus.localOccupancySessionActive ? "ACTIVE" : "NONE");
+            Serial.print(" CSESS=");
+            Serial.print(liveCameraStatus.sessionActive ? "ACTIVE" : "NONE");
             Serial.print(" CSTATE=");
             Serial.print(
                 liveCameraStatus.calibrating

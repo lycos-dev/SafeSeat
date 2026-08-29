@@ -1,0 +1,444 @@
+diff --git a/src/app/(tabs)/everyone/editprofile.tsx b/src/app/(tabs)/everyone/editprofile.tsx
+index 6d97c51..469502e 100644
+--- a/src/app/(tabs)/everyone/editprofile.tsx
++++ b/src/app/(tabs)/everyone/editprofile.tsx
+@@ -10,7 +10,7 @@ import {
+ } from "react-native";
+ import { SafeAreaView } from "react-native-safe-area-context";
+ 
+-import { Column, FieldGroup, Host, TextInput } from "@expo/ui";
++import { Column, FieldGroup, Host, TextInput, useNativeState } from "@expo/ui";
+ import { frame } from "@expo/ui/swift-ui/modifiers";
+ import { useCallback, useState } from "react";
+ 
+@@ -40,6 +40,12 @@ export default function EditProfile() {
+ 
+     // 1. Core Account States
+     const [userName, setUserName] = useState<string>("Guest");
++    const userNameInput = useNativeState("Guest");
++
++    const updateUserName = useCallback((nextName: string) => {
++        userNameInput.set(nextName);
++        setUserName(nextName);
++    }, [userNameInput]);
+     const [userEmail, setUserEmail] = useState<string>("Not Set");
+     const [userPhone, setUserPhone] = useState<string>("Not Set");
+ 
+@@ -69,7 +75,7 @@ export default function EditProfile() {
+             const savedHealthDataString = await SecureStore.getItemAsync(healthCacheKey);
+             if (savedHealthDataString) {
+                 const savedHealth = JSON.parse(savedHealthDataString);
+-                if (savedHealth.name) setUserName(savedHealth.name);
++                if (savedHealth.name) updateUserName(savedHealth.name);
+                 if (savedHealth.email) setUserEmail(savedHealth.email);
+                 if (savedHealth.phone) setUserPhone(savedHealth.phone);
+                 if (savedHealth.birthday) setBirthday(savedHealth.birthday);
+@@ -105,7 +111,7 @@ export default function EditProfile() {
+                 let cloudData: any = {};
+                 if (profileDocSnap.exists()) {
+                     cloudData = profileDocSnap.data();
+-                    if (cloudData.name) setUserName(cloudData.name);
++                    if (cloudData.name) updateUserName(cloudData.name);
+                     if (cloudData.email) setUserEmail(cloudData.email);
+                     if (cloudData.phone) setUserPhone(cloudData.phone);
+                     if (cloudData.birthday) setBirthday(cloudData.birthday);
+@@ -144,7 +150,7 @@ export default function EditProfile() {
+         } catch (error) {
+             console.error("Failed to load user profile data:", error);
+         }
+-    }, [healthCacheKey, isSubProfile, profileId]);
++    }, [healthCacheKey, isSubProfile, profileId, updateUserName]);
+ 
+     useFocusEffect(
+         useCallback(() => {
+@@ -250,8 +256,8 @@ export default function EditProfile() {
+                             >
+                                 <TextInput
+                                     placeholder="Name"
+-                                    value={userName}
+-                                    onChangeText={setUserName}
++                                    value={userNameInput}
++                                    onChangeText={updateUserName}
+                                     modifiers={[submitLabel("next")]}
+                                     textAlign="left"
+                                 />
+@@ -259,8 +265,8 @@ export default function EditProfile() {
+                                     <FieldGroup.Section title="Basic Information">
+                                         <TextInput
+                                             placeholder="Name"
+-                                            value={userName}
+-                                            onChangeText={setUserName}
++                                            value={userNameInput}
++                                            onChangeText={updateUserName}
+                                             modifiers={[submitLabel("next")]}
+                                             textAlign="left"
+                                         />
+diff --git a/src/app/(tabs)/settings/index.tsx b/src/app/(tabs)/settings/index.tsx
+index 3b450cb..11df445 100644
+--- a/src/app/(tabs)/settings/index.tsx
++++ b/src/app/(tabs)/settings/index.tsx
+@@ -1,5 +1,5 @@
+ import { Themes } from "@/constants/theme";
+-import { useFocusEffect, useRouter } from "expo-router";
++import { type Href, useFocusEffect, useRouter } from "expo-router";
+ import {
+ 	Alert,
+ 	Dimensions,
+@@ -286,7 +286,7 @@ export default function Settings() {
+ 										isLast={true}
+ 										onPress={() => {
+ 											Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+-											router.push("/(tabs)/settings/diagnostics");
++											router.push("/(tabs)/settings/diagnostics" as Href);
+ 										}}
+ 									/>
+ 								</View>
+diff --git a/src/components/PasswordVerifyModal.tsx b/src/components/PasswordVerifyModal.tsx
+index 15a5b4b..badbab3 100644
+--- a/src/components/PasswordVerifyModal.tsx
++++ b/src/components/PasswordVerifyModal.tsx
+@@ -1,7 +1,7 @@
+ // components/PasswordVerifyModal.tsx
+ import { Themes } from "@/constants/theme";
+ import { extendSession } from "@/utils/securitySession";
+-import { BottomSheet, Button, Column, FieldGroup, Host, Icon, Row, Spacer, Text, TextInput } from "@expo/ui";
++import { BottomSheet, Button, Column, FieldGroup, Host, Icon, Row, Spacer, Text, TextInput, useNativeState } from "@expo/ui";
+ import { buttonBorderShape, buttonStyle, controlSize, scrollDisabled, submitLabel } from "@expo/ui/swift-ui/modifiers";
+ import * as Haptics from "expo-haptics";
+ import { useEffect, useRef, useState } from "react";
+@@ -19,6 +19,12 @@ type Props = {
+ 
+ export default function PasswordVerifyModal({ visible, onClose, onSuccess }: Props) {
+     const [passwordInput, setPasswordInput] = useState("");
++    const passwordInputState = useNativeState("");
++
++    const updatePasswordInput = (nextValue: string) => {
++        passwordInputState.set(nextValue);
++        setPasswordInput(nextValue);
++    };
+     const [isLoading, setIsLoading] = useState(false);
+     const passwordInputRef = useRef<any>(null);
+ 
+@@ -47,7 +53,7 @@ export default function PasswordVerifyModal({ visible, onClose, onSuccess }: Pro
+             await reauthenticateWithCredential(currentUser, credential);
+ 
+             await extendSession();
+-            setPasswordInput(""); // Reset field
++            updatePasswordInput(""); // Reset field
+             onSuccess();
+         } catch (error: any) {
+             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+@@ -128,8 +134,8 @@ export default function PasswordVerifyModal({ visible, onClose, onSuccess }: Pro
+                                 secureTextEntry={true}
+                                 editable={!isLoading}
+                                 ref={passwordInputRef}
+-                                onChangeText={setPasswordInput}
+-                                value={passwordInput}
++                                onChangeText={updatePasswordInput}
++                                value={passwordInputState}
+                                 modifiers={[submitLabel("done")]}
+                                 textAlign="center"
+                                 onSubmitEditing={handleVerify}
+diff --git a/src/components/app-tabs.tsx b/src/components/app-tabs.tsx
+deleted file mode 100644
+index 0b8bb53..0000000
+--- a/src/components/app-tabs.tsx
++++ /dev/null
+@@ -1,32 +0,0 @@
+-import { NativeTabs } from 'expo-router/unstable-native-tabs';
+-import { useColorScheme } from 'react-native';
+-
+-import { Colors } from '@/constants/theme';
+-
+-export default function AppTabs() {
+-  const scheme = useColorScheme();
+-  const colors = Colors[scheme === 'unspecified' ? 'light' : scheme];
+-
+-  return (
+-    <NativeTabs
+-      backgroundColor={colors.background}
+-      indicatorColor={colors.backgroundElement}
+-      labelStyle={{ selected: { color: colors.text } }}>
+-      <NativeTabs.Trigger name="index">
+-        <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
+-        <NativeTabs.Trigger.Icon
+-          src={require('@/assets/images/tabIcons/home.png')}
+-          renderingMode="template"
+-        />
+-      </NativeTabs.Trigger>
+-
+-      <NativeTabs.Trigger name="explore">
+-        <NativeTabs.Trigger.Label>Explore</NativeTabs.Trigger.Label>
+-        <NativeTabs.Trigger.Icon
+-          src={require('@/assets/images/tabIcons/explore.png')}
+-          renderingMode="template"
+-        />
+-      </NativeTabs.Trigger>
+-    </NativeTabs>
+-  );
+-}
+diff --git a/src/components/app-tabs.web.tsx b/src/components/app-tabs.web.tsx
+deleted file mode 100644
+index e0d1de8..0000000
+--- a/src/components/app-tabs.web.tsx
++++ /dev/null
+@@ -1,115 +0,0 @@
+-import {
+-  Tabs,
+-  TabList,
+-  TabTrigger,
+-  TabSlot,
+-  TabTriggerSlotProps,
+-  TabListProps,
+-} from 'expo-router/ui';
+-import { SymbolView } from 'expo-symbols';
+-import { Pressable, useColorScheme, View, StyleSheet } from 'react-native';
+-
+-import { ExternalLink } from './external-link';
+-import { ThemedText } from './themed-text';
+-import { ThemedView } from './themed-view';
+-
+-import { Colors, MaxContentWidth, Spacing } from '@/constants/theme';
+-
+-export default function AppTabs() {
+-  return (
+-    <Tabs>
+-      <TabSlot style={{ height: '100%' }} />
+-      <TabList asChild>
+-        <CustomTabList>
+-          <TabTrigger name="home" href="/" asChild>
+-            <TabButton>Home</TabButton>
+-          </TabTrigger>
+-          <TabTrigger name="explore" href="/explore" asChild>
+-            <TabButton>Explore</TabButton>
+-          </TabTrigger>
+-        </CustomTabList>
+-      </TabList>
+-    </Tabs>
+-  );
+-}
+-
+-export function TabButton({ children, isFocused, ...props }: TabTriggerSlotProps) {
+-  return (
+-    <Pressable {...props} style={({ pressed }) => pressed && styles.pressed}>
+-      <ThemedView
+-        type={isFocused ? 'backgroundSelected' : 'backgroundElement'}
+-        style={styles.tabButtonView}>
+-        <ThemedText type="small" themeColor={isFocused ? 'text' : 'textSecondary'}>
+-          {children}
+-        </ThemedText>
+-      </ThemedView>
+-    </Pressable>
+-  );
+-}
+-
+-export function CustomTabList(props: TabListProps) {
+-  const scheme = useColorScheme();
+-  const colors = Colors[scheme === 'unspecified' ? 'light' : scheme];
+-
+-  return (
+-    <View {...props} style={styles.tabListContainer}>
+-      <ThemedView type="backgroundElement" style={styles.innerContainer}>
+-        <ThemedText type="smallBold" style={styles.brandText}>
+-          Expo Starter
+-        </ThemedText>
+-
+-        {props.children}
+-
+-        <ExternalLink href="https://docs.expo.dev" asChild>
+-          <Pressable style={styles.externalPressable}>
+-            <ThemedText type="link">Docs</ThemedText>
+-            <SymbolView
+-              tintColor={colors.text}
+-              name={{ ios: 'arrow.up.right.square', web: 'link' }}
+-              size={12}
+-            />
+-          </Pressable>
+-        </ExternalLink>
+-      </ThemedView>
+-    </View>
+-  );
+-}
+-
+-const styles = StyleSheet.create({
+-  tabListContainer: {
+-    position: 'absolute',
+-    width: '100%',
+-    padding: Spacing.three,
+-    justifyContent: 'center',
+-    alignItems: 'center',
+-    flexDirection: 'row',
+-  },
+-  innerContainer: {
+-    paddingVertical: Spacing.two,
+-    paddingHorizontal: Spacing.five,
+-    borderRadius: Spacing.five,
+-    flexDirection: 'row',
+-    alignItems: 'center',
+-    flexGrow: 1,
+-    gap: Spacing.two,
+-    maxWidth: MaxContentWidth,
+-  },
+-  brandText: {
+-    marginRight: 'auto',
+-  },
+-  pressed: {
+-    opacity: 0.7,
+-  },
+-  tabButtonView: {
+-    paddingVertical: Spacing.one,
+-    paddingHorizontal: Spacing.three,
+-    borderRadius: Spacing.three,
+-  },
+-  externalPressable: {
+-    flexDirection: 'row',
+-    justifyContent: 'center',
+-    alignItems: 'center',
+-    gap: Spacing.one,
+-    marginLeft: Spacing.three,
+-  },
+-});
+diff --git a/src/components/contact-card-drawer.tsx b/src/components/contact-card-drawer.tsx
+deleted file mode 100644
+index 3405ec4..0000000
+--- a/src/components/contact-card-drawer.tsx
++++ /dev/null
+@@ -1,137 +0,0 @@
+-// components/PasswordVerifyModal.tsx
+-import { Themes } from "@/constants/theme";
+-import { BottomSheet, Button, Column, Host, Icon, Row, Spacer, Text } from "@expo/ui";
+-import { buttonBorderShape, buttonStyle, controlSize } from "@expo/ui/swift-ui/modifiers";
+-
+-import * as Haptics from "expo-haptics"
+-import { useEffect, useRef, useState } from "react";
+-import { Alert, StyleSheet, useColorScheme } from "react-native";
+-
+-type Props = {
+-    visible: boolean;
+-    name: string;
+-    number: string;
+-    order: string;
+-    onClose: () => void;
+-};
+-
+-export default function ContactCardDrawer({ visible, onClose, name, number, order }: Props) {
+-    const colorScheme = useColorScheme();
+-    const activeScheme = colorScheme === "dark" ? "dark" : "light";
+-    const currentTheme = Themes[activeScheme];
+-
+-    useEffect(() => {
+-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+-    }, [visible])
+-
+-    return (
+-        <Host matchContents>
+-            <BottomSheet isPresented={visible} onDismiss={onClose} showDragIndicator={false} snapPoints={["half"]}>
+-                <Column spacing={16} alignment="start">
+-                    <Spacer size={0} />
+-                    {/* 🧭 Header Row */}
+-                    <Row>
+-                        <Column spacing={0}>
+-                            {/* Main Content Body */}
+-                            <Text textStyle={{ color: currentTheme.textSecondary, fontSize: 18, textAlign: "left" }}>
+-                                {order.toUpperCase()}
+-                            </Text>
+-                            <Text textStyle={{ color: currentTheme.text, fontSize: 36, fontWeight: "bold", textAlign: "left" }}>
+-                                {name}
+-                            </Text>
+-                            <Row spacing={6} alignment="center">
+-                                <Text textStyle={{ color: currentTheme.text, fontSize: 20, fontWeight: "600", textAlign: "left" }}>
+-                                    {number}
+-                                </Text>
+-                                <Button
+-                                    label="Copy"
+-                                    variant="text"
+-                                    onPress={() => Alert.alert("Action 2")}
+-                                >
+-                                </Button>
+-                            </Row>
+-                        </Column>
+-
+-                        <Spacer flexible />
+-
+-                        <Button
+-                            modifiers={[buttonStyle('glass'), controlSize("large"), buttonBorderShape("circle")]}
+-                        >
+-                            <Icon name={Icon.select({
+-                                ios: "xmark",
+-                                android: import("@expo/material-symbols/close.xml")
+-                            })} />
+-                        </Button>
+-                    </Row>
+-                    {/* 🔲 Native Large Square Action Buttons Grid */}
+-                    <Row spacing={12} alignment="center">
+-                        <Button
+-                            variant="outlined"
+-                            modifiers={[
+-                                controlSize("extraLarge"),
+-                                buttonBorderShape("roundedRectangle")
+-                            ]}
+-                            onPress={() => Alert.alert("Action 2")}
+-                            style={{ flex: 1, height: 100 }}
+-                        >
+-                            <Column alignment="center" spacing={4}>
+-                                <Icon name={Icon.select({
+-                                    ios: "pencil",
+-                                    android: import("@expo/material-symbols/chat.xml")
+-                                })} size={24} />
+-                                <Text textStyle={{ fontSize: 14, fontWeight: "600" }}>Edit</Text>
+-                            </Column>
+-                        </Button>
+-                        <Button
+-                            variant="outlined"
+-                            modifiers={[
+-                                controlSize("extraLarge"),
+-                                buttonBorderShape("roundedRectangle")
+-                            ]}
+-                            onPress={() => Alert.alert("Action 2")}
+-                            style={{ flex: 1, height: 100 }}
+-                        >
+-                            <Column alignment="center" spacing={4}>
+-                                <Icon name={Icon.select({
+-                                    ios: "bubble.left.and.bubble.right.fill",
+-                                    android: import("@expo/material-symbols/chat.xml")
+-                                })} size={24} />
+-                                <Text textStyle={{ fontSize: 14, fontWeight: "600" }}>Message</Text>
+-                            </Column>
+-                        </Button>
+-                        <Button
+-                            modifiers={[
+-                                buttonStyle('borderedProminent'),
+-                                controlSize("extraLarge"),
+-                                buttonBorderShape("roundedRectangle")
+-                            ]}
+-                            onPress={() => Alert.alert("Action 1")}
+-                            style={{ height: 100 }}
+-                        >
+-                            <Column alignment="center" spacing={4}>
+-                                <Icon name={Icon.select({
+-                                    ios: "phone.fill",
+-                                    android: import("@expo/material-symbols/call.xml")
+-                                })} size={24} />
+-                                <Text textStyle={{ fontSize: 14, fontWeight: "600" }}>Call</Text>
+-                            </Column>
+-                        </Button>
+-                    </Row>
+-                    <Spacer />
+-                </Column>
+-            </BottomSheet>
+-        </Host>
+-    );
+-}
+-
+-const styles = StyleSheet.create({
+-    title: {
+-        fontSize: 36,
+-        textAlign: "center",
+-        height: 100,
+-        fontFamily: "Logo-Font",
+-        borderWidth: 1,
+-        borderColor: "#fff",
+-        marginBottom: 8
+-    }
+-});
+\ No newline at end of file

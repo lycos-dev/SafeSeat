@@ -60,6 +60,7 @@ private:
 
     SafeSeatNowStatus status{};
     unsigned long lastBeaconMillis = 0;
+    unsigned long lastChannelRefreshMillis = 0;
 
 
     volatile bool pendingC1001Ready = false;

@@ -4,6 +4,7 @@
 
 #include "NetworkConfig.h"
 #include "CameraProtocol.h"
+#include "SafeSeatUatPage.h"
 
 namespace
 {
@@ -35,10 +36,12 @@ bool SafeSeatApi::begin(
     Serial.println("[API] SafeSeat local read-only API started.");
     Serial.println("[API] Base URL : http://192.168.4.1");
     Serial.println("[API] Status   : /api/v1/status");
+    Serial.println("[API] Fusion   : /api/v1/fusion");
     Serial.println("[API] Sensors  : /api/v1/sensors");
     Serial.println("[API] Camera   : /api/v1/camera");
     Serial.println("[API] Network  : /api/v1/network");
     Serial.println("[API] Health   : /health");
+    Serial.println("[API] UAT View : /uat");
 
     return true;
 }
@@ -57,8 +60,10 @@ void SafeSeatApi::registerRoutes()
 {
     server.on("/", HTTP_GET, [this]() { handleRoot(); });
     server.on("/health", HTTP_GET, [this]() { handleHealth(); });
+    server.on("/uat", HTTP_GET, [this]() { handleUat(); });
 
     server.on("/api/v1/status", HTTP_GET, [this]() { handleStatus(); });
+    server.on("/api/v1/fusion", HTTP_GET, [this]() { handleFusion(); });
     server.on("/api/v1/sensors", HTTP_GET, [this]() { handleSensors(); });
     server.on("/api/v1/camera", HTTP_GET, [this]() { handleCamera(); });
     server.on("/api/v1/network", HTTP_GET, [this]() { handleNetwork(); });
@@ -66,6 +71,7 @@ void SafeSeatApi::registerRoutes()
     // Development aliases. The versioned endpoints above are the
     // contract the frontend should ultimately target.
     server.on("/status", HTTP_GET, [this]() { handleStatus(); });
+    server.on("/fusion", HTTP_GET, [this]() { handleFusion(); });
     server.on("/sensors", HTTP_GET, [this]() { handleSensors(); });
     server.on("/camera", HTTP_GET, [this]() { handleCamera(); });
     server.on("/network", HTTP_GET, [this]() { handleNetwork(); });
@@ -92,6 +98,7 @@ a{display:block;margin:8px 0}
 <p>Local read-only telemetry API is running.</p>
 <p>The Main Hub Fusion state is authoritative; these endpoints only expose current state.</p>
 <a href="/api/v1/status">/api/v1/status</a>
+<a href="/api/v1/fusion">/api/v1/fusion</a>
 <a href="/api/v1/sensors">/api/v1/sensors</a>
 <a href="/api/v1/camera">/api/v1/camera</a>
 <a href="/api/v1/network">/api/v1/network</a>
@@ -109,9 +116,20 @@ void SafeSeatApi::handleHealth()
     sendJson(200, buildHealthJson());
 }
 
+void SafeSeatApi::handleUat()
+{
+    server.sendHeader("Cache-Control", "no-store");
+    server.send_P(200, "text/html", SAFESEAT_UAT_PAGE);
+}
+
 void SafeSeatApi::handleStatus()
 {
     sendJson(200, buildStatusJson());
+}
+
+void SafeSeatApi::handleFusion()
+{
+    sendJson(200, buildFusionJson());
 }
 
 void SafeSeatApi::handleSensors()
@@ -171,6 +189,75 @@ String SafeSeatApi::buildHealthJson() const
     out += F(",\"telemetry_ready\":");
     appendJsonBool(out, telemetryReady);
     out += F(",\"read_only\":true}");
+
+    return out;
+}
+
+String SafeSeatApi::buildFusionJson() const
+{
+    String out;
+    out.reserve(1800);
+
+    if (telemetry == nullptr || !telemetry->getSnapshot().ready)
+    {
+        out = F("{\"schema_version\":\"1.0.0\",\"telemetry_ready\":false}");
+        return out;
+    }
+
+    const SafeSeatTelemetrySnapshot &s = telemetry->getSnapshot();
+    const FusionReading &f = s.fusion;
+
+    out += F("{\"schema_version\":");
+    appendJsonString(out, API_SCHEMA_VERSION);
+    out += F(",\"telemetry_ready\":true");
+    out += F(",\"timestamp_ms\":");
+    out += String(s.capturedMillis);
+    out += F(",\"uptime_ms\":");
+    out += String(millis());
+    out += F(",\"system\":{");
+    out += F("\"fusion_authoritative\":true");
+    out += F(",\"fusion_valid\":");
+    appendJsonBool(out, f.valid);
+    out += F(",\"fusion_state\":");
+    appendJsonString(out, FusionEngine::getLevelText(f.level));
+    out += F(",\"confidence\":");
+    appendJsonFloat(out, f.confidence, 3);
+    out += F(",\"emergency_active\":");
+    appendJsonBool(out, f.level == FusionLevel::EMERGENCY);
+    out += F(",\"camera_verification_requested\":");
+    appendJsonBool(out, f.triggerCamera);
+    out += F(",\"alert_requested\":");
+    appendJsonBool(out, f.triggerAlert);
+    out += F(",\"occupancy\":");
+    appendJsonString(out, FusionEngine::getOccupancyText(f.occupancy));
+    out += F(",\"motion_context\":");
+    appendJsonString(out, FusionEngine::getMotionText(f.motion));
+    out += F(",\"vitals_state\":");
+    appendJsonString(out, FusionEngine::getVitalsText(f.vitals));
+    out += F(",\"pressure_state\":");
+    appendJsonString(out, FusionEngine::getPressureText(f.pressure));
+    out += F(",\"temperature_state\":");
+    appendJsonString(out, FusionEngine::getTemperatureText(f.temperature));
+    out += F(",\"respiration_state\":");
+    appendJsonString(out, FusionEngine::getRespirationText(f.respiration));
+    out += F(",\"evidence\":{");
+    out += F("\"valid_sensor_count\":");
+    out += String(f.evidence.validSensorCount);
+    out += F(",\"unavailable_sensor_count\":");
+    out += String(f.evidence.unavailableSensorCount);
+    out += F(",\"anomaly_evidence_count\":");
+    out += String(f.evidence.anomalyEvidenceCount);
+    out += F(",\"strong_anomaly_evidence_count\":");
+    out += String(f.evidence.strongAnomalyEvidenceCount);
+    out += F(",\"normal_evidence_count\":");
+    out += String(f.evidence.normalEvidenceCount);
+    out += F(",\"supporting_context_count\":");
+    out += String(f.evidence.supportingContextCount);
+    out += F(",\"motion_artifact_possible\":");
+    appendJsonBool(out, f.evidence.motionArtifactPossible);
+    out += F(",\"multi_sensor_agreement\":");
+    appendJsonBool(out, f.evidence.multiSensorAgreement);
+    out += F("}}}");
 
     return out;
 }
@@ -444,6 +531,10 @@ String SafeSeatApi::buildSensorsJson() const
     appendModelEvidence(out, in.mpu.model);
     out += F(",\"model_interpretation\":\"road_domain_diagnostic_only_after_physical_motion\",\"fusion_role\":\"vehicle_motion_context_for_fsr_artifact_handling\"}");
 
+    // Close the top-level sensors object opened before c1001.
+    // Without this brace, /api/v1/sensors and /api/v1/status are invalid JSON.
+    out += F("}");
+
     return out;
 }
 
@@ -478,6 +569,22 @@ String SafeSeatApi::buildCameraJson() const
     appendJsonBool(out, r.psramReady);
     out += F(",\"busy\":");
     appendJsonBool(out, r.busy);
+    out += F(",\"session_active\":");
+    appendJsonBool(out, r.sessionActive);
+    out += F(",\"local_session_active\":");
+    appendJsonBool(out, r.localOccupancySessionActive);
+    out += F(",\"remote_session_id\":");
+    out += String(r.remoteSessionId);
+    out += F(",\"local_session_id\":");
+    out += String(r.localSessionId);
+    out += F(",\"baseline_ready\":");
+    appendJsonBool(out, r.baselineReady);
+    out += F(",\"calibrating\":");
+    appendJsonBool(out, r.calibrating);
+    out += F(",\"calibration_count\":");
+    out += String(r.calibrationCount);
+    out += F(",\"calibration_target\":");
+    out += String(r.calibrationTarget);
     out += F(",\"packet_age_ms\":");
     out += String(r.packetAgeMillis);
     out += F(",\"status_packets_received\":");

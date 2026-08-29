@@ -1,0 +1,5740 @@
+diff --git a/.env.example b/.env.example
+new file mode 100644
+index 0000000..a714474
+--- /dev/null
++++ b/.env.example
+@@ -0,0 +1,10 @@
++EXPO_PUBLIC_FIREBASE_API_KEY=
++EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=
++EXPO_PUBLIC_FIREBASE_PROJECT_ID=
++EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=
++EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=
++EXPO_PUBLIC_FIREBASE_APP_ID=
++EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID=
++
++# Main Hub local read-only API. Keep this local IP unless the runtime changes.
++EXPO_PUBLIC_SAFESEAT_HUB_URL=http://192.168.4.1
+diff --git a/SAFESEAT_LIVE_INTEGRATION.md b/SAFESEAT_LIVE_INTEGRATION.md
+new file mode 100644
+index 0000000..1a2852b
+--- /dev/null
++++ b/SAFESEAT_LIVE_INTEGRATION.md
+@@ -0,0 +1,40 @@
++# SafeSeat Live App Integration
++
++## Main Hub API
++
++- Wi-Fi SSID: `SafeSeat`
++- Hub base URL: `http://192.168.4.1`
++- Primary app endpoint: `GET /api/v1/status`
++- Fallback reachability endpoint: `GET /health`
++- Evaluator monitor: `http://192.168.4.1/uat`
++
++The mobile app does not rerun SafeSeat ML/fusion. Main Hub Fusion is authoritative. WATCH remains a non-alert MONITORING state; it is never converted into a participant WARNING.
++
++## Added integration layers
++
++- `src/services/safeseat-hardware.ts` — defensive local HTTP client and payload validation
++- `src/hooks/use-safeseat-hardware.ts` — one process-wide sequential polling loop
++- `src/services/safeseat-session-store.ts` — local-first active UAT session cache
++- `src/hooks/use-safeseat-session.ts` — session subscription hook
++- `src/services/safeseat-trip-sync.ts` — best-effort cloud state/Twilio request mirror
++- `src/services/safeseat-module-status.ts` — user-facing module health summaries
++- `src/types/safeseat-hardware.ts` and `src/types/safeseat-session.ts`
++- `plugins/with-safeseat-local-network.js` — Android cleartext/local-network native config
++
++## Pre-build verification
++
++```powershell
++git diff --check
++npm install
++npx expo-doctor
++npx tsc --noEmit
++npm run lint
++```
++
++For the first hardware test, also open this from the physical phone browser while joined to
++SafeSeat Wi-Fi:
++
++`http://192.168.4.1/health`
++
++Then verify the participant Home screen changes from Monitoring Unavailable/Initializing to
++Monitoring Active without exposing raw telemetry.
+diff --git a/SAFESEAT_UAT_V1_NOTES.md b/SAFESEAT_UAT_V1_NOTES.md
+new file mode 100644
+index 0000000..845fcd1
+--- /dev/null
++++ b/SAFESEAT_UAT_V1_NOTES.md
+@@ -0,0 +1,127 @@
++# SafeSeat UAT V1 — Live Single-Prototype App
++
++This branch is the UAT/defense integration for one complete movable SafeSeat prototype.
++The Main Hub remains authoritative for monitoring and emergency decisions; the app is the
++participant-facing presentation/session layer.
++
++## One physical prototype, five logical positions
++
++Before the first Lock Deployment of a session, choose where the physical SafeSeat apron and
++camera are installed:
++
++1. Driver
++2. Front Passenger
++3. Rear Left
++4. Rear Center
++5. Rear Right
++
++Only the selected logical position receives the live Main Hub Fusion state. Other assigned
++seats display **NOT MONITORED**. After the first Lock Deployment, the prototype position is
++fixed until **End Session** so software cannot disagree with the physical installation.
++
++## Session semantics
++
++- **Lock Deployment** — starts or resumes monitoring.
++- **Unlock Deployment** — pauses monitoring and allows occupant reassignment; it does not end
++  or archive the session and does not allow prototype relocation.
++- **End Session** — ends the session, clears the local active session, removes temporary Guest
++  assignments, and permits prototype relocation.
++
++The active UAT session is cached locally with AsyncStorage so assignment/lock state remains
++usable even while the phone is connected to the SafeSeat local-only access point. Firestore is
++best-effort mirroring/history, not the live monitoring source.
++
++## Guest / Temporary Occupant
++
++The assignment sheet always offers **Guest / Temporary Occupant**. Guest mode does not create
++a permanent profile. Guest identity is excluded from archived trip assignments. This also
++allows UAT assignment to continue when cloud profile lookup is temporarily unavailable.
++
++## Participant vs evaluator interfaces
++
++The participant app shows:
++
++- monitoring Active / Initializing / Unavailable;
++- the one active prototype position;
++- MONITORING while Main Hub Fusion is in WATCH/warm-up, then SAFE / WARNING / EMERGENCY for that monitored seat;
++- NOT MONITORED for other assigned logical seats;
++- emergency UI;
++- System Self-Diagnostic module readiness.
++
++The participant app does **not** display raw HR, RR, temperature, pressure, MPU values, model
++scores, or camera confidence.
++
++`WATCH` is intentionally **not** converted into WARNING. It is shown as **MONITORING** so normal warm-up/conservative Fusion behavior cannot create a false participant warning.
++
++The evaluator uses the Main Hub browser monitor separately:
++
++`http://192.168.4.1/uat`
++
++Raw evaluator recordings remain local to the evaluator device unless deliberately exported.
++
++## Local API reliability contract
++
++Normal participant polling uses `GET /api/v1/status` first. `GET /health` is only a fallback.
++The app uses one shared polling loop even if Home and Diagnostics are both mounted.
++
++The networking layer:
++
++- waits for each poll to complete before scheduling the next one;
++- prevents overlapping requests;
++- uses a finite request timeout;
++- cache-busts local API requests;
++- validates/parses JSON before accepting it;
++- catches `Failed to fetch`, `Network request failed`, timeout, HTTP, and malformed-payload
++  failures inside the hardware service;
++- retains last-known-good telemetry only for diagnostics/history but never presents stale data
++  as a live SAFE state;
++- automatically resumes when the Main Hub becomes reachable again.
++
++A temporary Wi-Fi/API problem therefore becomes **Monitoring Unavailable** rather than an
++uncaught fetch exception.
++
++## Android UAT / defense
++
++Android is delivered as a standalone EAS preview APK. The local-network config plugin enables
++HTTP access to the Main Hub at `192.168.4.1` in the generated Android native project.
++
++Recommended build:
++
++```powershell
++npx expo-doctor
++eas build --platform android --profile preview --clear-cache
++```
++
++After installation, Metro/Expo Go are not required for Android monitoring.
++
++## iPhone UAT / defense without a paid Apple Developer membership
++
++The UAT branch intentionally removes the unused `react-native-picker` and
++`react-native-image-colors` native dependencies so the project stays compatible with Expo Go
++as far as application dependencies are concerned.
++
++The dependable physical-iPhone UAT path is Expo Go + Metro on a Windows laptop. The laptop and
++iPhone join the same SafeSeat Wi-Fi and communicate wirelessly; no Mac or USB tether is needed.
++The laptop can remain out of sight during the dashboard/vehicle demonstration.
++
++Before UAT/defense, install/re-sign the SDK-compatible Expo Go on the iPhone while Internet is
++available. During the local-only SafeSeat demo, start Metro from the project on Windows and
++open the project on the iPhone. Test this exact workflow before formal UAT.
++
++Project-specific native config plugins do not modify the Expo Go binary, so iPhone local-HTTP
++connectivity must be proven on the real device rather than assumed from the Android APK.
++
++## Driver-only automated SMS escalation
++
++The included Firebase Function scaffold is eligible only when:
++
++- the physical prototype is mapped to Seat 1 / Driver;
++- Main Hub Fusion is `EMERGENCY`;
++- Main Hub sets `alert_requested=true`; and
++- the user's Emergency Escalation setting and primary emergency contact permit sending.
++
++Passenger/rear-seat emergencies never create automatic external SMS requests. The driver is
++first responder for passenger alerts. Twilio credentials remain in Firebase Functions secrets,
++never in the mobile app.
++
++Do not deploy/configure Twilio until the local app↔Main Hub UAT flow is stable.
+diff --git a/app.json b/app.json
+index 6ebcc61..6a71a74 100644
+--- a/app.json
++++ b/app.json
+@@ -9,7 +9,13 @@
+     "userInterfaceStyle": "automatic",
+     "ios": {
+       "icon": "./assets/expo.icon",
+-      "bundleIdentifier": "com.ollymt.safeseatapp"
++      "bundleIdentifier": "com.ollymt.safeseatapp",
++      "infoPlist": {
++        "NSLocalNetworkUsageDescription": "SafeSeat connects to the Main Hub on the local SafeSeat Wi-Fi network to receive live occupant-monitoring status.",
++        "NSAppTransportSecurity": {
++          "NSAllowsLocalNetworking": true
++        }
++      }
+     },
+     "android": {
+       "adaptiveIcon": {
+@@ -41,7 +47,8 @@
+       "expo-image",
+       "expo-secure-store",
+       "expo-status-bar",
+-      "expo-web-browser"
++      "expo-web-browser",
++      "./plugins/with-safeseat-local-network"
+     ],
+     "experiments": {
+       "typedRoutes": true,
+diff --git a/eas.json b/eas.json
+new file mode 100644
+index 0000000..82e2cfc
+--- /dev/null
++++ b/eas.json
+@@ -0,0 +1,24 @@
++{
++  "cli": {
++    "version": ">= 22.4.0",
++    "appVersionSource": "remote"
++  },
++  "build": {
++    "development": {
++      "developmentClient": true,
++      "distribution": "internal"
++    },
++    "preview": {
++      "distribution": "internal",
++      "android": {
++        "buildType": "apk"
++      }
++    },
++    "production": {
++      "autoIncrement": true
++    }
++  },
++  "submit": {
++    "production": {}
++  }
++}
+diff --git a/firebase.json b/firebase.json
+new file mode 100644
+index 0000000..1bee05e
+--- /dev/null
++++ b/firebase.json
+@@ -0,0 +1,14 @@
++{
++  "functions": [
++    {
++      "source": "functions",
++      "codebase": "default",
++      "ignore": [
++        "node_modules",
++        ".git",
++        "firebase-debug.log",
++        "firebase-debug.*.log"
++      ]
++    }
++  ]
++}
+diff --git a/functions/README.md b/functions/README.md
+new file mode 100644
+index 0000000..324bbbe
+--- /dev/null
++++ b/functions/README.md
+@@ -0,0 +1,34 @@
++# SafeSeat Driver-Only Twilio SMS Backend
++
++This Firebase Cloud Function sends an automated SMS only when:
++
++1. Main Hub Fusion reaches `EMERGENCY` for Seat 1 / Driver;
++2. Main Hub reports `alert_requested=true`;
++3. the app queues `users/{uid}/alertRequests/{alertId}`;
++4. `settings/preferences.emergencyEscalation` is not disabled; and
++5. a primary emergency contact exists.
++
++Passenger seats never create automatic SMS escalation jobs.
++
++## Required Twilio secrets
++
++From the project root, after installing Firebase CLI and initializing/using the `safeseat-app` Firebase project:
++
++```powershell
++firebase functions:secrets:set TWILIO_ACCOUNT_SID
++firebase functions:secrets:set TWILIO_AUTH_TOKEN
++firebase functions:secrets:set TWILIO_FROM_NUMBER
++```
++
++The primary emergency contact phone must use E.164 format, e.g. `+639XXXXXXXXX`.
++
++Install backend dependencies and deploy:
++
++```powershell
++cd functions
++npm install
++cd ..
++firebase deploy --only functions:sendDriverEmergencySms
++```
++
++The Twilio credentials are never stored in the React Native app or committed to Git.
+diff --git a/functions/index.js b/functions/index.js
+new file mode 100644
+index 0000000..35b03bc
+--- /dev/null
++++ b/functions/index.js
+@@ -0,0 +1,155 @@
++const { onDocumentCreated } = require("firebase-functions/v2/firestore");
++const { defineSecret } = require("firebase-functions/params");
++const admin = require("firebase-admin");
++const twilio = require("twilio");
++
++admin.initializeApp();
++
++const TWILIO_ACCOUNT_SID = defineSecret("TWILIO_ACCOUNT_SID");
++const TWILIO_AUTH_TOKEN = defineSecret("TWILIO_AUTH_TOKEN");
++const TWILIO_FROM_NUMBER = defineSecret("TWILIO_FROM_NUMBER");
++
++/**
++ * Driver-only SafeSeat automated SMS escalation.
++ *
++ * The mobile app creates a pending alert request only after Main Hub Fusion
++ * enters EMERGENCY for Seat 1 and Fusion sets alert_requested=true.
++ * Passenger seats are rejected here even if a malformed client write occurs.
++ */
++exports.sendDriverEmergencySms = onDocumentCreated(
++  {
++    document: "users/{uid}/alertRequests/{alertId}",
++    secrets: [TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER],
++  },
++  async (event) => {
++    const snapshot = event.data;
++    if (!snapshot) return;
++
++    const request = snapshot.data() || {};
++    const uid = event.params.uid;
++    const requestRef = snapshot.ref;
++
++    if (
++      request.kind !== "driver_confirmed_emergency" ||
++      Number(request.seatNo) !== 1 ||
++      request.source !== "safeseat_main_hub" ||
++      request.status !== "pending"
++    ) {
++      await requestRef.set(
++        {
++          status: "rejected",
++          failureReason: "Request did not satisfy driver-only SafeSeat escalation rules.",
++          processedAt: admin.firestore.FieldValue.serverTimestamp(),
++        },
++        { merge: true },
++      );
++      return;
++    }
++
++    const preferencesRef = admin
++      .firestore()
++      .doc(`users/${uid}/settings/preferences`);
++    const preferencesSnap = await preferencesRef.get();
++    const escalationEnabled =
++      !preferencesSnap.exists ||
++      preferencesSnap.data()?.emergencyEscalation !== false;
++
++    if (!escalationEnabled) {
++      await requestRef.set(
++        {
++          status: "skipped",
++          failureReason: "Driver automated SMS escalation is disabled in user settings.",
++          processedAt: admin.firestore.FieldValue.serverTimestamp(),
++        },
++        { merge: true },
++      );
++      return;
++    }
++
++    const contactsSnap = await admin
++      .firestore()
++      .collection(`users/${uid}/emergencyContacts`)
++      .get();
++
++    if (contactsSnap.empty) {
++      await requestRef.set(
++        {
++          status: "failed",
++          failureReason: "No emergency contact is configured for automated SMS.",
++          processedAt: admin.firestore.FieldValue.serverTimestamp(),
++        },
++        { merge: true },
++      );
++      return;
++    }
++
++    const sortedContacts = contactsSnap.docs
++      .map((doc) => ({ doc, data: doc.data() || {} }))
++      .sort((a, b) => {
++        const ah = Number(a.data.hierarchy || 999);
++        const bh = Number(b.data.hierarchy || 999);
++        return ah - bh;
++      });
++
++    const contactDoc = sortedContacts[0].doc;
++    const contact = sortedContacts[0].data;
++    const rawPhone = String(contact.phone || "").replace(/[\s()-]/g, "");
++    const to = rawPhone.startsWith("09") && rawPhone.length === 11
++      ? `+63${rawPhone.slice(1)}`
++      : rawPhone.startsWith("63")
++        ? `+${rawPhone}`
++        : rawPhone;
++
++    if (!to.startsWith("+") || to.length < 8) {
++      await requestRef.set(
++        {
++          status: "failed",
++          failureReason: "Primary emergency contact phone number is not valid for SMS delivery.",
++          processedAt: admin.firestore.FieldValue.serverTimestamp(),
++        },
++        { merge: true },
++      );
++      return;
++    }
++
++    try {
++      const client = twilio(
++        TWILIO_ACCOUNT_SID.value(),
++        TWILIO_AUTH_TOKEN.value(),
++      );
++
++      const occurredAt = request.occurredAt || "the current monitoring session";
++      const message = await client.messages.create({
++        from: TWILIO_FROM_NUMBER.value(),
++        to,
++        body:
++          `SafeSeat automated alert: a confirmed DRIVER emergency was detected (${occurredAt}). ` +
++          "Please check on or contact the driver immediately. SafeSeat is a research safety-monitoring system and does not provide a medical diagnosis.",
++      });
++
++      await requestRef.set(
++        {
++          status: "sent",
++          provider: "twilio",
++          providerMessageSid: message.sid,
++          recipientContactId: contactDoc.id,
++          sentAt: admin.firestore.FieldValue.serverTimestamp(),
++          processedAt: admin.firestore.FieldValue.serverTimestamp(),
++        },
++        { merge: true },
++      );
++    } catch (error) {
++      console.error("Twilio SMS send failed", error);
++      await requestRef.set(
++        {
++          status: "failed",
++          failureReason:
++            error instanceof Error ? error.message : "Twilio SMS send failed.",
++          processedAt: admin.firestore.FieldValue.serverTimestamp(),
++        },
++        { merge: true },
++      );
++      throw error;
++    }
++  },
++);
+diff --git a/functions/package.json b/functions/package.json
+new file mode 100644
+index 0000000..a48dbcf
+--- /dev/null
++++ b/functions/package.json
+@@ -0,0 +1,13 @@
++{
++  "name": "safeseat-functions",
++  "private": true,
++  "engines": {
++    "node": "20"
++  },
++  "main": "index.js",
++  "dependencies": {
++    "firebase-admin": "^13.0.0",
++    "firebase-functions": "^6.0.0",
++    "twilio": "^5.0.0"
++  }
++}
+diff --git a/package-lock.json b/package-lock.json
+index 001dd42..202c04d 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -40,8 +40,6 @@
+         "react-dom": "19.2.3",
+         "react-native": "0.86.2",
+         "react-native-gesture-handler": "~2.32.0",
+-        "react-native-image-colors": "^2.6.0",
+-        "react-native-picker": "^4.3.7",
+         "react-native-reanimated": "4.5.1",
+         "react-native-safe-area-context": "~5.7.0",
+         "react-native-screens": "~4.26.0",
+@@ -2864,143 +2862,6 @@
+         "node": "^14.15.0 || ^16.10.0 || >=18.0.0"
+       }
+     },
+-    "node_modules/@jimp/bmp": {
+-      "version": "0.22.12",
+-      "resolved": "https://registry.npmjs.org/@jimp/bmp/-/bmp-0.22.12.tgz",
+-      "integrity": "sha512-aeI64HD0npropd+AR76MCcvvRaa+Qck6loCOS03CkkxGHN5/r336qTM5HPUdHKMDOGzqknuVPA8+kK1t03z12g==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "@jimp/utils": "^0.22.12",
+-        "bmp-js": "^0.1.0"
+-      },
+-      "peerDependencies": {
+-        "@jimp/custom": ">=0.3.5"
+-      }
+-    },
+-    "node_modules/@jimp/core": {
+-      "version": "0.22.12",
+-      "resolved": "https://registry.npmjs.org/@jimp/core/-/core-0.22.12.tgz",
+-      "integrity": "sha512-l0RR0dOPyzMKfjUW1uebzueFEDtCOj9fN6pyTYWWOM/VS4BciXQ1VVrJs8pO3kycGYZxncRKhCoygbNr8eEZQA==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "@jimp/utils": "^0.22.12",
+-        "any-base": "^1.1.0",
+-        "buffer": "^5.2.0",
+-        "exif-parser": "^0.1.12",
+-        "file-type": "^16.5.4",
+-        "isomorphic-fetch": "^3.0.0",
+-        "pixelmatch": "^4.0.2",
+-        "tinycolor2": "^1.6.0"
+-      }
+-    },
+-    "node_modules/@jimp/custom": {
+-      "version": "0.22.12",
+-      "resolved": "https://registry.npmjs.org/@jimp/custom/-/custom-0.22.12.tgz",
+-      "integrity": "sha512-xcmww1O/JFP2MrlGUMd3Q78S3Qu6W3mYTXYuIqFq33EorgYHV/HqymHfXy9GjiCJ7OI+7lWx6nYFOzU7M4rd1Q==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "@jimp/core": "^0.22.12"
+-      }
+-    },
+-    "node_modules/@jimp/gif": {
+-      "version": "0.22.12",
+-      "resolved": "https://registry.npmjs.org/@jimp/gif/-/gif-0.22.12.tgz",
+-      "integrity": "sha512-y6BFTJgch9mbor2H234VSjd9iwAhaNf/t3US5qpYIs0TSbAvM02Fbc28IaDETj9+4YB4676sz4RcN/zwhfu1pg==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "@jimp/utils": "^0.22.12",
+-        "gifwrap": "^0.10.1",
+-        "omggif": "^1.0.9"
+-      },
+-      "peerDependencies": {
+-        "@jimp/custom": ">=0.3.5"
+-      }
+-    },
+-    "node_modules/@jimp/jpeg": {
+-      "version": "0.22.12",
+-      "resolved": "https://registry.npmjs.org/@jimp/jpeg/-/jpeg-0.22.12.tgz",
+-      "integrity": "sha512-Rq26XC/uQWaQKyb/5lksCTCxXhtY01NJeBN+dQv5yNYedN0i7iYu+fXEoRsfaJ8xZzjoANH8sns7rVP4GE7d/Q==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "@jimp/utils": "^0.22.12",
+-        "jpeg-js": "^0.4.4"
+-      },
+-      "peerDependencies": {
+-        "@jimp/custom": ">=0.3.5"
+-      }
+-    },
+-    "node_modules/@jimp/plugin-resize": {
+-      "version": "0.22.12",
+-      "resolved": "https://registry.npmjs.org/@jimp/plugin-resize/-/plugin-resize-0.22.12.tgz",
+-      "integrity": "sha512-3NyTPlPbTnGKDIbaBgQ3HbE6wXbAlFfxHVERmrbqAi8R3r6fQPxpCauA8UVDnieg5eo04D0T8nnnNIX//i/sXg==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "@jimp/utils": "^0.22.12"
+-      },
+-      "peerDependencies": {
+-        "@jimp/custom": ">=0.3.5"
+-      }
+-    },
+-    "node_modules/@jimp/png": {
+-      "version": "0.22.12",
+-      "resolved": "https://registry.npmjs.org/@jimp/png/-/png-0.22.12.tgz",
+-      "integrity": "sha512-Mrp6dr3UTn+aLK8ty/dSKELz+Otdz1v4aAXzV5q53UDD2rbB5joKVJ/ChY310B+eRzNxIovbUF1KVrUsYdE8Hg==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "@jimp/utils": "^0.22.12",
+-        "pngjs": "^6.0.0"
+-      },
+-      "peerDependencies": {
+-        "@jimp/custom": ">=0.3.5"
+-      }
+-    },
+-    "node_modules/@jimp/png/node_modules/pngjs": {
+-      "version": "6.0.0",
+-      "resolved": "https://registry.npmjs.org/pngjs/-/pngjs-6.0.0.tgz",
+-      "integrity": "sha512-TRzzuFRRmEoSW/p1KVAmiOgPco2Irlah+bGFCeNfJXxxYGwSw7YwAOAcd7X28K/m5bjBWKsC29KyoMfHbypayg==",
+-      "license": "MIT",
+-      "engines": {
+-        "node": ">=12.13.0"
+-      }
+-    },
+-    "node_modules/@jimp/tiff": {
+-      "version": "0.22.12",
+-      "resolved": "https://registry.npmjs.org/@jimp/tiff/-/tiff-0.22.12.tgz",
+-      "integrity": "sha512-E1LtMh4RyJsoCAfAkBRVSYyZDTtLq9p9LUiiYP0vPtXyxX4BiYBUYihTLSBlCQg5nF2e4OpQg7SPrLdJ66u7jg==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "utif2": "^4.0.1"
+-      },
+-      "peerDependencies": {
+-        "@jimp/custom": ">=0.3.5"
+-      }
+-    },
+-    "node_modules/@jimp/types": {
+-      "version": "0.22.12",
+-      "resolved": "https://registry.npmjs.org/@jimp/types/-/types-0.22.12.tgz",
+-      "integrity": "sha512-wwKYzRdElE1MBXFREvCto5s699izFHNVvALUv79GXNbsOVqlwlOxlWJ8DuyOGIXoLP4JW/m30YyuTtfUJgMRMA==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "@jimp/bmp": "^0.22.12",
+-        "@jimp/gif": "^0.22.12",
+-        "@jimp/jpeg": "^0.22.12",
+-        "@jimp/png": "^0.22.12",
+-        "@jimp/tiff": "^0.22.12",
+-        "timm": "^1.6.1"
+-      },
+-      "peerDependencies": {
+-        "@jimp/custom": ">=0.3.5"
+-      }
+-    },
+-    "node_modules/@jimp/utils": {
+-      "version": "0.22.12",
+-      "resolved": "https://registry.npmjs.org/@jimp/utils/-/utils-0.22.12.tgz",
+-      "integrity": "sha512-yJ5cWUknGnilBq97ZXOyOS0HhsHOyAyjHwYfHxGbSyMTohgQI6sVyE8KPgDwH8HHW/nMKXk8TrSwAE71zt716Q==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "regenerator-runtime": "^0.13.3"
+-      }
+-    },
+     "node_modules/@jridgewell/gen-mapping": {
+       "version": "0.3.13",
+       "resolved": "https://registry.npmjs.org/@jridgewell/gen-mapping/-/gen-mapping-0.3.13.tgz",
+@@ -3851,12 +3712,6 @@
+         "node": ">=10"
+       }
+     },
+-    "node_modules/@tokenizer/token": {
+-      "version": "0.3.0",
+-      "resolved": "https://registry.npmjs.org/@tokenizer/token/-/token-0.3.0.tgz",
+-      "integrity": "sha512-OvjF+z51L3ov0OyAU0duzsYuvO01PH7x4t6DJx+guahgTnBHkhJdG7soQeTSFLWN3efnHyibZ4Z8l2EuWwJN3A==",
+-      "license": "MIT"
+-    },
+     "node_modules/@types/cacheable-request": {
+       "version": "6.0.3",
+       "resolved": "https://registry.npmjs.org/@types/cacheable-request/-/cacheable-request-6.0.3.tgz",
+@@ -3971,156 +3826,6 @@
+       "integrity": "sha512-5jsZFwgR5rTdKwidH9Qmat75RKwqfpKlWWB1frDkljN127mwqBu8K0PYo7/hFpF03IEJpfVPpCQDY/eDx3iHvA==",
+       "license": "ISC"
+     },
+-    "node_modules/@vibrant/color": {
+-      "version": "4.0.4",
+-      "resolved": "https://registry.npmjs.org/@vibrant/color/-/color-4.0.4.tgz",
+-      "integrity": "sha512-Fq2tAszz4QOPWfHZ+KuEAchXUD8i594BM2fOJt8dI/fvYbiVoBycBF/BlNH6F4IWBubxXoPqD4JmmAHvFYbNew==",
+-      "license": "MIT",
+-      "funding": {
+-        "type": "github",
+-        "url": "https://github.com/sponsors/crutchcorn"
+-      }
+-    },
+-    "node_modules/@vibrant/core": {
+-      "version": "4.0.4",
+-      "resolved": "https://registry.npmjs.org/@vibrant/core/-/core-4.0.4.tgz",
+-      "integrity": "sha512-yZ0XSpW2biKyaJPpBC31AVYgn7NseKSO2q3KNMmDrkL2qC6TEWsBMnSQ28n0m///chZELXpQLx1CCOsWg5pj8w==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "@vibrant/color": "^4.0.4",
+-        "@vibrant/generator": "^4.0.4",
+-        "@vibrant/image": "^4.0.4",
+-        "@vibrant/quantizer": "^4.0.4",
+-        "@vibrant/worker": "^4.0.4"
+-      },
+-      "funding": {
+-        "type": "github",
+-        "url": "https://github.com/sponsors/crutchcorn"
+-      }
+-    },
+-    "node_modules/@vibrant/generator": {
+-      "version": "4.0.4",
+-      "resolved": "https://registry.npmjs.org/@vibrant/generator/-/generator-4.0.4.tgz",
+-      "integrity": "sha512-rwq8PnlpKdch4YqaA1FAwdm71gKE2cMrUsbu72TqRFGa8rpP1roaZlQCVXIIwElXVc3r9axZyAcqyTLaMjhrTg==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "@vibrant/color": "^4.0.4",
+-        "@vibrant/types": "^4.0.4"
+-      },
+-      "funding": {
+-        "type": "github",
+-        "url": "https://github.com/sponsors/crutchcorn"
+-      }
+-    },
+-    "node_modules/@vibrant/generator-default": {
+-      "version": "4.0.4",
+-      "resolved": "https://registry.npmjs.org/@vibrant/generator-default/-/generator-default-4.0.4.tgz",
+-      "integrity": "sha512-QeVDeH2dz9lityvJCb84Ml4hlBTElwCpU7SVpiDFBh6gPoCLnzcb1H9G4NgG3hOlAPyrBM+Ivq1Pg+1lZj5Ywg==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "@vibrant/color": "^4.0.4",
+-        "@vibrant/generator": "^4.0.4"
+-      },
+-      "funding": {
+-        "type": "github",
+-        "url": "https://github.com/sponsors/crutchcorn"
+-      }
+-    },
+-    "node_modules/@vibrant/image": {
+-      "version": "4.0.4",
+-      "resolved": "https://registry.npmjs.org/@vibrant/image/-/image-4.0.4.tgz",
+-      "integrity": "sha512-NBIJj7umfDRVpFjJHQo1AFSCWCzQyjfil+Yxu7W62PEL72GPCif0CDiglPkvVF8QhDLmnx/x1k3LIBb9jWF2sw==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "@vibrant/color": "^4.0.4"
+-      },
+-      "funding": {
+-        "type": "github",
+-        "url": "https://github.com/sponsors/crutchcorn"
+-      }
+-    },
+-    "node_modules/@vibrant/image-browser": {
+-      "version": "4.0.4",
+-      "resolved": "https://registry.npmjs.org/@vibrant/image-browser/-/image-browser-4.0.4.tgz",
+-      "integrity": "sha512-7qVyAm+z9t98iwMDzUgGCwgRg0KBB5RXQFgiO2Um5Izd1wO7BKC0SHVEz2k7sRx3XNfBf+JExp8quPrvSz17gg==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "@vibrant/image": "^4.0.4"
+-      },
+-      "funding": {
+-        "type": "github",
+-        "url": "https://github.com/sponsors/crutchcorn"
+-      }
+-    },
+-    "node_modules/@vibrant/image-node": {
+-      "version": "4.0.4",
+-      "resolved": "https://registry.npmjs.org/@vibrant/image-node/-/image-node-4.0.4.tgz",
+-      "integrity": "sha512-aG8Ukt9oTa6FWaAV5oBKsBetkKASWH31hZiFJ2R1291f3TZlphUyQTJz5TubucIRsCEl4dgG1xyxFPgse2IABA==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "@jimp/custom": "^0.22.12",
+-        "@jimp/plugin-resize": "^0.22.12",
+-        "@jimp/types": "^0.22.12",
+-        "@vibrant/image": "^4.0.4"
+-      },
+-      "funding": {
+-        "type": "github",
+-        "url": "https://github.com/sponsors/crutchcorn"
+-      }
+-    },
+-    "node_modules/@vibrant/quantizer": {
+-      "version": "4.0.4",
+-      "resolved": "https://registry.npmjs.org/@vibrant/quantizer/-/quantizer-4.0.4.tgz",
+-      "integrity": "sha512-722CooC2W4mlBiv+zyAsIrIvARnMCN/P2Muo8bnWd0SQlVWFtQnFxJWGOUPOPS4DGe3pGoqmNfvS0let4dICZQ==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "@vibrant/color": "^4.0.4",
+-        "@vibrant/image": "^4.0.4",
+-        "@vibrant/types": "^4.0.4"
+-      },
+-      "funding": {
+-        "type": "github",
+-        "url": "https://github.com/sponsors/crutchcorn"
+-      }
+-    },
+-    "node_modules/@vibrant/quantizer-mmcq": {
+-      "version": "4.0.4",
+-      "resolved": "https://registry.npmjs.org/@vibrant/quantizer-mmcq/-/quantizer-mmcq-4.0.4.tgz",
+-      "integrity": "sha512-/1CNnM96J8K+OBCWNUzywo6VdnmdFJyiKO+ty/nkfe8H0NseOEHIL7PrVtWGgtsb0rh2uTAq2rjXv65TfgPy8g==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "@vibrant/color": "^4.0.4",
+-        "@vibrant/image": "^4.0.4",
+-        "@vibrant/quantizer": "^4.0.4"
+-      },
+-      "funding": {
+-        "type": "github",
+-        "url": "https://github.com/sponsors/crutchcorn"
+-      }
+-    },
+-    "node_modules/@vibrant/types": {
+-      "version": "4.0.4",
+-      "resolved": "https://registry.npmjs.org/@vibrant/types/-/types-4.0.4.tgz",
+-      "integrity": "sha512-Qq3mVTJamn7yD4OBgBEUKaxfDlm3sxBK55N7dH3XzI9Ey7KR00R06uwtqOcEJMsziWTEXdYN3VUlYaj2Tkt7hw==",
+-      "license": "MIT",
+-      "funding": {
+-        "type": "github",
+-        "url": "https://github.com/sponsors/crutchcorn"
+-      }
+-    },
+-    "node_modules/@vibrant/worker": {
+-      "version": "4.0.4",
+-      "resolved": "https://registry.npmjs.org/@vibrant/worker/-/worker-4.0.4.tgz",
+-      "integrity": "sha512-Q/R6PYhSMWCXEk/IcXbWIzIu7Z4b58ABkGvcdF8Y+q/7g+KnpxKW5x/jfQ/6ciyYSby13wZZoEdNr3QQVgsdBQ==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "@vibrant/types": "^4.0.4"
+-      },
+-      "funding": {
+-        "type": "github",
+-        "url": "https://github.com/sponsors/crutchcorn"
+-      }
+-    },
+     "node_modules/@xmldom/xmldom": {
+       "version": "0.8.15",
+       "resolved": "https://registry.npmjs.org/@xmldom/xmldom/-/xmldom-0.8.15.tgz",
+@@ -4245,12 +3950,6 @@
+         "url": "https://github.com/chalk/ansi-styles?sponsor=1"
+       }
+     },
+-    "node_modules/any-base": {
+-      "version": "1.1.0",
+-      "resolved": "https://registry.npmjs.org/any-base/-/any-base-1.1.0.tgz",
+-      "integrity": "sha512-uMgjozySS8adZZYePpaWs8cxB9/kdzmpX6SgJZ+wbz1K5eYk5QMYDVJaZKhxyIHUdnnJkfR7SVgStgH7LkGUyg==",
+-      "license": "MIT"
+-    },
+     "node_modules/arg": {
+       "version": "5.0.2",
+       "resolved": "https://registry.npmjs.org/arg/-/arg-5.0.2.tgz",
+@@ -4479,12 +4178,6 @@
+         "node": ">=0.6"
+       }
+     },
+-    "node_modules/bmp-js": {
+-      "version": "0.1.0",
+-      "resolved": "https://registry.npmjs.org/bmp-js/-/bmp-js-0.1.0.tgz",
+-      "integrity": "sha512-vHdS19CnY3hwiNdkaqk93DvjVLfbEcI8mys4UjuWrlX1haDmroo8o4xCzh4wD6DGV6HxRCyauwhHRqMTfERtjw==",
+-      "license": "MIT"
+-    },
+     "node_modules/bplist-creator": {
+       "version": "0.1.0",
+       "resolved": "https://registry.npmjs.org/bplist-creator/-/bplist-creator-0.1.0.tgz",
+@@ -4572,30 +4265,6 @@
+         "node-int64": "^0.4.0"
+       }
+     },
+-    "node_modules/buffer": {
+-      "version": "5.7.1",
+-      "resolved": "https://registry.npmjs.org/buffer/-/buffer-5.7.1.tgz",
+-      "integrity": "sha512-EHcyIPBQ4BSGlvjB16k5KgAJ27CIsHY/2JBmCRReo48y9rQ3MaUzWX3KVlBa4U7MyX02HdVj0K7C3WaB3ju7FQ==",
+-      "funding": [
+-        {
+-          "type": "github",
+-          "url": "https://github.com/sponsors/feross"
+-        },
+-        {
+-          "type": "patreon",
+-          "url": "https://www.patreon.com/feross"
+-        },
+-        {
+-          "type": "consulting",
+-          "url": "https://feross.org/support"
+-        }
+-      ],
+-      "license": "MIT",
+-      "dependencies": {
+-        "base64-js": "^1.3.1",
+-        "ieee754": "^1.1.13"
+-      }
+-    },
+     "node_modules/buffer-from": {
+       "version": "1.1.2",
+       "resolved": "https://registry.npmjs.org/buffer-from/-/buffer-from-1.1.2.tgz",
+@@ -5211,20 +4880,6 @@
+         "node": ">=6"
+       }
+     },
+-    "node_modules/events": {
+-      "version": "3.3.0",
+-      "resolved": "https://registry.npmjs.org/events/-/events-3.3.0.tgz",
+-      "integrity": "sha512-mQw+2fkQbALzQ7V0MY0IqdnXNOeTtP4r0lN9z7AAawCXgqea7bDii20AYrIBrFd/Hx0M2Ocz6S111CaFkUcb0Q==",
+-      "license": "MIT",
+-      "engines": {
+-        "node": ">=0.8.x"
+-      }
+-    },
+-    "node_modules/exif-parser": {
+-      "version": "0.1.12",
+-      "resolved": "https://registry.npmjs.org/exif-parser/-/exif-parser-0.1.12.tgz",
+-      "integrity": "sha512-c2bQfLNbMzLPmzQuOr8fy0csy84WmwnER81W88DzTp9CYNPJ6yzOj2EZAh9pywYpqHnshVLHQJ8WzldAyfY+Iw=="
+-    },
+     "node_modules/expo": {
+       "version": "57.0.16",
+       "resolved": "https://registry.npmjs.org/expo/-/expo-57.0.16.tgz",
+@@ -5972,23 +5627,6 @@
+       "integrity": "sha512-m6I8ALe4L4XpdETy7MJZWs6L1IVMbjs99bwbpIKphxX+0CTns4IKDWJY0LWfr4YsFjfg+z1TjzTMU8lKl8rG0w==",
+       "license": "MIT"
+     },
+-    "node_modules/file-type": {
+-      "version": "16.5.4",
+-      "resolved": "https://registry.npmjs.org/file-type/-/file-type-16.5.4.tgz",
+-      "integrity": "sha512-/yFHK0aGjFEgDJjEKP0pWCplsPFPhwyfwevf/pVxiN0tmE4L9LmwWxWukdJSHdoCli4VgQLehjJtwQBnqmsKcw==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "readable-web-to-node-stream": "^3.0.0",
+-        "strtok3": "^6.2.4",
+-        "token-types": "^4.1.1"
+-      },
+-      "engines": {
+-        "node": ">=10"
+-      },
+-      "funding": {
+-        "url": "https://github.com/sindresorhus/file-type?sponsor=1"
+-      }
+-    },
+     "node_modules/fill-range": {
+       "version": "7.1.1",
+       "resolved": "https://registry.npmjs.org/fill-range/-/fill-range-7.1.1.tgz",
+@@ -6160,16 +5798,6 @@
+         "node": ">=6"
+       }
+     },
+-    "node_modules/gifwrap": {
+-      "version": "0.10.1",
+-      "resolved": "https://registry.npmjs.org/gifwrap/-/gifwrap-0.10.1.tgz",
+-      "integrity": "sha512-2760b1vpJHNmLzZ/ubTtNnEx5WApN/PYWJvXvgS+tL1egTTthayFYIQQNi136FLEDcN/IyEY2EcGpIITD6eYUw==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "image-q": "^4.0.0",
+-        "omggif": "^1.0.10"
+-      }
+-    },
+     "node_modules/glob": {
+       "version": "13.0.6",
+       "resolved": "https://registry.npmjs.org/glob/-/glob-13.0.6.tgz",
+@@ -6372,26 +6000,6 @@
+       "integrity": "sha512-gchesWBzyvGHRO9W8tzUWFDycow5gwjvFKfyV9FF32Y7F50yZMp7mP+T2mJIWFx49zicqyC4uefHM17o6xKIVQ==",
+       "license": "ISC"
+     },
+-    "node_modules/ieee754": {
+-      "version": "1.2.1",
+-      "resolved": "https://registry.npmjs.org/ieee754/-/ieee754-1.2.1.tgz",
+-      "integrity": "sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA==",
+-      "funding": [
+-        {
+-          "type": "github",
+-          "url": "https://github.com/sponsors/feross"
+-        },
+-        {
+-          "type": "patreon",
+-          "url": "https://www.patreon.com/feross"
+-        },
+-        {
+-          "type": "consulting",
+-          "url": "https://feross.org/support"
+-        }
+-      ],
+-      "license": "BSD-3-Clause"
+-    },
+     "node_modules/ignore": {
+       "version": "5.3.2",
+       "resolved": "https://registry.npmjs.org/ignore/-/ignore-5.3.2.tgz",
+@@ -6401,21 +6009,6 @@
+         "node": ">= 4"
+       }
+     },
+-    "node_modules/image-q": {
+-      "version": "4.0.0",
+-      "resolved": "https://registry.npmjs.org/image-q/-/image-q-4.0.0.tgz",
+-      "integrity": "sha512-PfJGVgIfKQJuq3s0tTDOKtztksibuUEbJQIYT3by6wctQo+Rdlh7ef4evJ5NCdxY4CfMbvFkocEwbl4BF8RlJw==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "@types/node": "16.9.1"
+-      }
+-    },
+-    "node_modules/image-q/node_modules/@types/node": {
+-      "version": "16.9.1",
+-      "resolved": "https://registry.npmjs.org/@types/node/-/node-16.9.1.tgz",
+-      "integrity": "sha512-QpLcX9ZSsq3YYUUnD3nFDY8H7wctAhQj/TFKL8Ya8v5fMm3CFXxo8zStsLAl780ltoYoo1WvKUVGBQK+1ifr7g==",
+-      "license": "MIT"
+-    },
+     "node_modules/image-size": {
+       "version": "1.2.1",
+       "resolved": "https://registry.npmjs.org/image-size/-/image-size-1.2.1.tgz",
+@@ -6536,16 +6129,6 @@
+       "integrity": "sha512-RHxMLp9lnKHGHRng9QFhRCMbYAcVpn69smSGcq3f36xjgVVWThj4qqLbTLlq7Ssj8B+fIQ1EuCEGI2lKsyQeIw==",
+       "license": "ISC"
+     },
+-    "node_modules/isomorphic-fetch": {
+-      "version": "3.0.0",
+-      "resolved": "https://registry.npmjs.org/isomorphic-fetch/-/isomorphic-fetch-3.0.0.tgz",
+-      "integrity": "sha512-qvUtwJ3j6qwsF3jLxkZ72qCgjMysPzDfeV240JHiGZsANBYd+EEuu35v7dfrJ9Up0Ak07D7GGSkGhCHTqg/5wA==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "node-fetch": "^2.6.1",
+-        "whatwg-fetch": "^3.4.1"
+-      }
+-    },
+     "node_modules/jest-get-type": {
+       "version": "29.6.3",
+       "resolved": "https://registry.npmjs.org/jest-get-type/-/jest-get-type-29.6.3.tgz",
+@@ -6652,12 +6235,6 @@
+       "integrity": "sha512-dZ6Ra7u1G8c4Letq/B5EzAxj4tLFHL+cGtdpR+PVm4yzPDj+lCk+AbivWt1eOM+ikzkowtyV7qSqX6qr3t71Ww==",
+       "license": "MIT"
+     },
+-    "node_modules/jpeg-js": {
+-      "version": "0.4.4",
+-      "resolved": "https://registry.npmjs.org/jpeg-js/-/jpeg-js-0.4.4.tgz",
+-      "integrity": "sha512-WZzeDOEtTOBK4Mdsar0IqEU5sMr3vSV2RqkAIzUEV2BHnUfKGyswWFPFwK5EeDo93K3FohSHbLAjj0s1Wzd+dg==",
+-      "license": "BSD-3-Clause"
+-    },
+     "node_modules/js-tokens": {
+       "version": "4.0.0",
+       "resolved": "https://registry.npmjs.org/js-tokens/-/js-tokens-4.0.0.tgz",
+@@ -7705,39 +7282,6 @@
+         "node": ">=18"
+       }
+     },
+-    "node_modules/node-vibrant": {
+-      "version": "4.0.4",
+-      "resolved": "https://registry.npmjs.org/node-vibrant/-/node-vibrant-4.0.4.tgz",
+-      "integrity": "sha512-hA/pUXBE9TJ41G9FlTkzeqD5JdxgvvPGYZb/HNpdkaxxXUEnP36imSolZ644JuPun+lTd+FpWWtBpTYdp2noQA==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "@types/node": "^18.15.3",
+-        "@vibrant/core": "^4.0.4",
+-        "@vibrant/generator-default": "^4.0.4",
+-        "@vibrant/image-browser": "^4.0.4",
+-        "@vibrant/image-node": "^4.0.4",
+-        "@vibrant/quantizer-mmcq": "^4.0.4"
+-      },
+-      "funding": {
+-        "type": "github",
+-        "url": "https://github.com/sponsors/crutchcorn"
+-      }
+-    },
+-    "node_modules/node-vibrant/node_modules/@types/node": {
+-      "version": "18.19.130",
+-      "resolved": "https://registry.npmjs.org/@types/node/-/node-18.19.130.tgz",
+-      "integrity": "sha512-GRaXQx6jGfL8sKfaIDD6OupbIHBr9jv7Jnaml9tB7l4v068PAOXqfcujMMo5PhbIs6ggR1XODELqahT2R8v0fg==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "undici-types": "~5.26.4"
+-      }
+-    },
+-    "node_modules/node-vibrant/node_modules/undici-types": {
+-      "version": "5.26.5",
+-      "resolved": "https://registry.npmjs.org/undici-types/-/undici-types-5.26.5.tgz",
+-      "integrity": "sha512-JlCMO+ehdEIKqlFxk6IfVoAUVmgz7cU7zD/h9XZ0qzeosSHmUJVOzSQvvYSYWXkFXC+IfLKSIffhv0sVZup6pA==",
+-      "license": "MIT"
+-    },
+     "node_modules/normalize-url": {
+       "version": "6.1.0",
+       "resolved": "https://registry.npmjs.org/normalize-url/-/normalize-url-6.1.0.tgz",
+@@ -7792,12 +7336,6 @@
+         "node": ">=0.10.0"
+       }
+     },
+-    "node_modules/omggif": {
+-      "version": "1.0.10",
+-      "resolved": "https://registry.npmjs.org/omggif/-/omggif-1.0.10.tgz",
+-      "integrity": "sha512-LMJTtvgc/nugXj0Vcrrs68Mn2D1r0zf630VNtqtpI1FEO7e+O9FP4gqs9AcnBaSEeoHIPm28u6qgPR0oyEpGSw==",
+-      "license": "MIT"
+-    },
+     "node_modules/on-finished": {
+       "version": "2.3.0",
+       "resolved": "https://registry.npmjs.org/on-finished/-/on-finished-2.3.0.tgz",
+@@ -7974,12 +7512,6 @@
+         "node": ">=8"
+       }
+     },
+-    "node_modules/pako": {
+-      "version": "1.0.11",
+-      "resolved": "https://registry.npmjs.org/pako/-/pako-1.0.11.tgz",
+-      "integrity": "sha512-4hLB8Py4zZce5s4yd9XzopqwVv/yGNhV1Bl8NTmCq1763HeK2+EwVTv+leGeL13Dnh2wfbqowVPXCIO0z4taYw==",
+-      "license": "(MIT AND Zlib)"
+-    },
+     "node_modules/parse-png": {
+       "version": "2.1.0",
+       "resolved": "https://registry.npmjs.org/parse-png/-/parse-png-2.1.0.tgz",
+@@ -8041,19 +7573,6 @@
+         "node": "20 || >=22"
+       }
+     },
+-    "node_modules/peek-readable": {
+-      "version": "4.1.0",
+-      "resolved": "https://registry.npmjs.org/peek-readable/-/peek-readable-4.1.0.tgz",
+-      "integrity": "sha512-ZI3LnwUv5nOGbQzD9c2iDG6toheuXSZP5esSHBjopsXH4dg19soufvpUGA3uohi5anFtGb2lhAVdHzH6R/Evvg==",
+-      "license": "MIT",
+-      "engines": {
+-        "node": ">=8"
+-      },
+-      "funding": {
+-        "type": "github",
+-        "url": "https://github.com/sponsors/Borewit"
+-      }
+-    },
+     "node_modules/picocolors": {
+       "version": "1.1.1",
+       "resolved": "https://registry.npmjs.org/picocolors/-/picocolors-1.1.1.tgz",
+@@ -8072,18 +7591,6 @@
+         "url": "https://github.com/sponsors/jonschlinkert"
+       }
+     },
+-    "node_modules/pixelmatch": {
+-      "version": "4.0.2",
+-      "resolved": "https://registry.npmjs.org/pixelmatch/-/pixelmatch-4.0.2.tgz",
+-      "integrity": "sha512-J8B6xqiO37sU/gkcMglv6h5Jbd9xNER7aHzpfRdNmV4IbQBzBpe4l9XmbG+xPF/znacgu2jfEw+wHffaq/YkXA==",
+-      "license": "ISC",
+-      "dependencies": {
+-        "pngjs": "^3.0.0"
+-      },
+-      "bin": {
+-        "pixelmatch": "bin/pixelmatch"
+-      }
+-    },
+     "node_modules/plist": {
+       "version": "3.1.1",
+       "resolved": "https://registry.npmjs.org/plist/-/plist-3.1.1.tgz",
+@@ -8191,15 +7698,6 @@
+         "node": "^14.17.0 || ^16.13.0 || >=18.0.0"
+       }
+     },
+-    "node_modules/process": {
+-      "version": "0.11.10",
+-      "resolved": "https://registry.npmjs.org/process/-/process-0.11.10.tgz",
+-      "integrity": "sha512-cdGef/drWFoydD1JsMzuFf8100nZl+GT+yacc2bEced5f9Rjk4z+WtFUTBu9PhOi9j/jfmBPu0mMEY4wIdAF8A==",
+-      "license": "MIT",
+-      "engines": {
+-        "node": ">= 0.6.0"
+-      }
+-    },
+     "node_modules/progress": {
+       "version": "2.0.3",
+       "resolved": "https://registry.npmjs.org/progress/-/progress-2.0.3.tgz",
+@@ -8464,20 +7962,6 @@
+         "react-native": "*"
+       }
+     },
+-    "node_modules/react-native-image-colors": {
+-      "version": "2.6.0",
+-      "resolved": "https://registry.npmjs.org/react-native-image-colors/-/react-native-image-colors-2.6.0.tgz",
+-      "integrity": "sha512-MbBPmRpp2yy8h5W7KUreByP96pey0J9habHaRSN/67O0hlR/5Izpt370BNHQVQogfHrRXfV4d8n6ZLn/2ga7Bg==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "node-vibrant": "^4.0.3"
+-      },
+-      "peerDependencies": {
+-        "expo": "*",
+-        "react": "*",
+-        "react-native": "*"
+-      }
+-    },
+     "node_modules/react-native-is-edge-to-edge": {
+       "version": "1.3.1",
+       "resolved": "https://registry.npmjs.org/react-native-is-edge-to-edge/-/react-native-is-edge-to-edge-1.3.1.tgz",
+@@ -8488,12 +7972,6 @@
+         "react-native": "*"
+       }
+     },
+-    "node_modules/react-native-picker": {
+-      "version": "4.3.7",
+-      "resolved": "https://registry.npmjs.org/react-native-picker/-/react-native-picker-4.3.7.tgz",
+-      "integrity": "sha512-bqY0FOsgNe/svnlV7CTvDKjqca5iZr0E0h4gYO8LDh9alxGK7P6bTvqSx6VwDR144moHAG7dsKGrSH2r8bTx2Q==",
+-      "license": "MIT"
+-    },
+     "node_modules/react-native-reanimated": {
+       "version": "4.5.1",
+       "resolved": "https://registry.npmjs.org/react-native-reanimated/-/react-native-reanimated-4.5.1.tgz",
+@@ -8678,62 +8156,6 @@
+         }
+       }
+     },
+-    "node_modules/readable-stream": {
+-      "version": "4.7.0",
+-      "resolved": "https://registry.npmjs.org/readable-stream/-/readable-stream-4.7.0.tgz",
+-      "integrity": "sha512-oIGGmcpTLwPga8Bn6/Z75SVaH1z5dUut2ibSyAMVhmUggWpmDn2dapB0n7f8nwaSiRtepAsfJyfXIO5DCVAODg==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "abort-controller": "^3.0.0",
+-        "buffer": "^6.0.3",
+-        "events": "^3.3.0",
+-        "process": "^0.11.10",
+-        "string_decoder": "^1.3.0"
+-      },
+-      "engines": {
+-        "node": "^12.22.0 || ^14.17.0 || >=16.0.0"
+-      }
+-    },
+-    "node_modules/readable-stream/node_modules/buffer": {
+-      "version": "6.0.3",
+-      "resolved": "https://registry.npmjs.org/buffer/-/buffer-6.0.3.tgz",
+-      "integrity": "sha512-FTiCpNxtwiZZHEZbcbTIcZjERVICn9yq/pDFkTl95/AxzD1naBctN7YO68riM/gLSDY7sdrMby8hofADYuuqOA==",
+-      "funding": [
+-        {
+-          "type": "github",
+-          "url": "https://github.com/sponsors/feross"
+-        },
+-        {
+-          "type": "patreon",
+-          "url": "https://www.patreon.com/feross"
+-        },
+-        {
+-          "type": "consulting",
+-          "url": "https://feross.org/support"
+-        }
+-      ],
+-      "license": "MIT",
+-      "dependencies": {
+-        "base64-js": "^1.3.1",
+-        "ieee754": "^1.2.1"
+-      }
+-    },
+-    "node_modules/readable-web-to-node-stream": {
+-      "version": "3.0.4",
+-      "resolved": "https://registry.npmjs.org/readable-web-to-node-stream/-/readable-web-to-node-stream-3.0.4.tgz",
+-      "integrity": "sha512-9nX56alTf5bwXQ3ZDipHJhusu9NTQJ/CVPtb/XHAJCXihZeitfJvIRS4GqQ/mfIoOE3IelHMrpayVrosdHBuLw==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "readable-stream": "^4.7.0"
+-      },
+-      "engines": {
+-        "node": ">=8"
+-      },
+-      "funding": {
+-        "type": "github",
+-        "url": "https://github.com/sponsors/Borewit"
+-      }
+-    },
+     "node_modules/regenerate": {
+       "version": "1.4.2",
+       "resolved": "https://registry.npmjs.org/regenerate/-/regenerate-1.4.2.tgz",
+@@ -9234,15 +8656,6 @@
+         "node": ">=4"
+       }
+     },
+-    "node_modules/string_decoder": {
+-      "version": "1.3.0",
+-      "resolved": "https://registry.npmjs.org/string_decoder/-/string_decoder-1.3.0.tgz",
+-      "integrity": "sha512-hkRX8U1WjJFd8LsDJ2yQ/wWWxaopEsABU1XfkM8A+j0+85JAGppt16cr1Whg6KIbb4okU6Mql6BOj+uup/wKeA==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "safe-buffer": "~5.2.0"
+-      }
+-    },
+     "node_modules/string-width": {
+       "version": "4.2.3",
+       "resolved": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
+@@ -9269,23 +8682,6 @@
+         "node": ">=8"
+       }
+     },
+-    "node_modules/strtok3": {
+-      "version": "6.3.0",
+-      "resolved": "https://registry.npmjs.org/strtok3/-/strtok3-6.3.0.tgz",
+-      "integrity": "sha512-fZtbhtvI9I48xDSywd/somNqgUHl2L2cstmXCCif0itOf96jeW18MBSyrLuNicYQVkvpOxkZtkzujiTJ9LW5Jw==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "@tokenizer/token": "^0.3.0",
+-        "peek-readable": "^4.1.0"
+-      },
+-      "engines": {
+-        "node": ">=10"
+-      },
+-      "funding": {
+-        "type": "github",
+-        "url": "https://github.com/sponsors/Borewit"
+-      }
+-    },
+     "node_modules/structured-headers": {
+       "version": "0.4.1",
+       "resolved": "https://registry.npmjs.org/structured-headers/-/structured-headers-0.4.1.tgz",
+@@ -9381,18 +8777,6 @@
+       "integrity": "sha512-fcwX4mndzpLQKBS1DVYhGAcYaYt7vsHNIvQV+WXMvnow5cgjPphq5CaayLaGsjRdSCKZFNGt7/GYAuXaNOiYCA==",
+       "license": "MIT"
+     },
+-    "node_modules/timm": {
+-      "version": "1.7.1",
+-      "resolved": "https://registry.npmjs.org/timm/-/timm-1.7.1.tgz",
+-      "integrity": "sha512-IjZc9KIotudix8bMaBW6QvMuq64BrJWFs1+4V0lXwWGQZwH+LnX87doAYhem4caOEusRP9/g6jVDQmZ8XOk1nw==",
+-      "license": "MIT"
+-    },
+-    "node_modules/tinycolor2": {
+-      "version": "1.6.0",
+-      "resolved": "https://registry.npmjs.org/tinycolor2/-/tinycolor2-1.6.0.tgz",
+-      "integrity": "sha512-XPaBkWQJdsf3pLKJV9p4qN/S+fm2Oj8AIPo1BTUhg5oxkvm9+SVEGFdhyOz7tTdUTfvxMiAs4sp6/eZO2Ew+pw==",
+-      "license": "MIT"
+-    },
+     "node_modules/tinyglobby": {
+       "version": "0.2.17",
+       "resolved": "https://registry.npmjs.org/tinyglobby/-/tinyglobby-0.2.17.tgz",
+@@ -9436,23 +8820,6 @@
+         "node": ">=0.6"
+       }
+     },
+-    "node_modules/token-types": {
+-      "version": "4.2.1",
+-      "resolved": "https://registry.npmjs.org/token-types/-/token-types-4.2.1.tgz",
+-      "integrity": "sha512-6udB24Q737UD/SDsKAHI9FCRP7Bqc9D/MQUV02ORQg5iskjtLJlZJNdN4kKtcdtwCeWIwIHDGaUsTsCCAa8sFQ==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "@tokenizer/token": "^0.3.0",
+-        "ieee754": "^1.2.1"
+-      },
+-      "engines": {
+-        "node": ">=10"
+-      },
+-      "funding": {
+-        "type": "github",
+-        "url": "https://github.com/sponsors/Borewit"
+-      }
+-    },
+     "node_modules/toqr": {
+       "version": "0.1.1",
+       "resolved": "https://registry.npmjs.org/toqr/-/toqr-0.1.1.tgz",
+@@ -9657,15 +9024,6 @@
+         }
+       }
+     },
+-    "node_modules/utif2": {
+-      "version": "4.1.0",
+-      "resolved": "https://registry.npmjs.org/utif2/-/utif2-4.1.0.tgz",
+-      "integrity": "sha512-+oknB9FHrJ7oW7A2WZYajOcv4FcDR4CfoGB0dPNfxbi4GO05RRnFmt5oa23+9w32EanrYcSJWspUiJkLMs+37w==",
+-      "license": "MIT",
+-      "dependencies": {
+-        "pako": "^1.0.11"
+-      }
+-    },
+     "node_modules/utils-merge": {
+       "version": "1.0.1",
+       "resolved": "https://registry.npmjs.org/utils-merge/-/utils-merge-1.0.1.tgz",
+diff --git a/package.json b/package.json
+index b6c7293..ce7ac49 100644
+--- a/package.json
++++ b/package.json
+@@ -35,8 +35,6 @@
+     "react-dom": "19.2.3",
+     "react-native": "0.86.2",
+     "react-native-gesture-handler": "~2.32.0",
+-    "react-native-image-colors": "^2.6.0",
+-    "react-native-picker": "^4.3.7",
+     "react-native-reanimated": "4.5.1",
+     "react-native-safe-area-context": "~5.7.0",
+     "react-native-screens": "~4.26.0",
+diff --git a/plugins/with-safeseat-local-network.js b/plugins/with-safeseat-local-network.js
+new file mode 100644
+index 0000000..0f3bb2c
+--- /dev/null
++++ b/plugins/with-safeseat-local-network.js
+@@ -0,0 +1,80 @@
++const fs = require("fs");
++const path = require("path");
++const {
++  AndroidConfig,
++  withAndroidManifest,
++  withDangerousMod,
++  withInfoPlist,
++} = require("@expo/config-plugins");
++
++const NETWORK_SECURITY_XML = `<?xml version="1.0" encoding="utf-8"?>
++<network-security-config>
++  <base-config cleartextTrafficPermitted="true" />
++</network-security-config>
++`;
++
++/**
++ * SafeSeat Main Hub serves a read-only local HTTP API at 192.168.4.1.
++ * Android 9+ blocks cleartext HTTP by default, so preview/production builds
++ * explicitly allow this local transport and include the networking permissions
++ * needed by React Native fetch().
++ */
++module.exports = function withSafeSeatLocalNetwork(config) {
++  config = AndroidConfig.Permissions.withPermissions(config, [
++    "android.permission.INTERNET",
++    "android.permission.ACCESS_NETWORK_STATE",
++    "android.permission.ACCESS_WIFI_STATE",
++  ]);
++
++  config = withAndroidManifest(config, (androidConfig) => {
++    const manifest = androidConfig.modResults.manifest;
++    const application = manifest.application?.[0];
++
++    if (!application) {
++      throw new Error(
++        "SafeSeat local-network plugin could not find <application> in AndroidManifest.xml",
++      );
++    }
++
++    application.$ = application.$ || {};
++    application.$["android:usesCleartextTraffic"] = "true";
++    application.$["android:networkSecurityConfig"] =
++      "@xml/safeseat_network_security_config";
++    return androidConfig;
++  });
++
++  config = withDangerousMod(config, [
++    "android",
++    async (androidConfig) => {
++      const xmlDir = path.join(
++        androidConfig.modRequest.platformProjectRoot,
++        "app",
++        "src",
++        "main",
++        "res",
++        "xml",
++      );
++      fs.mkdirSync(xmlDir, { recursive: true });
++      fs.writeFileSync(
++        path.join(xmlDir, "safeseat_network_security_config.xml"),
++        NETWORK_SECURITY_XML,
++        "utf8",
++      );
++      return androidConfig;
++    },
++  ]);
++
++  config = withInfoPlist(config, (iosConfig) => {
++    iosConfig.modResults.NSLocalNetworkUsageDescription =
++      "SafeSeat connects to the Main Hub on the local SafeSeat Wi-Fi network to receive live occupant-monitoring status.";
++
++    iosConfig.modResults.NSAppTransportSecurity = {
++      ...(iosConfig.modResults.NSAppTransportSecurity || {}),
++      NSAllowsLocalNetworking: true,
++    };
++
++    return iosConfig;
++  });
++
++  return config;
++};
+diff --git a/src/app/(tabs)/_layout.tsx b/src/app/(tabs)/_layout.tsx
+index 45b87c6..3b81013 100644
+--- a/src/app/(tabs)/_layout.tsx
++++ b/src/app/(tabs)/_layout.tsx
+@@ -1,3 +1,4 @@
++import SafeSeatLiveMonitor from "@/components/safeseat-live-monitor";
+ import { Themes } from "@/constants/theme";
+ import { DarkTheme, DefaultTheme, ThemeProvider } from "expo-router";
+ import { NativeTabs } from "expo-router/unstable-native-tabs";
+@@ -11,6 +12,7 @@ export default function TabLayout() {
+   return (
+     // ThemeProvider is required to prevent visual flashes during tab switching
+     <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
++      <SafeSeatLiveMonitor />
+       <NativeTabs
+           // Tints the active tab icons
+           tintColor={activeScheme == "dark" ? "#BBFFB3" : "#25601D"}
+diff --git a/src/app/(tabs)/assign/index.tsx b/src/app/(tabs)/assign/index.tsx
+index 164112e..707b162 100644
+--- a/src/app/(tabs)/assign/index.tsx
++++ b/src/app/(tabs)/assign/index.tsx
+@@ -1,547 +1,482 @@
+-import { Themes } from "@/constants/theme";
+-import { useRouter } from "expo-router";
+-import { Alert, StyleSheet, Text, useColorScheme, View } from "react-native";
+-import { SafeAreaView } from "react-native-safe-area-context";
+-
+ import AssignCard from "@/components/assign-card";
+ import AssignSeatModal from "@/components/assign-seat-modal";
+-import * as Haptics from "expo-haptics";
+-import { useEffect, useState } from "react";
+-
+ import Button from "@/components/button";
+-import EmergencytModal from "@/components/emergency-modal";
+-
++import { Themes } from "@/constants/theme";
++import { useSafeSeatSession } from "@/hooks/use-safeseat-session";
++import {
++  clearSafeSeatSession,
++  updateSafeSeatSession,
++} from "@/services/safeseat-session-store";
++import {
++  SAFESEAT_SEATS,
++  getSafeSeatLabel,
++  type SafeSeatActiveSession,
++  type SafeSeatAssignment,
++  type SafeSeatSeatNo,
++} from "@/types/safeseat-session";
++import * as Haptics from "expo-haptics";
+ import {
+   addDoc,
+-  arrayUnion,
+   collection,
+-  deleteField,
++  deleteDoc,
+   doc,
+-  onSnapshot,
+   setDoc,
+-  updateDoc,
+ } from "firebase/firestore";
+-import { auth, db } from "../../../firebase";
+-
+-type Profile = {
+-  id: string;
+-  name: string;
+-  photoURL?: string;
+-  icon?: string;
+-  isAccountOwner?: boolean;
+-};
+-
+-export type SeatState = "empty" | "assigned" | "safe" | "warning" | "emergency";
+-
+-type EmergencyEvent = {
+-  seatNo: number;
+-  occurredAt: string;
+-};
+-
+-const SEATS = [
+-  { seatNo: 1, seatCode: "driver" },
+-  { seatNo: 2, seatCode: "passenger" },
+-  { seatNo: 3, seatCode: "l backseat" },
+-  { seatNo: 4, seatCode: "c backseat" },
+-  { seatNo: 5, seatCode: "r backseat" },
+-];
+-
+-export default function Assign() {
+-  const colorScheme = useColorScheme();
+-  const activeScheme = colorScheme === "dark" ? "dark" : "light";
+-  const currentTheme = Themes[activeScheme];
++import { useState } from "react";
++import {
++  Alert,
++  Pressable,
++  ScrollView,
++  StyleSheet,
++  Text,
++  useColorScheme,
++  View,
++} from "react-native";
++import { SafeAreaView } from "react-native-safe-area-context";
+ 
+-  const router = useRouter();
++import { auth, db } from "../../../firebase";
+ 
+-  const [assignModalVisible, setAssignModalVisible] = useState(false);
+-  const [selectedSeat, setSelectedSeat] = useState(1);
++function cloudSafeAssignment(profile: SafeSeatAssignment) {
++  return {
++    id: profile.id,
++    name: profile.isGuest ? "Guest Occupant" : profile.name,
++    photoURL: profile.isGuest ? null : profile.photoURL ?? null,
++    icon: profile.isGuest ? null : profile.icon ?? null,
++    isAccountOwner: profile.isGuest ? false : profile.isAccountOwner ?? false,
++    isGuest: Boolean(profile.isGuest),
++    sessionOnly: Boolean(profile.sessionOnly),
++  };
++}
+ 
+-  // Map seat numbers (1-5) to assigned Profiles — now sourced live from Firestore
+-  const [assignments, setAssignments] = useState<Record<number, Profile>>({});
++function mirrorSessionToFirestore(session: SafeSeatActiveSession) {
++  const currentUser = auth.currentUser;
++  if (!currentUser) return;
+ 
+-  // Lock-in state & status mapping (seatNo -> "safe" | "warning" | "emergency") — live from Firestore
+-  const [isLockedIn, setIsLockedIn] = useState<boolean>(false);
+-  const [seatStatuses, setSeatStatuses] = useState<Record<number, SeatState>>(
+-    {},
++  // Temporary Guest occupants remain local to the active phone session.
++  // Do not write Guest identity/session data to Firestore, even transiently.
++  const assignments = Object.fromEntries(
++    Object.entries(session.assignments)
++      .filter(([, profile]) => !profile.isGuest && !profile.sessionOnly)
++      .map(([seatNo, profile]) => [seatNo, cloudSafeAssignment(profile)]),
+   );
+ 
+-  // 🕒 Trip history bookkeeping — when the current trip started, and every
+-  // emergency moment logged during it, so we can archive both on Unlock.
+-  const [lockedInAt, setLockedInAt] = useState<string | null>(null);
+-  const [emergencyEvents, setEmergencyEvents] = useState<EmergencyEvent[]>([]);
+-
+-  // Check if at least one seat has an assigned profile
+-  const hasAssignedSeats = Object.values(assignments).some((profile) =>
+-    Boolean(profile),
++  const tripDocRef = doc(
++    db,
++    "users",
++    currentUser.uid,
++    "activeTrip",
++    "current",
+   );
+ 
+-  // 📡 Real-time listener on users/{uid}/activeTrip/current — replaces the old
+-  // AsyncStorage read. This fires instantly whenever the doc changes, whether
+-  // the change came from this device, another device, or (later) a sensor.
+-  useEffect(() => {
+-    const currentUser = auth.currentUser;
+-    if (!currentUser) return;
+-
+-    const tripDocRef = doc(
+-      db,
+-      "users",
+-      currentUser.uid,
+-      "activeTrip",
+-      "current",
+-    );
++  void setDoc(
++    tripDocRef,
++    {
++      prototypeMode: "single_seat_uat",
++      monitoredSeatNo: session.monitoredSeatNo,
++      assignments,
++      isLockedIn: session.isLockedIn,
++      lockedInAt: session.lockedInAt,
++      seatStatuses: session.seatStatuses,
++      emergencyEvents: session.emergencyEvents,
++      appSessionUpdatedAt: new Date().toISOString(),
++    },
++    { merge: true },
++  ).catch((error) => {
++    // The SafeSeat AP is local-only. Cloud mirroring is intentionally best
++    // effort and must never block assignment/monitoring on the phone.
++    console.warn("SafeSeat cloud session mirror deferred:", error);
++  });
++}
++
++async function archiveAndDeleteCloudSession(session: SafeSeatActiveSession) {
++  const currentUser = auth.currentUser;
++  if (!currentUser) return;
+ 
+-    const unsubscribe = onSnapshot(
+-      tripDocRef,
+-      (snapshot) => {
+-        if (snapshot.exists()) {
+-          const data = snapshot.data();
+-          setAssignments(data.assignments ?? {});
+-          setIsLockedIn(Boolean(data.isLockedIn));
+-          setSeatStatuses(data.seatStatuses ?? {});
+-          setLockedInAt(data.lockedInAt ?? null);
+-          setEmergencyEvents(data.emergencyEvents ?? []);
+-        } else {
+-          setAssignments({});
+-          setIsLockedIn(false);
+-          setSeatStatuses({});
+-          setLockedInAt(null);
+-          setEmergencyEvents([]);
+-        }
+-      },
+-      (error) => {
+-        console.error("Failed to listen to active trip data:", error);
+-      },
++  try {
++    const registeredAssignments = Object.fromEntries(
++      Object.entries(session.assignments)
++        .filter(([, profile]) => !profile.isGuest && !profile.sessionOnly)
++        .map(([seatNo, profile]) => [seatNo, cloudSafeAssignment(profile)]),
+     );
+ 
+-    return () => unsubscribe();
+-  }, []);
++    if (session.lockedInAt) {
++      await addDoc(collection(db, "users", currentUser.uid, "tripHistory"), {
++        startedAt: session.lockedInAt,
++        endedAt: new Date().toISOString(),
++        monitoredSeatNo: session.monitoredSeatNo,
++        assignments: registeredAssignments,
++        finalSeatStatuses: session.seatStatuses,
++        emergencyEvents: session.emergencyEvents,
++        hadEmergency: session.emergencyEvents.length > 0,
++        prototypeMode: "single_seat_uat",
++      });
++    }
+ 
+-  // 🛠️ Derive the current state for any given seat number
+-  const getCardState = (seatNo: number): SeatState => {
+-    const hasProfile = Boolean(assignments[seatNo]);
++    await deleteDoc(
++      doc(db, "users", currentUser.uid, "activeTrip", "current"),
++    );
++  } catch (error) {
++    console.warn(
++      "SafeSeat cloud archive is pending/unavailable; local session was still ended safely:",
++      error,
++    );
++  }
++}
+ 
+-    if (!hasProfile) return "empty";
+-    if (!isLockedIn) return "assigned";
++export default function Assign() {
++  const colorScheme = useColorScheme();
++  const currentTheme = Themes[colorScheme === "dark" ? "dark" : "light"];
++  const { ready, session } = useSafeSeatSession();
+ 
+-    // When locked in, return its live status (defaulting to "safe")
+-    return seatStatuses[seatNo] ?? "safe";
++  const [assignModalVisible, setAssignModalVisible] = useState(false);
++  const [selectedSeat, setSelectedSeat] = useState<SafeSeatSeatNo>(1);
++
++  const {
++    monitoredSeatNo,
++    assignments,
++    isLockedIn,
++    lockedInAt,
++  } = session;
++
++  const hasAssignedSeats = Object.values(assignments).some(Boolean);
++  const monitoredSeatAssigned = Boolean(assignments[monitoredSeatNo]);
++  const sessionHasStarted = Boolean(lockedInAt);
++
++  const getCardState = (seatNo: SafeSeatSeatNo) => {
++    if (!assignments[seatNo]) return "empty" as const;
++    if (!isLockedIn) return "assigned" as const;
++    return seatNo === monitoredSeatNo ? "monitored" as const : "unmonitored" as const;
+   };
+ 
+-  // 🔒 Lock In Handler
+-  const handleLockIn = async () => {
+-    if (!hasAssignedSeats) return;
++  const choosePrototypePosition = (seatNo: SafeSeatSeatNo) => {
++    Haptics.selectionAsync();
+ 
+-    const currentUser = auth.currentUser;
+-    if (!currentUser) return;
+-
+-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+-
+-    // Default all currently assigned seats to "safe" status upon lock-in
+-    const initialStatuses: Record<number, SeatState> = {};
+-    Object.keys(assignments).forEach((seatStr) => {
+-      const seatNum = parseInt(seatStr, 10);
+-      initialStatuses[seatNum] = seatStatuses[seatNum] ?? "safe";
+-    });
+-
+-    try {
+-      const tripDocRef = doc(
+-        db,
+-        "users",
+-        currentUser.uid,
+-        "activeTrip",
+-        "current",
+-      );
+-      await setDoc(
+-        tripDocRef,
+-        {
+-          isLockedIn: true,
+-          seatStatuses: initialStatuses,
+-          lockedInAt: new Date().toISOString(),
+-          emergencyEvents: [], // fresh log for this new trip
+-        },
+-        { merge: true },
++    if (sessionHasStarted) {
++      Alert.alert(
++        "Prototype position is fixed",
++        "End Session before physically moving the SafeSeat prototype to another seat.",
+       );
+-      // No local setState needed — the onSnapshot listener above will
+-      // pick up this write and update the UI automatically.
+-    } catch (error) {
+-      console.error("Failed to lock in assignments:", error);
+-      Alert.alert("Error", "Could not save locked-in state.");
++      return;
+     }
+-  };
+ 
+-  // 📦 Archive the trip that's about to end into tripHistory, then clear
+-  // the current trip's bookkeeping fields (assignments/seatStatuses are
+-  // intentionally left alone, matching the existing "stay assigned after
+-  // unlock" behavior).
+-  const archiveCurrentTrip = async (currentUserUid: string) => {
+-    try {
+-      const historyRef = collection(db, "users", currentUserUid, "tripHistory");
+-      await addDoc(historyRef, {
+-        startedAt: lockedInAt ?? null,
+-        endedAt: new Date().toISOString(),
+-        assignments: assignments,
+-        finalSeatStatuses: seatStatuses,
+-        emergencyEvents: emergencyEvents,
+-        hadEmergency: emergencyEvents.length > 0,
+-      });
++    const next = updateSafeSeatSession({ monitoredSeatNo: seatNo });
++    mirrorSessionToFirestore(next);
++  };
+ 
+-      const tripDocRef = doc(
+-        db,
+-        "users",
+-        currentUserUid,
+-        "activeTrip",
+-        "current",
+-      );
+-      await setDoc(
+-        tripDocRef,
+-        {
+-          isLockedIn: false,
+-          lockedInAt: deleteField(),
+-          emergencyEvents: [],
+-        },
+-        { merge: true },
++  const handleLockIn = () => {
++    if (!monitoredSeatAssigned) {
++      Alert.alert(
++        "Assign the monitored seat",
++        `Assign an occupant to ${getSafeSeatLabel(monitoredSeatNo)} before Lock Deployment.`,
+       );
+-    } catch (error) {
+-      console.error("Failed to archive trip history:", error);
++      return;
+     }
++
++    const now = new Date().toISOString();
++    const next = updateSafeSeatSession((current) => ({
++      ...current,
++      isLockedIn: true,
++      lockedInAt: current.lockedInAt ?? now,
++      // Do not manufacture SAFE at lock time. Main Hub Fusion must provide the
++      // first authoritative SAFE/WARNING/EMERGENCY state. WATCH remains a
++      // participant-facing MONITORING state and is intentionally not persisted
++      // as a safety verdict.
++      seatStatuses: { ...current.seatStatuses },
++    }));
++
++    mirrorSessionToFirestore(next);
++    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+   };
+ 
+-  // 🔓 Unlock Handler
+   const handleUnlock = () => {
+     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+-    Alert.alert("Seats are locked in.", "Are you sure you want to unlock?", [
+-      {
+-        text: "No",
+-        style: "cancel",
+-      },
+-      {
+-        text: "Yes",
+-        style: "destructive",
+-        onPress: async () => {
+-          const currentUser = auth.currentUser;
+-          if (!currentUser) return;
+-
+-          try {
+-            await archiveCurrentTrip(currentUser.uid);
+-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+-          } catch (error) {
+-            console.error("Failed to unlock assignments:", error);
+-          }
+-        },
+-      },
+-    ]);
+-  };
+-
+-  // ⚡ Mutator: Update status for a specific locked seat ("safe" | "warning" | "emergency")
+-  const updateSeatStatus = async (
+-    seatNo: number,
+-    status: "safe" | "warning" | "emergency",
+-  ) => {
+-    const currentUser = auth.currentUser;
+-    if (!currentUser) return;
+-
+-    // Clear dismissal so a new emergency on this seat shows the modal again
+-    if (status === "emergency") {
+-      setDismissedSeats((prev) => {
+-        const next = new Set(prev);
+-        next.delete(seatNo);
+-        return next;
+-      });
+-    }
+-
+-    try {
+-      const tripDocRef = doc(
+-        db,
+-        "users",
+-        currentUser.uid,
+-        "activeTrip",
+-        "current",
+-      );
+-      await setDoc(
+-        tripDocRef,
++    Alert.alert(
++      "Pause monitoring?",
++      "Unlock Deployment pauses monitoring and allows occupant reassignment. It does not end this session or allow the prototype to be moved.",
++      [
++        { text: "Cancel", style: "cancel" },
+         {
+-          seatStatuses: { [String(seatNo)]: status },
+-          // Log the exact moment an emergency was triggered, so it
+-          // survives even if the seat is later cycled back to "safe"
+-          // before Unlock is pressed.
+-          ...(status === "emergency"
+-            ? {
+-                emergencyEvents: arrayUnion({
+-                  seatNo,
+-                  occurredAt: new Date().toISOString(),
+-                }),
+-              }
+-            : {}),
++          text: "Unlock",
++          style: "destructive",
++          onPress: () => {
++            const next = updateSafeSeatSession({ isLockedIn: false });
++            mirrorSessionToFirestore(next);
++            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
++          },
+         },
+-        { merge: true },
+-      );
+-    } catch (error) {
+-      console.error(`Failed to update status for seat ${seatNo}:`, error);
+-    }
++      ],
++    );
+   };
+ 
+-  // ⚡ Mutator: Update status for ALL assigned seats at once
+-  const setAllSeatsStatus = async (
+-    status: "safe" | "warning" | "emergency",
+-  ) => {
+-    const currentUser = auth.currentUser;
+-    if (!currentUser) return;
+-
+-    const updatedStatuses: Record<number, SeatState> = {};
+-    const newEmergencyEvents: EmergencyEvent[] = [];
+-    Object.keys(assignments).forEach((seatStr) => {
+-      const seatNum = parseInt(seatStr, 10);
+-      updatedStatuses[seatNum] = status;
+-      if (status === "emergency") {
+-        newEmergencyEvents.push({
+-          seatNo: seatNum,
+-          occurredAt: new Date().toISOString(),
+-        });
+-      }
+-    });
+-
+-    try {
+-      const tripDocRef = doc(
+-        db,
+-        "users",
+-        currentUser.uid,
+-        "activeTrip",
+-        "current",
+-      );
+-      await setDoc(
+-        tripDocRef,
++  const handleEndSession = () => {
++    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
++    Alert.alert(
++      "End SafeSeat session?",
++      "This ends monitoring, clears temporary Guest assignments, and allows the physical prototype to be moved to another seat.",
++      [
++        { text: "Cancel", style: "cancel" },
+         {
+-          seatStatuses: updatedStatuses,
+-          ...(newEmergencyEvents.length > 0
+-            ? {
+-                emergencyEvents: arrayUnion(...newEmergencyEvents),
+-              }
+-            : {}),
++          text: "End Session",
++          style: "destructive",
++          onPress: async () => {
++            const endedSession = session;
++            await clearSafeSeatSession();
++            void archiveAndDeleteCloudSession(endedSession);
++            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
++          },
+         },
+-        { merge: true },
+-      );
+-    } catch (error) {
+-      console.error("Failed to update status for all seats:", error);
+-    }
++      ],
++    );
+   };
+ 
+-  // Callback when modal updates or unassigns a seat
+-  const handleSeatAssigned = async (
+-    seatNumber: number,
+-    profile: Profile | null,
++  const handleSeatAssigned = (
++    seatNumber: SafeSeatSeatNo,
++    profile: SafeSeatAssignment | null,
+   ) => {
+-    const currentUser = auth.currentUser;
+-    if (!currentUser) return;
+-
+-    try {
+-      const tripDocRef = doc(
+-        db,
+-        "users",
+-        currentUser.uid,
+-        "activeTrip",
+-        "current",
+-      );
++    const next = updateSafeSeatSession((current) => {
++      const nextAssignments = { ...current.assignments };
++      const nextStatuses = { ...current.seatStatuses };
+ 
+       if (profile) {
+-        // 🛠️ Firestore rejects `undefined` field values outright (unlike
+-        // `null`, which is fine). Since Profile.photoURL/icon/isAccountOwner
+-        // are optional and may genuinely be undefined on some profiles,
+-        // sanitize them to null/false before writing, or setDoc throws.
+-        const sanitizedProfile = {
+-          id: profile.id,
+-          name: profile.name,
+-          photoURL: profile.photoURL ?? null,
+-          icon: profile.icon ?? null,
+-          isAccountOwner: profile.isAccountOwner ?? false,
+-        };
+-
+-        await setDoc(
+-          tripDocRef,
+-          {
+-            assignments: { [String(seatNumber)]: sanitizedProfile },
+-          },
+-          { merge: true },
+-        );
++        nextAssignments[seatNumber] = profile;
+       } else {
+-        // deleteField() fully removes the key, unlike setting it to null
+-        await updateDoc(tripDocRef, {
+-          [`assignments.${seatNumber}`]: deleteField(),
+-        });
++        delete nextAssignments[seatNumber];
++        delete nextStatuses[seatNumber];
+       }
+-    } catch (error) {
+-      console.error("Failed to update seat assignment:", error);
+-      Alert.alert("Error", "Could not save seat assignment.");
+-    }
++
++      return {
++        ...current,
++        assignments: nextAssignments,
++        seatStatuses: nextStatuses,
++      };
++    });
++
++    mirrorSessionToFirestore(next);
+   };
+ 
+-  // Card tap interaction
+-  const handleCardPress = (seatNo: number) => {
++  const handleCardPress = (seatNo: SafeSeatSeatNo) => {
+     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+ 
+     if (isLockedIn) {
+-      // Options or quick-status toggle when locked in
+-      const currentStatus = getCardState(seatNo);
+-      if (currentStatus === "empty") return;
+-
+-      // Example cycle when tapped while locked in: safe -> warning -> emergency -> safe
+-      const nextStatus: Record<string, "safe" | "warning" | "emergency"> = {
+-        safe: "warning",
+-        warning: "emergency",
+-        emergency: "safe",
+-      };
+-      updateSeatStatus(seatNo, nextStatus[currentStatus] ?? "safe");
+-    } else {
+-      // Open assignment modal when unlocked
+-      setSelectedSeat(seatNo);
+-      setAssignModalVisible(true);
++      Alert.alert(
++        "Deployment locked",
++        "Use Unlock Deployment before changing occupant assignments.",
++      );
++      return;
+     }
+-  };
+ 
+-  const [dismissedSeats, setDismissedSeats] = useState<Set<number>>(new Set());
+-
+-  const emergencySeat = isLockedIn
+-    ? SEATS.find(
+-        ({ seatNo }) =>
+-          seatStatuses[seatNo] === "emergency" &&
+-          assignments[seatNo] &&
+-          !dismissedSeats.has(seatNo),
+-      )
+-    : undefined;
++    setSelectedSeat(seatNo);
++    setAssignModalVisible(true);
++  };
+ 
+-  const emergencyProfile = emergencySeat
+-    ? assignments[emergencySeat.seatNo]
+-    : undefined;
++  if (!ready) {
++    return (
++      <SafeAreaView style={{ flex: 1, backgroundColor: currentTheme.background }}>
++        <View style={styles.loadingContainer}>
++          <Text style={{ color: currentTheme.textSecondary }}>Loading SafeSeat session…</Text>
++        </View>
++      </SafeAreaView>
++    );
++  }
+ 
+   return (
+     <SafeAreaView
+-      style={{
+-        flex: 1,
+-        backgroundColor: currentTheme.background,
+-      }}
++      style={{ flex: 1, backgroundColor: currentTheme.background }}
+       edges={["left", "right"]}
+     >
+-      <View style={[styles.container, { marginTop: 40 }]}>
+-        <Text style={[styles.pageHeader, { color: currentTheme.text }]}>
+-          Assign
+-        </Text>
+-
+-        <View
+-          style={{
+-            gap: 10,
+-            marginTop: 10,
+-            width: "100%",
+-            borderWidth: 0,
+-            borderColor: currentTheme.secondaryBttn,
+-            borderRadius: 10,
+-          }}
+-        >
+-          {/* Front Row */}
+-          <View style={{ gap: 10, flexDirection: "row", height: 230 }}>
+-            <AssignCard
+-              seatNo={1}
+-              assignedProfile={assignments[1]}
+-              onPress={() => handleCardPress(1)}
+-              state={getCardState(1)}
+-              seatCode="driver"
+-            />
+-            <AssignCard
+-              seatNo={2}
+-              assignedProfile={assignments[2]}
+-              onPress={() => handleCardPress(2)}
+-              state={getCardState(2)}
+-              seatCode="passenger"
+-            />
++      <ScrollView contentContainerStyle={styles.scrollContent}>
++        <Text style={[styles.pageHeader, { color: currentTheme.text }]}>Assign</Text>
++
++        <View style={[styles.prototypeCard, { backgroundColor: currentTheme.element }]}>
++          <Text style={[styles.prototypeTitle, { color: currentTheme.text }]}>Prototype Position</Text>
++          <Text style={[styles.prototypeHint, { color: currentTheme.textSecondary }]}>
++            Select the seat where the one physical SafeSeat prototype is installed.
++          </Text>
++
++          <View style={styles.positionWrap}>
++            {SAFESEAT_SEATS.map((seat) => {
++              const selected = seat.seatNo === monitoredSeatNo;
++              return (
++                <Pressable
++                  key={seat.seatNo}
++                  onPress={() => choosePrototypePosition(seat.seatNo)}
++                  style={[
++                    styles.positionChip,
++                    {
++                      backgroundColor: selected
++                        ? currentTheme.primaryBttn
++                        : currentTheme.backgroundElement,
++                      opacity: sessionHasStarted && !selected ? 0.5 : 1,
++                    },
++                  ]}
++                >
++                  <Text
++                    style={[
++                      styles.positionChipText,
++                      {
++                        color: selected
++                          ? currentTheme.primaryBttnText
++                          : currentTheme.text,
++                      },
++                    ]}
++                  >
++                    {seat.label}
++                  </Text>
++                </Pressable>
++              );
++            })}
+           </View>
+ 
+-          {/* Back Row */}
+-          <View style={{ gap: 10, flexDirection: "row", height: 230 }}>
+-            <AssignCard
+-              seatNo={3}
+-              assignedProfile={assignments[3]}
+-              onPress={() => handleCardPress(3)}
+-              state={getCardState(3)}
+-              seatCode="l backseat"
+-            />
+-            <AssignCard
+-              seatNo={4}
+-              assignedProfile={assignments[4]}
+-              onPress={() => handleCardPress(4)}
+-              state={getCardState(4)}
+-              seatCode="c backseat"
+-            />
+-            <AssignCard
+-              seatNo={5}
+-              assignedProfile={assignments[5]}
+-              onPress={() => handleCardPress(5)}
+-              state={getCardState(5)}
+-              seatCode="r backseat"
+-            />
++          {sessionHasStarted ? (
++            <Text style={[styles.fixedHint, { color: currentTheme.textSecondary }]}>
++              Position fixed for this session. End Session before moving the prototype.
++            </Text>
++          ) : null}
++        </View>
++
++        <View style={{ gap: 10, width: "100%" }}>
++          <View style={styles.frontRow}>
++            {SAFESEAT_SEATS.slice(0, 2).map((seat) => (
++              <AssignCard
++                key={seat.seatNo}
++                seatNo={seat.seatNo}
++                assignedProfile={assignments[seat.seatNo]}
++                onPress={() => handleCardPress(seat.seatNo)}
++                state={getCardState(seat.seatNo)}
++                seatCode={`${seat.seatCode}${seat.seatNo === monitoredSeatNo ? " • prototype" : ""}`}
++              />
++            ))}
++          </View>
++
++          <View style={styles.backRow}>
++            {SAFESEAT_SEATS.slice(2).map((seat) => (
++              <AssignCard
++                key={seat.seatNo}
++                seatNo={seat.seatNo}
++                assignedProfile={assignments[seat.seatNo]}
++                onPress={() => handleCardPress(seat.seatNo)}
++                state={getCardState(seat.seatNo)}
++                seatCode={`${seat.seatCode}${seat.seatNo === monitoredSeatNo ? " • prototype" : ""}`}
++              />
++            ))}
+           </View>
+         </View>
+ 
+-        {/* Lock In / Unlock Action Controls */}
+-        <View style={{ paddingVertical: 20 }}>
++        {!monitoredSeatAssigned ? (
++          <Text style={[styles.lockHint, { color: currentTheme.warnBttn }]}>
++            Assign an occupant to {getSafeSeatLabel(monitoredSeatNo)} before Lock Deployment.
++          </Text>
++        ) : null}
++
++        <View style={styles.actions}>
+           {isLockedIn ? (
+             <Button
+-              label="Unlock"
++              label="Unlock Deployment"
+               onPress={handleUnlock}
+-              fullWidth={true}
++              fullWidth
+               variant="warn"
+               glass={false}
+             />
+           ) : (
+-            <Button
+-              label="Lock In"
+-              onPress={handleLockIn}
+-              fullWidth={true}
+-              variant="primary"
+-              enabled={hasAssignedSeats}
+-              glass={false}
+-            />
++            <>
++              <Button
++                label={sessionHasStarted ? "Resume / Lock Deployment" : "Lock Deployment"}
++                onPress={handleLockIn}
++                fullWidth
++                variant="primary"
++                enabled={hasAssignedSeats && monitoredSeatAssigned}
++                glass={false}
++              />
++              {hasAssignedSeats || sessionHasStarted ? (
++                <Button
++                  label="End Session"
++                  onPress={handleEndSession}
++                  fullWidth
++                  variant="secondary"
++                  glass={false}
++                />
++              ) : null}
++            </>
+           )}
+         </View>
+ 
+         <AssignSeatModal
+           seat={selectedSeat}
+           visible={assignModalVisible}
+-          onClose={() => {
+-            setAssignModalVisible(false);
+-          }}
+-          onSuccess={(seatNum, profile) => {
+-            handleSeatAssigned(seatNum, profile);
+-          }}
++          assignments={assignments}
++          onClose={() => setAssignModalVisible(false)}
++          onSuccess={handleSeatAssigned}
+         />
+-
+-        {emergencySeat && emergencyProfile && (
+-          <EmergencytModal
+-            seat={emergencySeat.seatNo}
+-            visible={true}
+-            onClose={() =>
+-              setDismissedSeats((prev) =>
+-                new Set(prev).add(emergencySeat.seatNo),
+-              )
+-            }
+-            id={emergencyProfile.id}
+-            name={emergencyProfile.name}
+-            icon={emergencyProfile.photoURL ?? emergencyProfile.icon}
+-            isAccountOwner={emergencyProfile.isAccountOwner}
+-          />
+-        )}
+-      </View>
++      </ScrollView>
+     </SafeAreaView>
+   );
+ }
+ 
+ const styles = StyleSheet.create({
+-  container: {
+-    flex: 1,
+-    width: "100%",
++  scrollContent: {
+     padding: 20,
+-    borderWidth: 0,
+-    borderColor: "#fff",
++    paddingTop: 40,
++    paddingBottom: 70,
++    gap: 14,
++  },
++  loadingContainer: {
++    flex: 1,
++    alignItems: "center",
++    justifyContent: "center",
+   },
+   pageHeader: {
+     fontSize: 40,
+     fontFamily: "Logo-Font",
+   },
++  prototypeCard: {
++    borderRadius: 14,
++    padding: 14,
++    gap: 8,
++  },
++  prototypeTitle: {
++    fontSize: 18,
++    fontFamily: "Body-Bold",
++  },
++  prototypeHint: {
++    fontSize: 13,
++    lineHeight: 18,
++  },
++  positionWrap: {
++    flexDirection: "row",
++    flexWrap: "wrap",
++    gap: 7,
++  },
++  positionChip: {
++    borderRadius: 999,
++    paddingHorizontal: 12,
++    paddingVertical: 9,
++  },
++  positionChipText: {
++    fontSize: 12,
++    fontFamily: "Body-Bold",
++  },
++  fixedHint: {
++    fontSize: 12,
++    lineHeight: 17,
++  },
++  frontRow: {
++    gap: 10,
++    flexDirection: "row",
++    height: 205,
++  },
++  backRow: {
++    gap: 10,
++    flexDirection: "row",
++    height: 205,
++  },
++  lockHint: {
++    fontFamily: "Body-Medium",
++    fontSize: 13,
++    lineHeight: 18,
++    textAlign: "center",
++  },
++  actions: {
++    gap: 10,
++    paddingTop: 4,
++  },
+ });
+diff --git a/src/app/(tabs)/home/index.tsx b/src/app/(tabs)/home/index.tsx
+index f01fafe..83e0796 100644
+--- a/src/app/(tabs)/home/index.tsx
++++ b/src/app/(tabs)/home/index.tsx
+@@ -1,158 +1,176 @@
++import Button from "@/components/button";
++import EmergencyModal from "@/components/emergency-modal";
++import SeatCard, { type SafeSeatCardState } from "@/components/seat-card";
+ import { Themes } from "@/constants/theme";
++import { useSafeSeatHardware } from "@/hooks/use-safeseat-hardware";
++import { useSafeSeatSession } from "@/hooks/use-safeseat-session";
++import {
++  SAFESEAT_SEATS,
++  getSafeSeatLabel,
++  type SafeSeatSeatNo,
++} from "@/types/safeseat-session";
++import { Host, Icon } from "@expo/ui";
+ import * as Haptics from "expo-haptics";
+ import { useRouter } from "expo-router";
+-import { useEffect, useState } from "react";
++import { useEffect, useMemo, useState } from "react";
+ import {
+-	ScrollView,
+-	StyleSheet,
+-	Text,
+-	useColorScheme,
+-	View,
++  ScrollView,
++  StyleSheet,
++  Text,
++  useColorScheme,
++  View,
+ } from "react-native";
+ import { SafeAreaView } from "react-native-safe-area-context";
+ 
+-import Button from "@/components/button";
+-import EmergencytModal from "@/components/emergency-modal";
+-import SeatCard from "@/components/seat-card";
+-import { Host, Icon } from "@expo/ui";
+-
+-import { doc, onSnapshot } from "firebase/firestore";
+-import { auth, db } from "../../../firebase";
+-
+-type Profile = {
+-  id: string;
+-  name: string;
+-  photoURL?: string;
+-  icon?: string;
+-  isAccountOwner?: boolean;
+-};
+-
+-export type SeatState = "empty" | "assigned" | "safe" | "warning" | "emergency";
+-
+-const SEAT_ROLES: Record<number, string> = {
+-  1: "driver",
+-  2: "passenger",
+-  3: "l backseat",
+-  4: "c backseat",
+-  5: "r backseat",
+-};
+-
+ export default function Home() {
+   const colorScheme = useColorScheme();
+-  const activeScheme = colorScheme === "dark" ? "dark" : "light";
+-  const currentTheme = Themes[activeScheme];
+-
++  const currentTheme = Themes[colorScheme === "dark" ? "dark" : "light"];
+   const router = useRouter();
++  const { ready, session } = useSafeSeatSession();
+ 
+-  const [isLockedIn, setIsLockedIn] = useState<boolean>(false);
+-  const [assignments, setAssignments] = useState<Record<number, Profile>>({});
+-  const [seatStatuses, setSeatStatuses] = useState<Record<number, SeatState>>(
+-    {},
+-  );
+-
+-  // Tracks which emergency seats the user has dismissed, so the modal
+-  // doesn't keep popping back up until a *new* emergency is triggered.
+-  const [dismissedSeats, setDismissedSeats] = useState<Set<number>>(new Set());
++  const { assignments, isLockedIn, monitoredSeatNo } = session;
+ 
+-  // 📡 Real-time listener on users/{uid}/activeTrip/current — this is what
+-  // actually makes Home a "live monitoring" screen. It fires instantly
+-  // whenever the trip doc changes, from this device, another device, or
+-  // (later) a sensor — no manual refresh or focus-triggered refetch needed.
+-  useEffect(() => {
+-    const currentUser = auth.currentUser;
+-    if (!currentUser) return;
+-
+-    const tripDocRef = doc(
+-      db,
+-      "users",
+-      currentUser.uid,
+-      "activeTrip",
+-      "current",
+-    );
++  const monitoredSeatAssigned = Boolean(assignments[monitoredSeatNo]);
++  const hardware = useSafeSeatHardware({
++    enabled: ready && isLockedIn && monitoredSeatAssigned,
++  });
+ 
+-    const unsubscribe = onSnapshot(
+-      tripDocRef,
+-      (snapshot) => {
+-        if (snapshot.exists()) {
+-          const data = snapshot.data();
+-          setIsLockedIn(Boolean(data.isLockedIn));
+-          setAssignments(data.assignments ?? {});
+-          setSeatStatuses(data.seatStatuses ?? {});
+-        } else {
+-          setIsLockedIn(false);
+-          setAssignments({});
+-          setSeatStatuses({});
+-        }
+-      },
+-      (error) => {
+-        console.error("Failed to listen to active trip data:", error);
+-      },
+-    );
+-
+-    return () => unsubscribe();
+-  }, []);
++  const [dismissedSeats, setDismissedSeats] = useState<Set<number>>(new Set());
+ 
+-  // Derive card status state
+-  const getSeatState = (seatNo: number): SeatState => {
++  const getSeatState = (seatNo: SafeSeatSeatNo): SafeSeatCardState => {
+     const profile = assignments[seatNo];
+     if (!profile) return "empty";
+-    return seatStatuses[seatNo] ?? "safe";
++    if (seatNo !== monitoredSeatNo) return "unmonitored";
++    if (!hardware.isOnline || !hardware.telemetry) return "unavailable";
++    if (hardware.telemetry.system.fusion_state === "WATCH") return "monitoring";
++    return hardware.fusionSeatState ?? "monitoring";
+   };
+ 
+-  // 🚨 Find the first assigned, locked-in seat currently in "emergency"
+-  // that the user hasn't already dismissed.
+-  const emergencySeatNo = isLockedIn
+-    ? [1, 2, 3, 4, 5].find(
+-        (seatNo) =>
+-          seatStatuses[seatNo] === "emergency" &&
+-          assignments[seatNo] &&
+-          !dismissedSeats.has(seatNo),
+-      )
+-    : undefined;
++  const monitoredState = getSeatState(monitoredSeatNo);
++
++  // Dismiss applies only to the current emergency episode. Once Fusion leaves
++  // EMERGENCY, allow a later emergency on this seat to surface again.
++  useEffect(() => {
++    if (monitoredState === "emergency") return;
++    setDismissedSeats((previous) => {
++      if (!previous.has(monitoredSeatNo)) return previous;
++      const next = new Set(previous);
++      next.delete(monitoredSeatNo);
++      return next;
++    });
++  }, [monitoredSeatNo, monitoredState]);
++
++  const emergencySeatNo =
++    isLockedIn &&
++    monitoredState === "emergency" &&
++    assignments[monitoredSeatNo] &&
++    !dismissedSeats.has(monitoredSeatNo)
++      ? monitoredSeatNo
++      : undefined;
+ 
+   const emergencyProfile =
+     emergencySeatNo !== undefined ? assignments[emergencySeatNo] : undefined;
+ 
++  const monitoringPresentation = useMemo(() => {
++    if (hardware.isOnline) {
++      return {
++        title: "SafeSeat Monitoring Active",
++        detail: `${getSafeSeatLabel(monitoredSeatNo)} is receiving live Main Hub Fusion status.`,
++        color: currentTheme.primaryBttn,
++      };
++    }
++
++    if (hardware.isReachable) {
++      return {
++        title: "SafeSeat Monitoring Initializing",
++        detail: "The Main Hub is reachable, but live telemetry is still becoming ready.",
++        color: currentTheme.yellow,
++      };
++    }
++
++    return {
++      title: "SafeSeat Monitoring Unavailable",
++      detail:
++        "Keep this phone connected to the SafeSeat Wi-Fi. Monitoring resumes automatically when the Main Hub is reachable.",
++      color: currentTheme.warnBttn,
++    };
++  }, [
++    currentTheme.primaryBttn,
++    currentTheme.warnBttn,
++    currentTheme.yellow,
++    hardware.isOnline,
++    hardware.isReachable,
++    monitoredSeatNo,
++  ]);
++
++  if (!ready) {
++    return (
++      <SafeAreaView style={{ flex: 1, backgroundColor: currentTheme.background }}>
++        <View style={styles.loadingContainer}>
++          <Text style={{ color: currentTheme.textSecondary }}>Loading SafeSeat session…</Text>
++        </View>
++      </SafeAreaView>
++    );
++  }
++
+   return (
+     <SafeAreaView
+-      style={{
+-        flex: 1,
+-        backgroundColor: currentTheme.background,
+-      }}
++      style={{ flex: 1, backgroundColor: currentTheme.background }}
+       edges={["left", "right"]}
+     >
+       <View style={[styles.container, { marginTop: 40 }]}>
+-        {isLockedIn && (
+-          <Text style={[styles.pageHeader, { color: currentTheme.text }]}>
+-            Home
+-          </Text>
+-        )}
+-
+         {isLockedIn ? (
+-          <ScrollView
+-            showsVerticalScrollIndicator={false}
+-            contentContainerStyle={{ paddingBottom: 40 }}
+-          >
+-            <View style={{ gap: 10, marginTop: 10 }}>
+-              {[1, 2, 3, 4, 5].map((seatNo) => {
+-                const profile = assignments[seatNo];
+-                const state = getSeatState(seatNo);
+-
+-                return (
++          <>
++            <Text style={[styles.pageHeader, { color: currentTheme.text }]}>Home</Text>
++
++            <ScrollView
++              showsVerticalScrollIndicator={false}
++              contentContainerStyle={styles.scrollContent}
++            >
++              <View style={[styles.monitoringCard, { backgroundColor: currentTheme.element }]}>
++                <View
++                  style={[
++                    styles.statusDot,
++                    { backgroundColor: monitoringPresentation.color },
++                  ]}
++                />
++                <View style={{ flex: 1 }}>
++                  <Text style={[styles.monitoringTitle, { color: currentTheme.text }]}>
++                    {monitoringPresentation.title}
++                  </Text>
++                  <Text
++                    style={[
++                      styles.monitoringDetail,
++                      { color: currentTheme.textSecondary },
++                    ]}
++                  >
++                    {monitoringPresentation.detail}
++                  </Text>
++                </View>
++              </View>
++
++              <View style={{ gap: 10 }}>
++                {SAFESEAT_SEATS.map((seat) => (
+                   <SeatCard
+-                    key={seatNo}
+-                    seatNo={seatNo}
+-                    role={SEAT_ROLES[seatNo]}
+-                    name={profile?.name}
+-                    state={state === "assigned" ? "safe" : state}
+-                    onPress={() => {
+-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+-                    }}
++                    key={seat.seatNo}
++                    seatNo={seat.seatNo}
++                    role={`${seat.label}${seat.seatNo === monitoredSeatNo ? " • prototype" : ""}`}
++                    name={assignments[seat.seatNo]?.name}
++                    state={getSeatState(seat.seatNo)}
+                   />
+-                );
+-              })}
+-            </View>
+-          </ScrollView>
++                ))}
++              </View>
++
++              <View style={[styles.infoCard, { backgroundColor: currentTheme.element }]}>
++                <Text style={[styles.infoTitle, { color: currentTheme.text }]}>Participant View</Text>
++                <Text style={[styles.infoText, { color: currentTheme.textSecondary }]}>
++                  SafeSeat shows the system safety state here. Raw HR, RR, temperature,
++                  pressure, motion, model scores, and camera confidence remain on the
++                  evaluator-only monitor.
++                </Text>
++              </View>
++            </ScrollView>
++          </>
+         ) : (
+           <View style={styles.unlockedContainer}>
+             <View style={{ marginVertical: 20 }}>
+@@ -168,7 +186,7 @@ export default function Home() {
+               </Host>
+             </View>
+             <Text style={[styles.unlockedTitle, { color: currentTheme.text }]}>
+-              Trip Not Locked In
++              Deployment Not Locked
+             </Text>
+             <Text
+               style={[
+@@ -176,8 +194,8 @@ export default function Home() {
+                 { color: currentTheme.textSecondary },
+               ]}
+             >
+-              Assign passengers to seats and tap "Lock In" on the Assign page to
+-              start monitoring.
++              Choose the physical prototype position, assign an occupant, and use Lock
++              Deployment on the Assign page to start monitoring.
+             </Text>
+             <View style={{ width: "100%", marginTop: 24 }}>
+               <Button
+@@ -186,26 +204,26 @@ export default function Home() {
+                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                   router.push("/assign");
+                 }}
+-                fullWidth={true}
++                fullWidth
+                 glass={false}
+               />
+             </View>
+           </View>
+         )}
+ 
+-        {emergencySeatNo !== undefined && emergencyProfile && (
+-          <EmergencytModal
++        {emergencySeatNo !== undefined && emergencyProfile ? (
++          <EmergencyModal
+             seat={emergencySeatNo}
+-            visible={true}
++            visible
+             onClose={() =>
+-              setDismissedSeats((prev) => new Set(prev).add(emergencySeatNo))
++              setDismissedSeats((previous) => new Set(previous).add(emergencySeatNo))
+             }
+             id={emergencyProfile.id}
+             name={emergencyProfile.name}
+-            icon={emergencyProfile.photoURL ?? emergencyProfile.icon}
++            icon={emergencyProfile.photoURL ?? emergencyProfile.icon ?? undefined}
+             isAccountOwner={emergencyProfile.isAccountOwner}
+           />
+-        )}
++        ) : null}
+       </View>
+     </SafeAreaView>
+   );
+@@ -216,21 +234,61 @@ const styles = StyleSheet.create({
+     flex: 1,
+     width: "100%",
+     padding: 20,
+-    borderWidth: 0,
+-    borderColor: "#fff",
++  },
++  loadingContainer: {
++    flex: 1,
++    alignItems: "center",
++    justifyContent: "center",
+   },
+   pageHeader: {
+     fontSize: 40,
+     fontFamily: "Logo-Font",
+   },
++  scrollContent: {
++    paddingBottom: 40,
++    gap: 12,
++  },
++  monitoringCard: {
++    borderRadius: 14,
++    padding: 14,
++    flexDirection: "row",
++    alignItems: "center",
++    gap: 11,
++  },
++  statusDot: {
++    width: 14,
++    height: 14,
++    borderRadius: 7,
++  },
++  monitoringTitle: {
++    fontSize: 17,
++    fontFamily: "Body-Bold",
++  },
++  monitoringDetail: {
++    fontSize: 13,
++    lineHeight: 18,
++    marginTop: 2,
++  },
++  infoCard: {
++    borderRadius: 12,
++    padding: 14,
++    marginTop: 2,
++  },
++  infoTitle: {
++    fontSize: 15,
++    fontFamily: "Body-Bold",
++  },
++  infoText: {
++    fontSize: 12,
++    lineHeight: 18,
++    marginTop: 4,
++  },
+   unlockedContainer: {
+     flex: 1,
+     justifyContent: "flex-start",
+     paddingTop: 140,
+     alignItems: "center",
+     paddingHorizontal: 20,
+-    borderWidth: 0,
+-    borderColor: "#fff",
+   },
+   unlockedTitle: {
+     fontSize: 22,
+diff --git a/src/app/(tabs)/settings/_layout.tsx b/src/app/(tabs)/settings/_layout.tsx
+index 3211d2d..21d383d 100644
+--- a/src/app/(tabs)/settings/_layout.tsx
++++ b/src/app/(tabs)/settings/_layout.tsx
+@@ -14,6 +14,7 @@ export default function TabsLayout() {
+     >
+       {/* Points to the index folder */}
+       <Stack.Screen name="index" options={{ title: "Settings" }} />
++      <Stack.Screen name="diagnostics" options={{ title: "System Diagnostic" }} />
+     </Stack>
+   );
+ }
+diff --git a/src/app/(tabs)/settings/diagnostics.tsx b/src/app/(tabs)/settings/diagnostics.tsx
+new file mode 100644
+index 0000000..17e5f7c
+--- /dev/null
++++ b/src/app/(tabs)/settings/diagnostics.tsx
+@@ -0,0 +1,223 @@
++import Button from "@/components/button";
++import ModuleStatusCard from "@/components/module-status-card";
++import { Themes } from "@/constants/theme";
++import { useSafeSeatHardware } from "@/hooks/use-safeseat-hardware";
++import { probeSafeSeatHub } from "@/services/safeseat-hardware";
++import { deriveSafeSeatModuleStatuses } from "@/services/safeseat-module-status";
++import type { SafeSeatHardwareStatus } from "@/types/safeseat-hardware";
++import * as Haptics from "expo-haptics";
++import { useMemo, useState } from "react";
++import {
++  Platform,
++  ScrollView,
++  StyleSheet,
++  Text,
++  useColorScheme,
++  View,
++} from "react-native";
++import { SafeAreaView } from "react-native-safe-area-context";
++
++const DIAGNOSTIC_SAMPLES = 4;
++const SAMPLE_DELAY_MS = 750;
++
++function delay(ms: number) {
++  return new Promise((resolve) => setTimeout(resolve, ms));
++}
++
++export default function Diagnostics() {
++  const colorScheme = useColorScheme();
++  const currentTheme = Themes[colorScheme === "dark" ? "dark" : "light"];
++  const hardware = useSafeSeatHardware({ enabled: true });
++
++  const [running, setRunning] = useState(false);
++  const [progress, setProgress] = useState(0);
++  const [diagnosticTelemetry, setDiagnosticTelemetry] =
++    useState<SafeSeatHardwareStatus | null>(null);
++  const [diagnosticSummary, setDiagnosticSummary] = useState<string | null>(null);
++
++  const visibleTelemetry = diagnosticTelemetry ?? hardware.telemetry;
++  const moduleStatuses = useMemo(
++    () => deriveSafeSeatModuleStatuses(visibleTelemetry, hardware.isReachable),
++    [hardware.isReachable, visibleTelemetry],
++  );
++
++  const runDiagnostic = async () => {
++    if (running) return;
++    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
++    setRunning(true);
++    setProgress(0);
++    setDiagnosticSummary(null);
++
++    let reachableSamples = 0;
++    let telemetrySamples = 0;
++    let lastTelemetry: SafeSeatHardwareStatus | null = null;
++
++    for (let sample = 1; sample <= DIAGNOSTIC_SAMPLES; sample += 1) {
++      try {
++        const result = await probeSafeSeatHub();
++        reachableSamples += 1;
++        if (result.telemetry) {
++          telemetrySamples += 1;
++          lastTelemetry = result.telemetry;
++        }
++      } catch {
++        // The final summary below is intentionally user-facing. Detailed raw
++        // telemetry/debug information is reserved for the evaluator monitor.
++      }
++
++      setProgress(sample);
++      if (sample < DIAGNOSTIC_SAMPLES) await delay(SAMPLE_DELAY_MS);
++    }
++
++    setDiagnosticTelemetry(lastTelemetry);
++
++    if (telemetrySamples === DIAGNOSTIC_SAMPLES) {
++      setDiagnosticSummary("All monitored SafeSeat modules responded normally.");
++      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
++    } else if (reachableSamples > 0) {
++      setDiagnosticSummary(
++        "SafeSeat is connected, but one or more monitoring modules are still initializing or need attention.",
++      );
++      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
++    } else {
++      setDiagnosticSummary(
++        "SafeSeat could not connect to the monitoring system. Reconnect this phone to the SafeSeat network and try again.",
++      );
++      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
++    }
++
++    await hardware.refresh();
++    setRunning(false);
++  };
++
++  const connectionColor = hardware.isOnline
++    ? currentTheme.primaryBttn
++    : hardware.isReachable
++      ? currentTheme.yellow
++      : currentTheme.warnBttn;
++
++  const connectionLabel = hardware.isOnline
++    ? "CONNECTED"
++    : hardware.isReachable
++      ? "INITIALIZING"
++      : "NOT CONNECTED";
++
++  return (
++    <SafeAreaView
++      style={{ flex: 1, backgroundColor: currentTheme.background }}
++      edges={Platform.OS === "android" ? ["left", "right", "top"] : ["left", "right"]}
++    >
++      <ScrollView contentContainerStyle={styles.scrollContent}>
++        <Text style={[styles.pageHeader, { color: currentTheme.text }]}>System Diagnostic</Text>
++        <Text style={[styles.intro, { color: currentTheme.textSecondary }]}>
++          Check SafeSeat connectivity and module readiness before starting a monitoring session.
++        </Text>
++
++        <View style={[styles.overviewCard, { backgroundColor: currentTheme.element }]}>
++          <View style={styles.statusRow}>
++            <View style={[styles.statusDot, { backgroundColor: connectionColor }]} />
++            <View style={{ flex: 1 }}>
++              <Text style={[styles.statusTitle, { color: currentTheme.text }]}>
++                Monitoring System {connectionLabel}
++              </Text>
++              <Text style={[styles.smallText, { color: currentTheme.textSecondary }]}>
++                Raw sensor values are not shown in the participant interface.
++              </Text>
++            </View>
++          </View>
++
++          <Button
++            label={
++              running
++                ? `Running Diagnostic ${progress}/${DIAGNOSTIC_SAMPLES}`
++                : "Run System Self-Diagnostic"
++            }
++            onPress={runDiagnostic}
++            enabled={!running}
++            fullWidth
++            glass={false}
++          />
++        </View>
++
++        {diagnosticSummary ? (
++          <View style={[styles.resultCard, { backgroundColor: currentTheme.element }]}>
++            <Text style={[styles.resultText, { color: currentTheme.text }]}>
++              {diagnosticSummary}
++            </Text>
++          </View>
++        ) : null}
++
++        <Text style={[styles.sectionTitle, { color: currentTheme.text }]}>Module Status</Text>
++        <View style={{ gap: 8 }}>
++          {moduleStatuses.map((module) => (
++            <ModuleStatusCard key={module.id} module={module} />
++          ))}
++        </View>
++
++        <Text style={[styles.disclaimer, { color: currentTheme.textSecondary }]}>
++          SafeSeat is a non-diagnostic safety-monitoring research prototype. Individual sensor readings are interpreted by the system before a safety state is shown to the user.
++        </Text>
++      </ScrollView>
++    </SafeAreaView>
++  );
++}
++
++const styles = StyleSheet.create({
++  scrollContent: {
++    padding: 20,
++    paddingTop: 54,
++    paddingBottom: 56,
++    gap: 12,
++  },
++  pageHeader: {
++    fontSize: 36,
++    fontFamily: "Logo-Font",
++  },
++  intro: {
++    fontSize: 14,
++    lineHeight: 20,
++  },
++  overviewCard: {
++    borderRadius: 14,
++    padding: 14,
++    gap: 12,
++  },
++  statusRow: {
++    flexDirection: "row",
++    alignItems: "center",
++    gap: 10,
++  },
++  statusDot: {
++    width: 13,
++    height: 13,
++    borderRadius: 7,
++  },
++  statusTitle: {
++    fontSize: 17,
++    fontFamily: "Body-Bold",
++  },
++  smallText: {
++    fontSize: 12,
++    marginTop: 2,
++    lineHeight: 17,
++  },
++  resultCard: {
++    borderRadius: 12,
++    padding: 14,
++  },
++  resultText: {
++    fontSize: 14,
++    lineHeight: 20,
++    fontFamily: "Body-Medium",
++  },
++  sectionTitle: {
++    fontSize: 19,
++    fontFamily: "Body-Bold",
++    marginTop: 4,
++  },
++  disclaimer: {
++    fontSize: 11,
++    lineHeight: 16,
++    marginTop: 6,
++  },
++});
+diff --git a/src/app/(tabs)/settings/index.tsx b/src/app/(tabs)/settings/index.tsx
+index c367a65..3b450cb 100644
+--- a/src/app/(tabs)/settings/index.tsx
++++ b/src/app/(tabs)/settings/index.tsx
+@@ -23,6 +23,7 @@ import SettingSwitch from "@/components/setting-switch";
+ 
+ import PasswordVerifyModal from "@/components/PasswordVerifyModal";
+ import { isSessionValid } from "@/utils/securitySession";
++import { clearSafeSeatSession } from "@/services/safeseat-session-store";
+ 
+ import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
+ import { auth, db } from "../../../firebase";
+@@ -266,13 +267,37 @@ export default function Settings() {
+ 									</View>
+ 									<View style={{ paddingHorizontal: 10 }}>
+ 										<Text style={[styles.caption, { color: currentTheme.textSecondary }]}>
+-											Automatic alert routing to nearest response center if unresponsive.
++											For a confirmed DRIVER emergency, SafeSeat can queue an automated SMS to the primary emergency contact. Passenger alerts remain driver-first.
+ 										</Text>
+ 									</View>
+ 								</View>
+ 							</View>
+ 						</View>
+ 
++						{/* SAFESEAT SECTION */}
++						<View>
++							<Text style={[styles.infoLabel, { color: currentTheme.textSecondary }]}>SAFESEAT</Text>
++							<View style={{ gap: 6 }}>
++								<View style={{ borderRadius: 12, overflow: "hidden" }}>
++									<SettingPageItem
++										name="System Self-Diagnostic"
++										iconName={Icon.select({ ios: "waveform.path.ecg", android: import("@expo/material-symbols/settings.xml") })}
++										showChevron={true}
++										isLast={true}
++										onPress={() => {
++											Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
++											router.push("/(tabs)/settings/diagnostics");
++										}}
++									/>
++								</View>
++								<View style={{ paddingHorizontal: 10 }}>
++									<Text style={[styles.caption, { color: currentTheme.textSecondary }]}>
++										Check module readiness without exposing raw participant sensor values.
++									</Text>
++								</View>
++							</View>
++						</View>
++
+ 						{/* APP SECTION */}
+ 						<View>
+ 							<Text style={[styles.infoLabel, { color: currentTheme.textSecondary }]}>APP</Text>
+@@ -324,6 +349,7 @@ export default function Settings() {
+ 																	// 2. 🧼 CLEAR CACHED USER DATA ON LOGOUT
+ 																	await SecureStore.deleteItemAsync("user_health_profile");
+ 																	await SecureStore.deleteItemAsync("user_privacy_prefs");
++																		await clearSafeSeatSession();
+ 
+ 																	// 3. Optional: Trigger Firebase sign out if you want to completely destroy the active session
+ 																	// await auth.signOut();
+diff --git a/src/components/assign-card.tsx b/src/components/assign-card.tsx
+index 3bdadc3..89e1aaa 100644
+--- a/src/components/assign-card.tsx
++++ b/src/components/assign-card.tsx
+@@ -1,118 +1,106 @@
+-// components/assign-card.tsx
+ import { Themes } from "@/constants/theme";
++import type { SafeSeatAssignment } from "@/types/safeseat-session";
+ import { Host, Icon } from "@expo/ui";
+-import { opacity } from "@expo/ui/swift-ui/modifiers";
+ import {
++  Image,
+   Pressable,
+   StyleSheet,
+   Text,
+   useColorScheme,
+   View,
+-  Image,
+ } from "react-native";
+ 
+-type Profile = {
+-  id: string;
+-  name: string;
+-  icon?: string;
+-  isAccountOwner?: boolean;
+-};
++export type AssignCardState =
++  | "empty"
++  | "assigned"
++  | "monitored"
++  | "unmonitored";
+ 
+ type AssignCardProps = {
+   seatNo: number;
+   seatCode: string;
+-  assignedProfile?: Profile | null;
+-  name?: string;
+-  pfp?: string;
+-  locked?: boolean
+-  state: string
++  assignedProfile?: SafeSeatAssignment | null;
++  state?: AssignCardState;
+   onPress: () => void;
+ };
+ 
++const STATE_LABELS: Record<AssignCardState, string> = {
++  empty: "EMPTY",
++  assigned: "ASSIGNED",
++  monitored: "PROTOTYPE",
++  unmonitored: "NOT MONITORED",
++};
+ 
+ export default function AssignCard({
+-  seatNo,
+   seatCode,
+   assignedProfile,
+-  name,
+-  pfp,
+   state = "empty",
+-  locked = true,
+   onPress,
+ }: AssignCardProps) {
+   const colorScheme = useColorScheme();
+-  const activeScheme = colorScheme === "dark" ? "dark" : "light";
+-  const currentTheme = Themes[activeScheme];
++  const currentTheme = Themes[colorScheme === "dark" ? "dark" : "light"];
+ 
+-  const displayName = assignedProfile?.name ?? name;
+-  const displayIcon = assignedProfile?.icon ?? pfp;
+-
+-  // Green outline when a seat is assigned; subtle gray dashed outline when unassigned
+-  const borderColor = displayName ? currentTheme.primaryBttn : currentTheme.textSecondary;
++  const displayName = assignedProfile?.name;
++  const displayIcon = assignedProfile?.photoURL ?? assignedProfile?.icon ?? undefined;
++  const statusColor =
++    state === "monitored"
++      ? currentTheme.primaryBttn
++      : state === "unmonitored"
++        ? currentTheme.textSecondary
++        : state === "assigned"
++          ? currentTheme.blue
++          : currentTheme.textSecondary;
+ 
+   return (
+     <Pressable
+       onPress={onPress}
+       style={[
+-        assigncard.baseCard,
++        styles.baseCard,
+         {
+           backgroundColor: currentTheme.element,
+-          borderColor: state == "safe"
+-            ? currentTheme.primaryBttn
+-            : state == "warning"
+-              ? currentTheme.yellow
+-              : state == "emergency"
+-                ? currentTheme.warnBttn
+-                : currentTheme.text,
+-          opacity: state == "empty" ? 0.5 : 1,
++          borderColor: statusColor,
++          opacity: state === "empty" ? 0.55 : 1,
+           borderStyle: displayName ? "solid" : "dashed",
+         },
+       ]}
+     >
+       {displayName ? (
+-        <View style={assigncard.profileContainer}>
++        <View style={styles.profileContainer}>
+           {displayIcon ? (
+             <Image
+               source={{ uri: displayIcon }}
+-              style={[
+-                assigncard.avatar,
+-                {
+-                  borderColor: state == "safe"
+-                    ? currentTheme.primaryBttn
+-                    : state == "warning"
+-                      ? currentTheme.yellow
+-                      : state == "emergency"
+-                        ? currentTheme.warnBttn
+-                        : currentTheme.text,
+-
+-                  borderWidth: 2
+-                },
+-              ]}
++              style={[styles.avatar, { borderColor: statusColor }]}
+             />
+           ) : (
+             <View
+               style={[
+-                assigncard.avatarFallback,
++                styles.avatarFallback,
+                 { backgroundColor: currentTheme.primaryBttn },
+               ]}
+             >
+-              <Text style={[assigncard.monogram, { color: currentTheme.primaryBttnText }]}>
++              <Text
++                style={[
++                  styles.monogram,
++                  { color: currentTheme.primaryBttnText },
++                ]}
++              >
+                 {displayName.charAt(0).toUpperCase()}
+               </Text>
+             </View>
+           )}
++
+           <Text
+             numberOfLines={1}
+-            style={[assigncard.profileName, { color: currentTheme.text }]}
++            style={[styles.profileName, { color: currentTheme.text }]}
+           >
+             {displayName}
+           </Text>
+-          <Text style={[assigncard.seatCode, { color: currentTheme.textSecondary }]}>
++          <Text style={[styles.seatCode, { color: currentTheme.textSecondary }]}>
+             {seatCode.toUpperCase()}
+           </Text>
+         </View>
+       ) : (
+-        <View style={assigncard.iconContainer}>
++        <View style={styles.iconContainer}>
+           <Host matchContents>
+             <Icon
+               name={Icon.select({
+@@ -122,29 +110,20 @@ export default function AssignCard({
+               color={currentTheme.textSecondary}
+             />
+           </Host>
+-          <Text style={[assigncard.seatCode, { color: currentTheme.textSecondary }]}>
++          <Text style={[styles.seatCode, { color: currentTheme.textSecondary }]}>
+             {seatCode.toUpperCase()}
+           </Text>
+         </View>
+       )}
+-      <Text style={{
+-        color: state == "safe"
+-          ? currentTheme.primaryBttn
+-          : state == "warning"
+-            ? currentTheme.yellow
+-            : state == "emergency"
+-              ? currentTheme.warnBttn
+-              : currentTheme.text,
+ 
+-        fontFamily: "Body-Bold",
+-        fontSize: 16,
+-        marginTop: 4
+-      }}>{state.toUpperCase()}</Text>
++      <Text style={[styles.stateText, { color: statusColor }]}>
++        {STATE_LABELS[state]}
++      </Text>
+     </Pressable>
+   );
+ }
+ 
+-const assigncard = StyleSheet.create({
++const styles = StyleSheet.create({
+   baseCard: {
+     flex: 1,
+     borderRadius: 12,
+@@ -165,6 +144,7 @@ const assigncard = StyleSheet.create({
+     height: 60,
+     borderRadius: 30,
+     resizeMode: "cover",
++    borderWidth: 2,
+   },
+   avatarFallback: {
+     width: 60,
+@@ -190,5 +170,12 @@ const assigncard = StyleSheet.create({
+   },
+   seatCode: {
+     fontSize: 12,
++    textAlign: "center",
++  },
++  stateText: {
++    fontFamily: "Body-Bold",
++    fontSize: 12,
++    marginTop: 5,
++    textAlign: "center",
+   },
+-});
+\ No newline at end of file
++});
+diff --git a/src/components/assign-seat-modal.tsx b/src/components/assign-seat-modal.tsx
+index 45d8c8d..e4190f6 100644
+--- a/src/components/assign-seat-modal.tsx
++++ b/src/components/assign-seat-modal.tsx
+@@ -1,354 +1,381 @@
+-// components/AssignSeatModal.tsx
+ import { Themes } from "@/constants/theme";
+-import { BottomSheet, Button, Column, Host, Icon, List, Row, Spacer, Text } from "@expo/ui";
+-import { buttonBorderShape, buttonStyle, controlSize } from "@expo/ui/swift-ui/modifiers";
++import {
++  createGuestAssignment,
++  type SafeSeatAssignment,
++  type SafeSeatSeatNo,
++} from "@/types/safeseat-session";
++import {
++  BottomSheet,
++  Button,
++  Column,
++  Host,
++  Icon,
++  List,
++  Row,
++  Spacer,
++  Text,
++} from "@expo/ui";
++import {
++  buttonBorderShape,
++  buttonStyle,
++  controlSize,
++} from "@expo/ui/swift-ui/modifiers";
+ import * as Haptics from "expo-haptics";
+-import { useEffect, useState } from "react";
+-import { useColorScheme, Alert } from "react-native";
+-import AsyncStorage from "@react-native-async-storage/async-storage";
+ import * as SecureStore from "expo-secure-store";
+-
+-// 🛠️ Firebase Imports
+-import { auth, db } from "../firebase";
+ import { collection, doc, getDoc, getDocs } from "firebase/firestore";
++import { useEffect, useMemo, useState } from "react";
++import { useColorScheme } from "react-native";
+ 
+-export type Profile = {
+-    id: string;
+-    name: string;
+-    icon?: string; // 👈 Updated to use 'icon'
+-    isAccountOwner?: boolean;
+-};
++import { auth, db } from "../firebase";
+ 
+ type Props = {
+-    visible: boolean;
+-    seat: number;
+-    onClose: () => void;
+-    onSuccess?: (seat: number, profile: Profile | null) => void;
++  visible: boolean;
++  seat: SafeSeatSeatNo;
++  assignments: Record<number, SafeSeatAssignment>;
++  onClose: () => void;
++  onSuccess?: (seat: SafeSeatSeatNo, profile: SafeSeatAssignment | null) => void;
+ };
+ 
+-const SEAT_ASSIGNMENTS_KEY = "seatAssignments";
+-
+-export default function AssignSeatModal({ visible, onClose, onSuccess, seat }: Props) {
+-    const [isLoading, setIsLoading] = useState(false);
+-    const [isFetchingProfiles, setIsFetchingProfiles] = useState(false);
+-
+-    const colorScheme = useColorScheme();
+-    const activeScheme = colorScheme === "dark" ? "dark" : "light";
+-    const currentTheme = Themes[activeScheme];
+-
+-    const [role, setRole] = useState("");
+-    const [profiles, setProfiles] = useState<Profile[]>([]);
+-    const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+-    const [isCurrentlyAssigned, setIsCurrentlyAssigned] = useState(false);
+-
+-    // Resolve seat number -> role label
+-    useEffect(() => {
+-        if (!visible) return;
+-
+-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+-        switch (seat) {
+-            case 1:
+-                setRole("Driver");
+-                break;
+-            case 2:
+-                setRole("Passenger");
+-                break;
+-            case 3:
+-                setRole("L Backseat");
+-                break;
+-            case 4:
+-                setRole("C Backseat");
+-                break;
+-            case 5:
+-                setRole("R Backseat");
+-                break;
+-            default:
+-                setRole("MISSINGNO");
+-                break;
+-        }
+-    }, [visible, seat]);
+-
+-    // Fetch user account + profiles + filter already-assigned profiles
+-    useEffect(() => {
+-        if (!visible) return;
+-
+-        const currentUser = auth.currentUser;
+-        if (!currentUser) return;
+-
+-        let cancelled = false;
+-
+-        (async () => {
+-            setIsFetchingProfiles(true);
+-            try {
+-                const combinedList: Profile[] = [];
+-
+-                // 1. Resolve Account Owner details
+-                let primaryName = currentUser.displayName;
+-                let primaryIcon = currentUser.photoURL ?? undefined;
+-
+-                const localHealthRaw = await SecureStore.getItemAsync("user_health_profile");
+-                if (localHealthRaw) {
+-                    const localHealth = JSON.parse(localHealthRaw);
+-                    if (localHealth.name) primaryName = localHealth.name;
+-                }
+-
+-                const userDocRef = doc(db, "users", currentUser.uid);
+-                const userDocSnap = await getDoc(userDocRef);
+-                if (userDocSnap.exists()) {
+-                    const userData = userDocSnap.data();
+-                    if (userData.name) primaryName = userData.name;
+-                    // Read 'icon' field first, fallback to 'photoURL'
+-                    if (userData.icon || userData.photoURL) {
+-                        primaryIcon = userData.icon ?? userData.photoURL;
+-                    }
+-                }
+-
+-                const accountOwnerProfile: Profile = {
+-                    id: currentUser.uid,
+-                    name: `${primaryName ?? "Me"} (Me)`,
+-                    icon: primaryIcon,
+-                    isAccountOwner: true,
+-                };
+-                combinedList.push(accountOwnerProfile);
+-
+-                // 2. Fetch sub-profiles subcollection
+-                const profilesRef = collection(db, "users", currentUser.uid, "profiles");
+-                const snapshot = await getDocs(profilesRef);
+-                const subProfiles: Profile[] = snapshot.docs.map((docSnap) => {
+-                    const data = docSnap.data();
+-                    return {
+-                        id: docSnap.id,
+-                        name: data.name ?? "Unnamed Profile",
+-                        icon: data.icon ?? data.photoURL, // 👈 Reads 'icon' from Firestore
+-                    };
+-                });
+-
+-                combinedList.push(...subProfiles);
+-
+-                // 3. Get existing seat assignments & filter out already-assigned profiles
+-                const raw = await AsyncStorage.getItem(SEAT_ASSIGNMENTS_KEY);
+-                const assignments: Record<number, Profile> = raw ? JSON.parse(raw) : {};
+-
+-                const assignedSeatProfile = assignments[seat];
+-                const currentlyAssignedProfileId = assignedSeatProfile?.id ?? null;
+-
+-                setIsCurrentlyAssigned(!!assignedSeatProfile);
+-                setSelectedProfileId(currentlyAssignedProfileId);
+-
+-                // Collect IDs assigned to OTHER seats (so we can hide them)
+-                const assignedOtherIds = new Set<string>();
+-                Object.entries(assignments).forEach(([seatNumStr, prof]) => {
+-                    if (parseInt(seatNumStr, 10) !== seat && prof?.id) {
+-                        assignedOtherIds.add(prof.id);
+-                    }
+-                });
+-
+-                // Filter out profiles assigned elsewhere
+-                const availableProfiles = combinedList.filter(
+-                    (p) => !assignedOtherIds.has(p.id)
+-                );
++const GUEST_OPTION_ID = "__safeseat_guest__";
+ 
+-                if (cancelled) return;
+-                setProfiles(availableProfiles);
+-            } catch (error) {
+-                console.error("Error fetching profiles/user: ", error);
+-                if (!cancelled) {
+-                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+-                    Alert.alert("Load Error", "Failed to load profiles. Please try again.");
+-                }
+-            } finally {
+-                if (!cancelled) setIsFetchingProfiles(false);
+-            }
+-        })();
++const ROLE_LABELS: Record<SafeSeatSeatNo, string> = {
++  1: "Driver",
++  2: "Front Passenger",
++  3: "Rear Left",
++  4: "Rear Center",
++  5: "Rear Right",
++};
+ 
+-        return () => {
+-            cancelled = true;
+-        };
+-    }, [visible, seat]);
++export default function AssignSeatModal({
++  visible,
++  onClose,
++  onSuccess,
++  seat,
++  assignments,
++}: Props) {
++  const [isLoading, setIsLoading] = useState(false);
++  const [isFetchingProfiles, setIsFetchingProfiles] = useState(false);
++  const [loadWarning, setLoadWarning] = useState<string | null>(null);
++  const [profiles, setProfiles] = useState<SafeSeatAssignment[]>([]);
++  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
++
++  const colorScheme = useColorScheme();
++  const currentTheme = Themes[colorScheme === "dark" ? "dark" : "light"];
++
++  const assignedSeatProfile = assignments[seat];
++  const isCurrentlyAssigned = Boolean(assignedSeatProfile);
++  const role = ROLE_LABELS[seat];
++
++  const assignedOtherIds = useMemo(() => {
++    const ids = new Set<string>();
++    Object.entries(assignments).forEach(([seatNo, profile]) => {
++      if (Number(seatNo) !== seat && profile?.id && !profile.isGuest) {
++        ids.add(profile.id);
++      }
++    });
++    return ids;
++  }, [assignments, seat]);
++
++  useEffect(() => {
++    if (!visible) return;
++
++    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
++    setLoadWarning(null);
++    setSelectedProfileId(
++      assignedSeatProfile?.isGuest
++        ? GUEST_OPTION_ID
++        : assignedSeatProfile?.id ?? null,
++    );
+ 
+-    const handleResetAndClose = () => {
+-        setSelectedProfileId(null);
+-        onClose();
+-    };
++    let cancelled = false;
+ 
+-    const handleSelectProfile = (profileId: string) => {
+-        Haptics.selectionAsync();
+-        setSelectedProfileId(profileId);
+-    };
++    (async () => {
++      setIsFetchingProfiles(true);
++      const combinedList: SafeSeatAssignment[] = [];
++      const currentUser = auth.currentUser;
+ 
+-    const handleSave = async () => {
+-        if (!selectedProfileId) {
+-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+-            Alert.alert("No Profile Selected", "Please select a profile to assign to this seat.");
+-            return;
+-        }
++      // Guest mode is always available, even when the SafeSeat Wi-Fi has no
++      // Internet path and Firebase cannot be contacted.
++      if (currentUser) {
++        let primaryName = currentUser.displayName;
++        let primaryIcon = currentUser.photoURL ?? undefined;
+ 
+-        const selectedProfile = profiles.find((p) => p.id === selectedProfileId);
+-        if (!selectedProfile) return;
++        try {
++          const localHealthRaw = await SecureStore.getItemAsync("user_health_profile");
++          if (localHealthRaw) {
++            const localHealth = JSON.parse(localHealthRaw);
++            if (localHealth.name) primaryName = localHealth.name;
++          }
++        } catch {
++          // Local profile metadata is optional for assignment.
++        }
+ 
+-        setIsLoading(true);
+         try {
+-            const raw = await AsyncStorage.getItem(SEAT_ASSIGNMENTS_KEY);
+-            const assignments: Record<number, Profile> = raw ? JSON.parse(raw) : {};
+-            assignments[seat] = selectedProfile;
+-            await AsyncStorage.setItem(SEAT_ASSIGNMENTS_KEY, JSON.stringify(assignments));
+-
+-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+-            if (onSuccess) onSuccess(seat, selectedProfile);
+-            handleResetAndClose();
+-        } catch (error) {
+-            console.error("Error saving seat assignment: ", error);
+-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+-            Alert.alert("Save Error", "Failed to assign this seat. Please try again.");
+-        } finally {
+-            setIsLoading(false);
++          const userDocSnap = await getDoc(doc(db, "users", currentUser.uid));
++          if (userDocSnap.exists()) {
++            const userData = userDocSnap.data();
++            if (userData.name) primaryName = userData.name;
++            if (userData.icon || userData.photoURL) {
++              primaryIcon = userData.icon ?? userData.photoURL;
++            }
++          }
++        } catch {
++          setLoadWarning(
++            "Cloud profiles are temporarily unavailable. Guest Occupant remains available offline.",
++          );
+         }
+-    };
+ 
+-    const handleUnassign = async () => {
+-        setIsLoading(true);
++        combinedList.push({
++          id: currentUser.uid,
++          name: `${primaryName ?? "Me"} (Me)`,
++          icon: primaryIcon ?? null,
++          isAccountOwner: true,
++        });
++
+         try {
+-            const raw = await AsyncStorage.getItem(SEAT_ASSIGNMENTS_KEY);
+-            const assignments: Record<number, Profile> = raw ? JSON.parse(raw) : {};
+-            delete assignments[seat];
+-            await AsyncStorage.setItem(SEAT_ASSIGNMENTS_KEY, JSON.stringify(assignments));
+-
+-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+-            if (onSuccess) onSuccess(seat, null);
+-            handleResetAndClose();
+-        } catch (error) {
+-            console.error("Error unassigning seat: ", error);
+-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+-            Alert.alert("Error", "Failed to unassign this seat. Please try again.");
+-        } finally {
+-            setIsLoading(false);
++          const snapshot = await getDocs(
++            collection(db, "users", currentUser.uid, "profiles"),
++          );
++          snapshot.docs.forEach((profileDoc) => {
++            const data = profileDoc.data();
++            combinedList.push({
++              id: profileDoc.id,
++              name: data.name ?? "Unnamed Profile",
++              icon: data.icon ?? data.photoURL ?? null,
++              photoURL: data.photoURL ?? null,
++            });
++          });
++        } catch {
++          setLoadWarning(
++            "Cloud profiles are temporarily unavailable. Guest Occupant remains available offline.",
++          );
+         }
++      }
++
++      // If a registered profile is already assigned and cloud lookup is
++      // unavailable, keep that current assignment selectable.
++      if (
++        assignedSeatProfile &&
++        !assignedSeatProfile.isGuest &&
++        !combinedList.some((profile) => profile.id === assignedSeatProfile.id)
++      ) {
++        combinedList.push(assignedSeatProfile);
++      }
++
++      if (cancelled) return;
++      setProfiles(
++        combinedList.filter((profile) => !assignedOtherIds.has(profile.id)),
++      );
++      setIsFetchingProfiles(false);
++    })();
++
++    return () => {
++      cancelled = true;
+     };
+-
+-    return (
+-        <Host matchContents>
+-            <BottomSheet
+-                isPresented={visible}
+-                onDismiss={onClose}
+-                showDragIndicator={false}
+-                snapPoints={["half"]}
++  }, [assignedOtherIds, assignedSeatProfile, visible]);
++
++  const handleResetAndClose = () => {
++    setSelectedProfileId(null);
++    setLoadWarning(null);
++    onClose();
++  };
++
++  const handleSelectProfile = (profileId: string) => {
++    Haptics.selectionAsync();
++    setSelectedProfileId(profileId);
++  };
++
++  const handleSave = async () => {
++    if (!selectedProfileId) {
++      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
++      return;
++    }
++
++    const selectedProfile =
++      selectedProfileId === GUEST_OPTION_ID
++        ? createGuestAssignment(seat)
++        : profiles.find((profile) => profile.id === selectedProfileId);
++
++    if (!selectedProfile) return;
++
++    setIsLoading(true);
++    try {
++      onSuccess?.(seat, selectedProfile);
++      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
++      handleResetAndClose();
++    } finally {
++      setIsLoading(false);
++    }
++  };
++
++  const handleUnassign = async () => {
++    setIsLoading(true);
++    try {
++      onSuccess?.(seat, null);
++      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
++      handleResetAndClose();
++    } finally {
++      setIsLoading(false);
++    }
++  };
++
++  return (
++    <Host matchContents>
++      <BottomSheet
++        isPresented={visible}
++        onDismiss={onClose}
++        showDragIndicator={false}
++        snapPoints={["half"]}
++      >
++        <Column spacing={16} alignment="center">
++          <Row>
++            <Button
++              variant="outlined"
++              onPress={onClose}
++              disabled={isLoading}
++              modifiers={[
++                buttonStyle("glass"),
++                controlSize("large"),
++                buttonBorderShape("circle"),
++              ]}
+             >
+-                <Column spacing={16} alignment="center">
+-                    {/* Header Controls */}
+-                    <Row>
+-                        <Button
+-                            variant="outlined"
+-                            onPress={onClose}
+-                            disabled={isLoading}
+-                            modifiers={[
+-                                buttonStyle("glass"),
+-                                controlSize("large"),
+-                                buttonBorderShape("circle"),
+-                            ]}
+-                        >
+-                            <Icon
+-                                name={Icon.select({
+-                                    ios: "xmark",
+-                                    android: import("@expo/material-symbols/close.xml"),
+-                                })}
+-                            />
+-                        </Button>
+-
+-                        <Spacer flexible />
+-
+-                        <Button
+-                            onPress={handleSave}
+-                            variant="filled"
+-                            modifiers={[
+-                                buttonStyle("borderedProminent"),
+-                                controlSize("large"),
+-                                buttonBorderShape("circle"),
+-                            ]}
+-                            disabled={isLoading || !selectedProfileId}
+-                        >
+-                            <Icon
+-                                name={Icon.select({
+-                                    ios: "checkmark",
+-                                    android: import("@expo/material-symbols/check.xml"),
+-                                })}
+-                            />
+-                        </Button>
++              <Icon
++                name={Icon.select({
++                  ios: "xmark",
++                  android: import("@expo/material-symbols/close.xml"),
++                })}
++              />
++            </Button>
++
++            <Spacer flexible />
++
++            <Button
++              onPress={handleSave}
++              variant="filled"
++              modifiers={[
++                buttonStyle("borderedProminent"),
++                controlSize("large"),
++                buttonBorderShape("circle"),
++              ]}
++              disabled={isLoading || !selectedProfileId}
++            >
++              <Icon
++                name={Icon.select({
++                  ios: "checkmark",
++                  android: import("@expo/material-symbols/check.xml"),
++                })}
++              />
++            </Button>
++          </Row>
++
++          <Spacer />
++
++          <Column spacing={12} alignment="center">
++            {/* @ts-ignore Expo UI textStyle is platform-rendered */}
++            <Text
++              textStyle={{
++                fontSize: 32,
++                color: currentTheme.text,
++                fontWeight: "bold",
++                textAlign: "center",
++              }}
++            >
++              Assign {role}
++            </Text>
++
++            {loadWarning ? (
++              /* @ts-ignore Expo UI textStyle is platform-rendered */
++              <Text
++                textStyle={{
++                  fontSize: 13,
++                  color: currentTheme.textSecondary,
++                  textAlign: "center",
++                }}
++              >
++                {loadWarning}
++              </Text>
++            ) : null}
++
++            <List>
++              <Button
++                onPress={() => handleSelectProfile(GUEST_OPTION_ID)}
++                variant="text"
++              >
++                <Row spacing={12} alignment="center">
++                  {/* @ts-ignore Expo UI textStyle is platform-rendered */}
++                  <Text textStyle={{ fontSize: 18, color: currentTheme.text }}>
++                    Guest / Temporary Occupant
++                  </Text>
++                  <Spacer flexible />
++                  {selectedProfileId === GUEST_OPTION_ID ? (
++                    <Icon
++                      name={Icon.select({
++                        ios: "checkmark",
++                        android: import("@expo/material-symbols/check.xml"),
++                      })}
++                    />
++                  ) : null}
++                </Row>
++              </Button>
++
++              {profiles.map((profile) => {
++                const isSelected = profile.id === selectedProfileId;
++                return (
++                  <Button
++                    key={profile.id}
++                    onPress={() => handleSelectProfile(profile.id)}
++                    variant="text"
++                  >
++                    <Row spacing={12} alignment="center">
++                      {/* @ts-ignore Expo UI textStyle is platform-rendered */}
++                      <Text textStyle={{ fontSize: 18, color: currentTheme.text }}>
++                        {profile.name}
++                      </Text>
++                      <Spacer flexible />
++                      {isSelected ? (
++                        <Icon
++                          name={Icon.select({
++                            ios: "checkmark",
++                            android: import("@expo/material-symbols/check.xml"),
++                          })}
++                        />
++                      ) : null}
+                     </Row>
+-
+-                    <Spacer />
+-
+-                    {/* Content Section */}
+-                    <Column spacing={12} alignment="center">
+-                        {/* @ts-ignore */}
+-                        <Text textStyle={{ fontSize: 32, color: currentTheme.text, fontWeight: "bold", textAlign: "center" }}>
+-                            Assign {role}
+-                        </Text>
+-
+-                        {isFetchingProfiles ? (
+-                            /* @ts-ignore */
+-                            <Text textStyle={{ fontSize: 16, color: currentTheme.textSecondary, textAlign: "center" }}>
+-                                Loading Profiles...
+-                            </Text>
+-                        ) : profiles.length === 0 ? (
+-                            /* @ts-ignore */
+-                            <Text textStyle={{ fontSize: 16, color: currentTheme.textSecondary, textAlign: "center" }}>
+-                                All available profiles have been assigned.
+-                            </Text>
+-                        ) : (
+-                            <List>
+-                                {profiles.map((profile) => {
+-                                    const isSelected = profile.id === selectedProfileId;
+-                                    return (
+-                                        <Button
+-                                            key={profile.id}
+-                                            onPress={() => handleSelectProfile(profile.id)}
+-                                            // @ts-ignore
+-                                            variant={"text"}
+-                                        >
+-                                            <Row spacing={12} alignment="center">
+-                                                {/* @ts-ignore */}
+-                                                <Text textStyle={{ fontSize: 18, color: currentTheme.text }}>
+-                                                    {profile.name}
+-                                                </Text>
+-
+-                                                <Spacer flexible />
+-
+-                                                {isSelected && (
+-                                                    <Icon
+-                                                        name={Icon.select({
+-                                                            ios: "checkmark",
+-                                                            android: import("@expo/material-symbols/check.xml"),
+-                                                        })}
+-                                                    />
+-                                                )}
+-                                            </Row>
+-                                        </Button>
+-                                    );
+-                                })}
+-                            </List>
+-                        )}
+-
+-                        {/* Unassign Button (Shown only when seat is currently assigned) */}
+-                        {isCurrentlyAssigned && !isFetchingProfiles && (
+-                            <Button
+-                                variant="outlined"
+-                                onPress={handleUnassign}
+-                                disabled={isLoading}
+-                                modifiers={[
+-                                    buttonStyle("bordered"),
+-                                    controlSize("regular"),
+-                                ]}
+-                            >
+-                                {/* @ts-ignore */}
+-                                <Text textStyle={{ color: "#FF3B30", fontWeight: "600" }}>
+-                                    Unassign Seat
+-                                </Text>
+-                            </Button>
+-                        )}
+-                    </Column>
+-                    <Spacer flexible />
+-                </Column>
+-            </BottomSheet>
+-        </Host>
+-    );
+-}
+\ No newline at end of file
++                  </Button>
++                );
++              })}
++            </List>
++
++            {isFetchingProfiles ? (
++              /* @ts-ignore Expo UI textStyle is platform-rendered */
++              <Text
++                textStyle={{
++                  fontSize: 13,
++                  color: currentTheme.textSecondary,
++                  textAlign: "center",
++                }}
++              >
++                Loading saved profiles…
++              </Text>
++            ) : null}
++
++            {isCurrentlyAssigned ? (
++              <Button
++                variant="outlined"
++                onPress={handleUnassign}
++                disabled={isLoading}
++                modifiers={[buttonStyle("bordered"), controlSize("regular")]}
++              >
++                {/* @ts-ignore Expo UI textStyle is platform-rendered */}
++                <Text textStyle={{ color: "#FF3B30", fontWeight: "600" }}>
++                  Unassign Seat
++                </Text>
++              </Button>
++            ) : null}
++          </Column>
++          <Spacer flexible />
++        </Column>
++      </BottomSheet>
++    </Host>
++  );
++}
+diff --git a/src/components/emergency-modal.ios.tsx b/src/components/emergency-modal.ios.tsx
+index 232b03d..ee66026 100644
+--- a/src/components/emergency-modal.ios.tsx
++++ b/src/components/emergency-modal.ios.tsx
+@@ -203,31 +203,6 @@ export default function EmergencyModal({
+ 
+                 {/* Emergency Action Buttons */}
+                 <View style={{ flexDirection: "column", gap: 10, width: "100%" }}>
+-                    <Button variant="warn" onPress={() => { }} fullWidth={true}>
+-                        <View style={styles.buttonContent}>
+-                            <View style={styles.iconContainer}>
+-                                <Host matchContents>
+-                                    <Icon
+-                                        name={Icon.select({
+-                                            ios: "light.beacon.max.fill",
+-                                            android: import("@expo/material-symbols/siren.xml"),
+-                                        })}
+-                                        color={currentTheme.primaryBttnText}
+-                                        size={36}
+-                                    />
+-                                </Host>
+-                            </View>
+-                            <Text
+-                                style={[
+-                                    styles.buttonText,
+-                                    { color: currentTheme.primaryBttnText },
+-                                ]}
+-                            >
+-                                Notify Emergency Services
+-                            </Text>
+-                        </View>
+-                    </Button>
+-
+                     <Button
+                         variant="primary"
+                         onPress={handleOpenContactMenu}
+diff --git a/src/components/emergency-modal.tsx b/src/components/emergency-modal.tsx
+index b89cac6..81e5a17 100644
+--- a/src/components/emergency-modal.tsx
++++ b/src/components/emergency-modal.tsx
+@@ -195,26 +195,6 @@ export default function EmergencyModal({
+ 
+                 {/* Emergency Action Buttons */}
+                 <View style={{ flexDirection: "column", gap: 10, width: "100%" }}>
+-                    <Button variant="warn" onPress={() => { }} fullWidth={true}>
+-                        <View style={styles.buttonContent}>
+-                            <View style={styles.iconContainer}>
+-                                <Ionicons
+-                                    name="warning"
+-                                    color={currentTheme.primaryBttnText}
+-                                    size={30}
+-                                />
+-                            </View>
+-                            <Text
+-                                style={[
+-                                    styles.buttonText,
+-                                    { color: currentTheme.primaryBttnText },
+-                                ]}
+-                            >
+-                                Notify Emergency Services
+-                            </Text>
+-                        </View>
+-                    </Button>
+-
+                     <Button
+                         variant="primary"
+                         onPress={handleOpenContactMenu}
+diff --git a/src/components/module-status-card.tsx b/src/components/module-status-card.tsx
+new file mode 100644
+index 0000000..c14557d
+--- /dev/null
++++ b/src/components/module-status-card.tsx
+@@ -0,0 +1,89 @@
++import { Themes } from "@/constants/theme";
++import type { SafeSeatModuleSummary } from "@/types/safeseat-hardware";
++import { StyleSheet, Text, useColorScheme, View } from "react-native";
++
++type Props = {
++  module: SafeSeatModuleSummary;
++  compact?: boolean;
++};
++
++const STATE_LABELS = {
++  operational: "OPERATIONAL",
++  degraded: "DEGRADED SIGNAL",
++  not_detected: "NOT DETECTED",
++} as const;
++
++export default function ModuleStatusCard({ module, compact = false }: Props) {
++  const colorScheme = useColorScheme();
++  const currentTheme = Themes[colorScheme === "dark" ? "dark" : "light"];
++
++  const statusColor =
++    module.state === "operational"
++      ? currentTheme.primaryBttn
++      : module.state === "degraded"
++        ? currentTheme.yellow
++        : currentTheme.warnBttn;
++
++  return (
++    <View style={[styles.card, compact && styles.cardCompact, { backgroundColor: currentTheme.element }]}>
++      <View style={styles.headerRow}>
++        <View style={[styles.dot, { backgroundColor: statusColor }]} />
++        <View style={{ flex: 1 }}>
++          <Text style={[styles.moduleName, { color: currentTheme.text }]}>
++            {module.id} • {module.label}
++          </Text>
++          <Text style={[styles.status, { color: statusColor }]}>
++            {STATE_LABELS[module.state]}
++          </Text>
++        </View>
++      </View>
++      {!compact && (
++        <>
++          <Text style={[styles.detail, { color: currentTheme.textSecondary }]}>{module.detail}</Text>
++          {module.action ? (
++            <Text style={[styles.action, { color: currentTheme.text }]}>{module.action}</Text>
++          ) : null}
++        </>
++      )}
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  card: {
++    borderRadius: 12,
++    padding: 12,
++    gap: 6,
++  },
++  cardCompact: {
++    paddingVertical: 10,
++  },
++  headerRow: {
++    flexDirection: "row",
++    alignItems: "center",
++    gap: 10,
++  },
++  dot: {
++    width: 12,
++    height: 12,
++    borderRadius: 6,
++  },
++  moduleName: {
++    fontFamily: "Body-Bold",
++    fontSize: 15,
++  },
++  status: {
++    fontFamily: "Condensed-Bold",
++    fontSize: 12,
++    marginTop: 1,
++  },
++  detail: {
++    fontSize: 13,
++    lineHeight: 18,
++  },
++  action: {
++    fontFamily: "Body-Medium",
++    fontSize: 12,
++    lineHeight: 17,
++  },
++});
+diff --git a/src/components/safeseat-live-monitor.tsx b/src/components/safeseat-live-monitor.tsx
+new file mode 100644
+index 0000000..d15aa66
+--- /dev/null
++++ b/src/components/safeseat-live-monitor.tsx
+@@ -0,0 +1,71 @@
++import { useSafeSeatHardware } from "@/hooks/use-safeseat-hardware";
++import { useSafeSeatSession } from "@/hooks/use-safeseat-session";
++import { updateSafeSeatSession } from "@/services/safeseat-session-store";
++import { syncHardwareTransitionToActiveTrip } from "@/services/safeseat-trip-sync";
++import { useEffect } from "react";
++
++import { auth } from "@/firebase";
++
++/**
++ * Invisible tab-level monitor.
++ *
++ * It keeps the one shared Main Hub polling loop alive for the duration of a
++ * locked deployment even if the participant switches away from Home. Main Hub
++ * Fusion is copied into local session state; Firestore is best-effort only.
++ */
++export default function SafeSeatLiveMonitor() {
++  const { ready, session } = useSafeSeatSession();
++  const monitoredSeatAssigned = Boolean(session.assignments[session.monitoredSeatNo]);
++  const hardware = useSafeSeatHardware({
++    enabled: ready && session.isLockedIn && monitoredSeatAssigned,
++  });
++
++  useEffect(() => {
++    if (!hardware.isOnline || !hardware.telemetry || !hardware.fusionSeatState) {
++      return;
++    }
++
++    const seatNo = session.monitoredSeatNo;
++    const nextState = hardware.fusionSeatState;
++    const previousState = session.seatStatuses[seatNo];
++
++    if (previousState === nextState) return;
++
++    const occurredAt = new Date().toISOString();
++    updateSafeSeatSession((current) => ({
++      ...current,
++      seatStatuses: {
++        ...current.seatStatuses,
++        [seatNo]: nextState,
++      },
++      emergencyEvents:
++        nextState === "emergency" && previousState !== "emergency"
++          ? [
++              ...current.emergencyEvents,
++              { seatNo, occurredAt, source: "SafeSeat Main Hub" },
++            ]
++          : current.emergencyEvents,
++    }));
++
++    const currentUser = auth.currentUser;
++    if (currentUser) {
++      void syncHardwareTransitionToActiveTrip({
++        uid: currentUser.uid,
++        seatNo,
++        previousSeatState: previousState,
++        seatState: nextState,
++        telemetry: hardware.telemetry,
++      }).catch((error) => {
++        console.warn("SafeSeat cloud transition mirror deferred:", error);
++      });
++    }
++  }, [
++    hardware.fusionSeatState,
++    hardware.isOnline,
++    hardware.telemetry,
++    session.monitoredSeatNo,
++    session.seatStatuses,
++  ]);
++
++  return null;
++}
+diff --git a/src/components/seat-card.tsx b/src/components/seat-card.tsx
+index 3eed086..4808058 100644
+--- a/src/components/seat-card.tsx
++++ b/src/components/seat-card.tsx
+@@ -1,19 +1,38 @@
+ import { Themes } from "@/constants/theme";
+ import { Host, Icon } from "@expo/ui";
+ import {
+-    Pressable,
+-    StyleSheet,
+-    Text,
+-    useColorScheme,
+-    View,
++  Pressable,
++  StyleSheet,
++  Text,
++  useColorScheme,
++  View,
+ } from "react-native";
+ 
++export type SafeSeatCardState =
++  | "safe"
++  | "warning"
++  | "monitoring"
++  | "emergency"
++  | "empty"
++  | "unmonitored"
++  | "unavailable";
++
+ type SeatCardProps = {
+   seatNo: number;
+   name?: string;
+-  state?: "safe" | "warning" | "emergency" | "empty" ;
++  state?: SafeSeatCardState;
+   role?: string;
+-  onPress: () => void;
++  onPress?: () => void;
++};
++
++const LABELS: Record<SafeSeatCardState, string> = {
++  safe: "SAFE",
++  warning: "WARNING",
++  monitoring: "MONITORING",
++  emergency: "EMERGENCY",
++  empty: "EMPTY",
++  unmonitored: "NOT MONITORED",
++  unavailable: "UNAVAILABLE",
+ };
+ 
+ export default function SeatCard({
+@@ -24,183 +43,138 @@ export default function SeatCard({
+   onPress,
+ }: SeatCardProps) {
+   const colorScheme = useColorScheme();
+-  const activeScheme = colorScheme === "dark" ? "dark" : "light";
+-  const currentTheme = Themes[activeScheme];
++  const currentTheme = Themes[colorScheme === "dark" ? "dark" : "light"];
++
++  const statusColor =
++    state === "safe"
++      ? currentTheme.primaryBttn
++      : state === "warning"
++        ? currentTheme.yellow
++        : state === "monitoring"
++          ? currentTheme.secondaryBttn
++          : state === "emergency"
++          ? currentTheme.warnBttn
++          : state === "unavailable"
++            ? currentTheme.warnBttn
++            : currentTheme.textSecondary;
++
++  const iconName =
++    state === "safe"
++      ? Icon.select({
++          ios: "checkmark.circle.fill",
++          android: import("@expo/material-symbols/check.xml"),
++        })
++      : state === "warning"
++        ? Icon.select({
++            ios: "exclamationmark.triangle.fill",
++            android: import("@expo/material-symbols/warning.xml"),
++          })
++        : state === "monitoring"
++          ? null
++          : state === "emergency"
++          ? Icon.select({
++              ios: "light.beacon.max.fill",
++              android: import("@expo/material-symbols/siren.xml"),
++            })
++          : state === "unavailable"
++            ? Icon.select({
++                ios: "wifi.slash",
++                android: import("@expo/material-symbols/wifi_off.xml"),
++              })
++            : null;
+ 
+   return (
+     <Pressable
++      onPress={onPress}
++      disabled={!onPress}
+       style={[
+-        seatcard.baseCard,
+-        state == "empty" && seatcard.emptySeat,
++        styles.baseCard,
++        state === "empty" && styles.emptySeat,
+         { backgroundColor: currentTheme.element },
+       ]}
+     >
+-      <View
+-        style={[
+-          seatcard.seatNoCont,
+-          {
+-            backgroundColor:
+-              state == "safe"
+-                ? currentTheme.primaryBttn
+-                : state == "warning"
+-                  ? currentTheme.yellow
+-                  : state == "emergency"
+-                    ? currentTheme.warnBttn
+-                    : currentTheme.text,
+-          },
+-        ]}
+-      >
+-        <Text style={[seatcard.seatNo, {color: currentTheme.background }]}>{seatNo}</Text>
++      <View style={[styles.seatNoCont, { backgroundColor: statusColor }]}>
++        <Text style={[styles.seatNo, { color: currentTheme.background }]}>
++          {seatNo}
++        </Text>
+       </View>
+-      <View
+-        style={{
+-          paddingVertical: 20,
+-          flex: 1,
+-          borderWidth: 0,
+-          borderColor: "#fff",
+-        }}
+-      >
+-        {role &&
++
++      <View style={styles.mainInfo}>
++        {role ? (
++          <Text style={[styles.role, { color: currentTheme.textSecondary }]}>
++            {role.toUpperCase()}
++          </Text>
++        ) : null}
+         <Text
+-          style={[seatcard.stateName, { color: currentTheme.textSecondary }]}
++          numberOfLines={1}
++          style={[styles.name, { color: currentTheme.text }]}
+         >
+-          {role.toUpperCase()}
+-        </Text>
+-        }
+-        
+-        <Text style={[seatcard.name, { color: currentTheme.text, textTransform: "capitalize" }]}>
+           {name}
+         </Text>
+       </View>
+-      {state == "safe" ? (
+-        <View
+-          style={{
+-            flexDirection: "row",
+-            gap: 4,
+-            alignItems: "center",
+-            justifyContent: "center",
+-            borderWidth: 0,
+-            paddingRight: 16,
+-            borderColor: "#fff",
+-          }}
+-        >
+-          <Host matchContents>
+-            <Icon
+-              name={Icon.select({
+-                ios: "checkmark.circle.fill",
+-                android: import("@expo/material-symbols/check.xml"),
+-              })}
+-              color={currentTheme.primaryBttn}
+-            />
+-          </Host>
+-          <Text
+-            style={[seatcard.stateName, { color: currentTheme.primaryBttn }]}
+-          >
+-            {state.toUpperCase()}
+-          </Text>
+-        </View>
+-      ) : state == "warning" ? (
+-        <View
+-          style={{
+-            flexDirection: "row",
+-            gap: 4,
+-            alignItems: "center",
+-            justifyContent: "center",
+-            borderWidth: 0,
+-            paddingRight: 16,
+-            borderColor: "#fff",
+-          }}
+-        >
+-          <Host matchContents>
+-            <Icon
+-              name={Icon.select({
+-                ios: "exclamationmark.triangle.fill",
+-                android: import("@expo/material-symbols/warning.xml"),
+-              })}
+-              color={currentTheme.yellow}
+-            />
+-          </Host>
+-          <Text style={[seatcard.stateName, { color: currentTheme.yellow }]}>
+-            {state.toUpperCase()}
+-          </Text>
+-        </View>
+-      ) : state == "emergency" ? (
+-        <View
+-          style={{
+-            flexDirection: "row",
+-            gap: 4,
+-            alignItems: "center",
+-            justifyContent: "center",
+-            borderWidth: 0,
+-            paddingRight: 16,
+-            borderColor: "#fff",
+-          }}
+-        >
++
++      <View style={styles.statusContainer}>
++        {iconName ? (
+           <Host matchContents>
+-            <Icon
+-              name={Icon.select({
+-                ios: "light.beacon.max.fill",
+-                android: import("@expo/material-symbols/siren.xml"),
+-              })}
+-              color={currentTheme.warnBttn}
+-            />
++            <Icon name={iconName} color={statusColor} />
+           </Host>
+-          <Text style={[seatcard.stateName, { color: currentTheme.warnBttn }]}>
+-            {state.toUpperCase()}
+-          </Text>
+-        </View>
+-      ) : (
+-        <View
+-          style={[{
+-            flexDirection: "row",
+-            gap: 4,
+-            alignItems: "center",
+-            justifyContent: "center",
+-            borderWidth: 0,
+-            paddingRight: 16,
+-            borderColor: "#fff",
+-          }]}
+-        >
+-          <Text style={[seatcard.stateName, { color: currentTheme.text }]}>
+-            {state.toUpperCase()}
+-          </Text>
+-        </View>
+-      )}
++        ) : null}
++        <Text style={[styles.stateName, { color: statusColor }]}>
++          {LABELS[state]}
++        </Text>
++      </View>
+     </Pressable>
+   );
+ }
+ 
+-const seatcard = StyleSheet.create({
++const styles = StyleSheet.create({
+   baseCard: {
+     width: "100%",
+-    borderWidth: 0,
+-    borderColor: "#fff",
+     flexDirection: "row",
+     gap: 10,
+     borderRadius: 12,
++    alignItems: "center",
+     overflow: "hidden",
++    minHeight: 86,
++  },
++  emptySeat: {
++    opacity: 0.5,
+   },
+   seatNoCont: {
+-    width: "15%",
++    width: 56,
++    alignSelf: "stretch",
+     alignItems: "center",
+     justifyContent: "center",
+   },
+   seatNo: {
+-    fontSize: 48,
++    fontSize: 24,
+     fontFamily: "Logo-Font",
+-    textAlign: "center",
+-    alignItems: "center",
+-    justifyContent: "center",
++  },
++  mainInfo: {
++    paddingVertical: 16,
++    flex: 1,
++  },
++  role: {
++    fontFamily: "Condensed-Bold",
++    fontSize: 12,
++    marginBottom: 2,
+   },
+   name: {
+-    fontSize: 24,
++    fontSize: 17,
+     fontFamily: "Body-Bold",
++    textTransform: "capitalize",
++  },
++  statusContainer: {
++    flexDirection: "row",
++    gap: 5,
++    alignItems: "center",
++    justifyContent: "flex-end",
++    paddingRight: 14,
++    maxWidth: 145,
+   },
+   stateName: {
+-    fontSize: 16,
+     fontFamily: "Condensed-Bold",
+-  },
+-  emptySeat: {
+-    opacity: 0.5,
++    fontSize: 12,
++    textAlign: "right",
+   },
+ });
+diff --git a/src/hooks/use-safeseat-hardware.ts b/src/hooks/use-safeseat-hardware.ts
+new file mode 100644
+index 0000000..f20c919
+--- /dev/null
++++ b/src/hooks/use-safeseat-hardware.ts
+@@ -0,0 +1,179 @@
++import { useEffect, useSyncExternalStore } from "react";
++
++import {
++  fusionStateToSeatState,
++  probeSafeSeatHub,
++} from "@/services/safeseat-hardware";
++import type {
++  SafeSeatHardwareConnectionState,
++  SafeSeatHardwareStatus,
++  SafeSeatHubHealth,
++} from "@/types/safeseat-hardware";
++
++type UseSafeSeatHardwareOptions = {
++  enabled?: boolean;
++};
++
++type HardwareSnapshot = {
++  telemetry: SafeSeatHardwareStatus | null;
++  health: SafeSeatHubHealth | null;
++  connectionState: SafeSeatHardwareConnectionState;
++  lastContactAt: number | null;
++  lastTelemetryAt: number | null;
++  lastAttemptAt: number | null;
++  errorMessage: string | null;
++};
++
++const POLL_DELAY_MS = 1250;
++const STALE_AFTER_MS = 7000;
++
++const listeners = new Set<() => void>();
++let consumerCount = 0;
++let generation = 0;
++let timer: ReturnType<typeof setTimeout> | null = null;
++let pollPromise: Promise<void> | null = null;
++
++let snapshot: HardwareSnapshot = {
++  telemetry: null,
++  health: null,
++  connectionState: "idle",
++  lastContactAt: null,
++  lastTelemetryAt: null,
++  lastAttemptAt: null,
++  errorMessage: null,
++};
++
++function emit(next: Partial<HardwareSnapshot>) {
++  snapshot = { ...snapshot, ...next };
++  listeners.forEach((listener) => listener());
++}
++
++function subscribe(listener: () => void) {
++  listeners.add(listener);
++  return () => listeners.delete(listener);
++}
++
++function getSnapshot() {
++  return snapshot;
++}
++
++async function pollOnce(): Promise<void> {
++  if (pollPromise) return pollPromise;
++
++  emit({ lastAttemptAt: Date.now() });
++
++  pollPromise = (async () => {
++    try {
++      const result = await probeSafeSeatHub();
++      const receivedAt = Date.now();
++
++      if (result.telemetry) {
++        emit({
++          telemetry: result.telemetry,
++          health: result.health,
++          connectionState: "online",
++          lastContactAt: receivedAt,
++          lastTelemetryAt: receivedAt,
++          errorMessage: null,
++        });
++      } else {
++        // Keep the last known-good telemetry for diagnostics/history, but mark
++        // the live connection degraded so UI never presents it as current.
++        emit({
++          health: result.health,
++          connectionState: "degraded",
++          lastContactAt: receivedAt,
++          errorMessage: result.degradedReason,
++        });
++      }
++    } catch (error) {
++      emit({
++        connectionState: "offline",
++        errorMessage:
++          error instanceof Error
++            ? error.message
++            : "SafeSeat Main Hub unavailable. Keep this phone on the SafeSeat Wi-Fi.",
++      });
++    } finally {
++      pollPromise = null;
++    }
++  })();
++
++  return pollPromise;
++}
++
++function scheduleLoop(loopGeneration: number) {
++  if (consumerCount <= 0 || loopGeneration !== generation) return;
++
++  timer = setTimeout(async () => {
++    await pollOnce();
++    scheduleLoop(loopGeneration);
++  }, POLL_DELAY_MS);
++}
++
++function startPolling() {
++  consumerCount += 1;
++
++  if (consumerCount !== 1) {
++    return () => stopPolling();
++  }
++
++  generation += 1;
++  const loopGeneration = generation;
++  emit({ connectionState: "connecting", errorMessage: null });
++
++  void pollOnce().finally(() => scheduleLoop(loopGeneration));
++  return () => stopPolling();
++}
++
++function stopPolling() {
++  consumerCount = Math.max(0, consumerCount - 1);
++  if (consumerCount > 0) return;
++
++  generation += 1;
++  if (timer) {
++    clearTimeout(timer);
++    timer = null;
++  }
++
++  emit({ connectionState: "idle" });
++}
++
++export async function refreshSafeSeatHardware() {
++  await pollOnce();
++}
++
++export function useSafeSeatHardware({ enabled = true }: UseSafeSeatHardwareOptions = {}) {
++  const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
++
++  useEffect(() => {
++    if (!enabled) return;
++    return startPolling();
++  }, [enabled]);
++
++  const now = Date.now();
++  const isReachable =
++    enabled &&
++    (state.connectionState === "online" || state.connectionState === "degraded") &&
++    state.lastContactAt !== null &&
++    now - state.lastContactAt <= STALE_AFTER_MS;
++
++  const isOnline =
++    isReachable &&
++    state.connectionState === "online" &&
++    state.lastTelemetryAt !== null &&
++    now - state.lastTelemetryAt <= STALE_AFTER_MS;
++
++  // Never map stale last-known-good telemetry into a live seat state.
++  const fusionSeatState = isOnline && state.telemetry
++    ? fusionStateToSeatState(state.telemetry.system.fusion_state)
++    : null;
++
++  return {
++    ...state,
++    isReachable,
++    isOnline,
++    fusionSeatState,
++    refresh: refreshSafeSeatHardware,
++  };
++}
+diff --git a/src/hooks/use-safeseat-session.ts b/src/hooks/use-safeseat-session.ts
+new file mode 100644
+index 0000000..6dfaa6e
+--- /dev/null
++++ b/src/hooks/use-safeseat-session.ts
+@@ -0,0 +1,21 @@
++import { useEffect, useSyncExternalStore } from "react";
++
++import {
++  ensureSafeSeatSessionLoaded,
++  getSafeSeatSessionSnapshot,
++  subscribeSafeSeatSession,
++} from "@/services/safeseat-session-store";
++
++export function useSafeSeatSession() {
++  const snapshot = useSyncExternalStore(
++    subscribeSafeSeatSession,
++    getSafeSeatSessionSnapshot,
++    getSafeSeatSessionSnapshot,
++  );
++
++  useEffect(() => {
++    void ensureSafeSeatSessionLoaded();
++  }, []);
++
++  return snapshot;
++}
+diff --git a/src/services/safeseat-hardware.ts b/src/services/safeseat-hardware.ts
+new file mode 100644
+index 0000000..ed92b66
+--- /dev/null
++++ b/src/services/safeseat-hardware.ts
+@@ -0,0 +1,280 @@
++import type {
++  SafeSeatFusionState,
++  SafeSeatHardwareStatus,
++  SafeSeatHubHealth,
++} from "@/types/safeseat-hardware";
++
++const configuredHubUrl = process.env.EXPO_PUBLIC_SAFESEAT_HUB_URL?.trim();
++
++export const SAFESEAT_HUB_BASE_URL = (
++  configuredHubUrl || "http://192.168.4.1"
++).replace(/\/+$/, "");
++
++export const SAFESEAT_HEALTH_URL = `${SAFESEAT_HUB_BASE_URL}/health`;
++export const SAFESEAT_STATUS_URL = `${SAFESEAT_HUB_BASE_URL}/api/v1/status`;
++
++const DEFAULT_TIMEOUT_MS = 4500;
++const HEALTH_FALLBACK_TIMEOUT_MS = 2200;
++const SHARED_PROBE_WINDOW_MS = 350;
++
++export type SafeSeatHardwareErrorCode =
++  | "timeout"
++  | "network"
++  | "http"
++  | "invalid_payload"
++  | "telemetry_not_ready";
++
++export class SafeSeatHardwareError extends Error {
++  readonly code: SafeSeatHardwareErrorCode;
++
++  constructor(code: SafeSeatHardwareErrorCode, message: string) {
++    super(message);
++    this.name = "SafeSeatHardwareError";
++    this.code = code;
++  }
++}
++
++function isHealthPayload(value: unknown): value is SafeSeatHubHealth {
++  if (!value || typeof value !== "object") return false;
++  const payload = value as Partial<SafeSeatHubHealth>;
++  return payload.ok === true && typeof payload.telemetry_ready === "boolean";
++}
++
++function isFusionState(value: unknown): value is SafeSeatFusionState {
++  return (
++    value === "SAFE" ||
++    value === "WATCH" ||
++    value === "WARNING" ||
++    value === "EMERGENCY"
++  );
++}
++
++function isStatusPayload(value: unknown): value is SafeSeatHardwareStatus {
++  if (!value || typeof value !== "object") return false;
++
++  const payload = value as Partial<SafeSeatHardwareStatus>;
++  return (
++    payload.telemetry_ready === true &&
++    typeof payload.schema_version === "string" &&
++    typeof payload.uptime_ms === "number" &&
++    Boolean(payload.system) &&
++    payload.system?.fusion_authoritative === true &&
++    isFusionState(payload.system?.fusion_state) &&
++    Boolean(payload.sensors) &&
++    Boolean(payload.camera)
++  );
++}
++
++function normalizeNetworkError(error: unknown): SafeSeatHardwareError {
++  if (error instanceof SafeSeatHardwareError) return error;
++
++  if (error instanceof Error && error.name === "AbortError") {
++    return new SafeSeatHardwareError(
++      "timeout",
++      "The SafeSeat Main Hub did not answer in time.",
++    );
++  }
++
++  const nativeMessage = error instanceof Error ? error.message : String(error ?? "");
++  const genericNetworkFailure =
++    !nativeMessage ||
++    nativeMessage === "Network request failed" ||
++    nativeMessage === "Failed to fetch" ||
++    nativeMessage.includes("Network request failed") ||
++    nativeMessage.includes("Failed to fetch");
++
++  return new SafeSeatHardwareError(
++    "network",
++    genericNetworkFailure
++      ? "Unable to reach the SafeSeat Main Hub. Keep this phone connected to the SafeSeat Wi-Fi and confirm http://192.168.4.1/health opens in the phone browser."
++      : nativeMessage,
++  );
++}
++
++async function requestJson(url: string, timeoutMs: number): Promise<unknown> {
++  const controller = new AbortController();
++  const timeout = setTimeout(() => controller.abort(), timeoutMs);
++  const separator = url.includes("?") ? "&" : "?";
++  const cacheBustedUrl = `${url}${separator}_=${Date.now()}`;
++
++  try {
++    const response = await fetch(cacheBustedUrl, {
++      method: "GET",
++      headers: {
++        Accept: "application/json",
++        "Cache-Control": "no-cache",
++      },
++      signal: controller.signal,
++    });
++
++    if (!response.ok) {
++      throw new SafeSeatHardwareError(
++        "http",
++        `Main Hub returned HTTP ${response.status}.`,
++      );
++    }
++
++    const body = await response.text();
++    try {
++      return JSON.parse(body);
++    } catch {
++      throw new SafeSeatHardwareError(
++        "invalid_payload",
++        `Main Hub responded, but the payload was not valid JSON (${body.length} bytes).`,
++      );
++    }
++  } catch (error) {
++    throw normalizeNetworkError(error);
++  } finally {
++    clearTimeout(timeout);
++  }
++}
++
++export async function fetchSafeSeatHubHealth(
++  timeoutMs = DEFAULT_TIMEOUT_MS,
++): Promise<SafeSeatHubHealth> {
++  const payload = await requestJson(SAFESEAT_HEALTH_URL, timeoutMs);
++  if (!isHealthPayload(payload)) {
++    throw new SafeSeatHardwareError(
++      "invalid_payload",
++      "Main Hub /health responded, but the payload was not recognized.",
++    );
++  }
++  return payload;
++}
++
++export async function fetchSafeSeatHardwareStatus(
++  timeoutMs = DEFAULT_TIMEOUT_MS,
++): Promise<SafeSeatHardwareStatus> {
++  const payload = await requestJson(SAFESEAT_STATUS_URL, timeoutMs);
++
++  if (
++    payload &&
++    typeof payload === "object" &&
++    (payload as { telemetry_ready?: boolean }).telemetry_ready === false
++  ) {
++    throw new SafeSeatHardwareError(
++      "telemetry_not_ready",
++      "Main Hub is reachable, but telemetry is still initializing.",
++    );
++  }
++
++  if (!isStatusPayload(payload)) {
++    throw new SafeSeatHardwareError(
++      "invalid_payload",
++      "Main Hub status responded, but the telemetry payload was not recognized.",
++    );
++  }
++
++  return payload;
++}
++
++export type SafeSeatHubProbe = {
++  health: SafeSeatHubHealth | null;
++  telemetry: SafeSeatHardwareStatus | null;
++  degradedReason: string | null;
++};
++
++function healthFromTelemetry(telemetry: SafeSeatHardwareStatus): SafeSeatHubHealth {
++  return {
++    ok: true,
++    service: telemetry.device || "SafeSeat Main Hub",
++    api_version: telemetry.schema_version,
++    uptime_ms: telemetry.uptime_ms,
++    telemetry_ready: true,
++    read_only: true,
++  };
++}
++
++async function performSafeSeatHubProbe(
++  timeoutMs = DEFAULT_TIMEOUT_MS,
++): Promise<SafeSeatHubProbe> {
++  // Normal operation deliberately uses ONE request: /api/v1/status.
++  // /health is only a fallback so the ESP32 is not double-polled every cycle.
++  try {
++    const telemetry = await fetchSafeSeatHardwareStatus(timeoutMs);
++    return {
++      health: healthFromTelemetry(telemetry),
++      telemetry,
++      degradedReason: null,
++    };
++  } catch (statusError) {
++    const statusMessage =
++      statusError instanceof Error
++        ? statusError.message
++        : "Live telemetry could not be read.";
++
++    try {
++      const health = await fetchSafeSeatHubHealth(
++        Math.min(timeoutMs, HEALTH_FALLBACK_TIMEOUT_MS),
++      );
++      return {
++        health,
++        telemetry: null,
++        degradedReason:
++          statusError instanceof SafeSeatHardwareError &&
++          statusError.code === "telemetry_not_ready"
++            ? "Hub reachable; telemetry is still initializing."
++            : `Hub reachable; live telemetry is temporarily unavailable. ${statusMessage}`,
++      };
++    } catch (healthError) {
++      const healthMessage =
++        healthError instanceof Error
++          ? healthError.message
++          : "Main Hub health check failed.";
++
++      throw new SafeSeatHardwareError(
++        "network",
++        `SafeSeat Main Hub is unavailable. ${statusMessage} ${healthMessage}`,
++      );
++    }
++  }
++}
++
++let sharedProbePromise: Promise<SafeSeatHubProbe> | null = null;
++let lastSharedProbe: { at: number; result: SafeSeatHubProbe } | null = null;
++
++export async function probeSafeSeatHub(
++  timeoutMs = DEFAULT_TIMEOUT_MS,
++): Promise<SafeSeatHubProbe> {
++  const now = Date.now();
++
++  if (
++    lastSharedProbe &&
++    now - lastSharedProbe.at <= SHARED_PROBE_WINDOW_MS
++  ) {
++    return lastSharedProbe.result;
++  }
++
++  if (sharedProbePromise) return sharedProbePromise;
++
++  sharedProbePromise = performSafeSeatHubProbe(timeoutMs)
++    .then((result) => {
++      lastSharedProbe = { at: Date.now(), result };
++      return result;
++    })
++    .finally(() => {
++      sharedProbePromise = null;
++    });
++
++  return sharedProbePromise;
++}
++
++export function fusionStateToSeatState(
++  fusionState: SafeSeatFusionState,
++): "safe" | "warning" | "emergency" | null {
++  switch (fusionState) {
++    case "EMERGENCY":
++      return "emergency";
++    case "WARNING":
++      return "warning";
++    case "SAFE":
++      return "safe";
++    case "WATCH":
++    default:
++      // WATCH is a conservative fusion/initialization state, not a participant
++      // warning. Keep it distinct so the UI never turns ordinary warm-up into
++      // a false WARNING.
++      return null;
++  }
++}
+diff --git a/src/services/safeseat-module-status.ts b/src/services/safeseat-module-status.ts
+new file mode 100644
+index 0000000..3717c4e
+--- /dev/null
++++ b/src/services/safeseat-module-status.ts
+@@ -0,0 +1,110 @@
++import type {
++  SafeSeatHardwareStatus,
++  SafeSeatModuleState,
++  SafeSeatModuleSummary,
++} from "@/types/safeseat-hardware";
++
++function summary(
++  id: string,
++  label: string,
++  state: SafeSeatModuleState,
++  detail: string,
++  action?: string,
++): SafeSeatModuleSummary {
++  return { id, label, state, detail, action };
++}
++
++export function deriveSafeSeatModuleStatuses(
++  telemetry: SafeSeatHardwareStatus | null,
++  hubReachable = false,
++): SafeSeatModuleSummary[] {
++  if (!telemetry) {
++    const state = hubReachable ? "degraded" : "not_detected";
++    const detail = hubReachable
++      ? "Main Hub reachable; module telemetry is not ready."
++      : "No live telemetry from Main Hub.";
++
++    return [
++      summary("M1", "Headrest", state, detail, "Check C1001/MLX status and Main Hub telemetry."),
++      summary("M2", "Backrest", state, detail, "Check FSR/ADS1115 connections."),
++      summary("M3", "Cushion", state, detail, "Check cushion FSR wiring and calibration."),
++      summary("M4", "Seat Frame", state, detail, "Check MPU6050/I2C connection."),
++      summary("CAM", "Camera", state, detail, "Check ESP32-S3 camera power/link."),
++    ];
++  }
++
++  const { c1001, mlx90614, fsr, mpu6050 } = telemetry.sensors;
++  const camera = telemetry.camera;
++
++  const headrestOperational =
++    c1001.connected && !c1001.stale && mlx90614.connected && mlx90614.valid;
++  const headrestDetected = c1001.connected || mlx90614.connected;
++
++  const fsrOperational = fsr.connected && fsr.calibrated;
++  const mpuOperational = mpu6050.connected && mpu6050.valid;
++  const cameraOperational =
++    camera.connected &&
++    !camera.stale &&
++    camera.camera_ready &&
++    camera.model_ready &&
++    camera.psram_ready;
++  const cameraDetected = camera.connected || camera.transport_connected;
++
++  return [
++    summary(
++      "M1",
++      "Headrest",
++      headrestOperational ? "operational" : headrestDetected ? "degraded" : "not_detected",
++      `C1001 ${c1001.connected && !c1001.stale ? "linked" : c1001.stale ? "stale" : "offline"} • MLX ${mlx90614.connected && mlx90614.valid ? "valid" : mlx90614.connected ? "degraded" : "offline"}`,
++      headrestOperational
++        ? undefined
++        : "Check C1001 node/ESP-NOW and the MLX90614 headrest connection.",
++    ),
++    summary(
++      "M2",
++      "Backrest",
++      fsrOperational ? "operational" : fsr.connected ? "degraded" : "not_detected",
++      fsrOperational
++        ? "Backrest pressure sensing is calibrated and ready."
++        : fsr.connected
++          ? "Backrest pressure sensing is detected but calibration is not ready."
++          : "Backrest pressure sensing is not detected.",
++      fsrOperational ? undefined : "Check ADS1115/FSR wiring and re-run calibration.",
++    ),
++    summary(
++      "M3",
++      "Cushion",
++      fsrOperational ? "operational" : fsr.connected ? "degraded" : "not_detected",
++      fsrOperational
++        ? "Cushion pressure sensing is calibrated and ready."
++        : fsr.connected
++          ? "Cushion pressure sensing is detected but calibration is not ready."
++          : "Cushion pressure sensing is not detected.",
++      fsrOperational ? undefined : "Check cushion FSR wiring and re-run calibration.",
++    ),
++    summary(
++      "M4",
++      "Seat Frame",
++      mpuOperational ? "operational" : mpu6050.connected ? "degraded" : "not_detected",
++      mpuOperational
++        ? "Seat-frame motion sensing is connected and ready."
++        : mpu6050.connected
++          ? "Seat-frame motion sensing is detected but the current signal is degraded."
++          : "Seat-frame motion sensing is not detected.",
++      mpuOperational ? undefined : "Check the M4 seat-frame I2C/clip connection.",
++    ),
++    summary(
++      "CAM",
++      "Camera",
++      cameraOperational ? "operational" : cameraDetected ? "degraded" : "not_detected",
++      cameraOperational
++        ? camera.verification_requested
++          ? "Posture verification is currently active."
++          : "Trigger-only posture verification is ready."
++        : cameraDetected
++          ? "Camera link is detected but the verification module is not fully ready."
++          : "Camera verification module is not detected.",
++      cameraOperational ? undefined : "Check ESP32-S3 camera power, readiness, and wireless link.",
++    ),
++  ];
++}
+diff --git a/src/services/safeseat-session-store.ts b/src/services/safeseat-session-store.ts
+new file mode 100644
+index 0000000..4eac19a
+--- /dev/null
++++ b/src/services/safeseat-session-store.ts
+@@ -0,0 +1,104 @@
++import AsyncStorage from "@react-native-async-storage/async-storage";
++
++import {
++  createEmptySafeSeatSession,
++  normalizeSafeSeatSeatNo,
++  type SafeSeatActiveSession,
++} from "@/types/safeseat-session";
++
++const ACTIVE_SESSION_KEY = "safeseat_active_session_v1";
++
++export type SafeSeatSessionSnapshot = {
++  ready: boolean;
++  session: SafeSeatActiveSession;
++};
++
++const listeners = new Set<() => void>();
++let loadPromise: Promise<void> | null = null;
++let snapshot: SafeSeatSessionSnapshot = {
++  ready: false,
++  session: createEmptySafeSeatSession(),
++};
++
++function normalizeSession(value: unknown): SafeSeatActiveSession {
++  if (!value || typeof value !== "object") return createEmptySafeSeatSession();
++  const raw = value as Partial<SafeSeatActiveSession>;
++
++  return {
++    monitoredSeatNo: normalizeSafeSeatSeatNo(raw.monitoredSeatNo),
++    assignments: raw.assignments && typeof raw.assignments === "object" ? raw.assignments : {},
++    isLockedIn: Boolean(raw.isLockedIn),
++    lockedInAt: typeof raw.lockedInAt === "string" ? raw.lockedInAt : null,
++    seatStatuses:
++      raw.seatStatuses && typeof raw.seatStatuses === "object" ? raw.seatStatuses : {},
++    emergencyEvents: Array.isArray(raw.emergencyEvents) ? raw.emergencyEvents : [],
++  };
++}
++
++function emit(next: SafeSeatSessionSnapshot) {
++  snapshot = next;
++  listeners.forEach((listener) => listener());
++}
++
++async function persist(session: SafeSeatActiveSession) {
++  try {
++    await AsyncStorage.setItem(ACTIVE_SESSION_KEY, JSON.stringify(session));
++  } catch (error) {
++    console.warn("SafeSeat session cache could not be saved:", error);
++  }
++}
++
++export async function ensureSafeSeatSessionLoaded() {
++  if (snapshot.ready) return;
++  if (loadPromise) return loadPromise;
++
++  loadPromise = (async () => {
++    try {
++      const raw = await AsyncStorage.getItem(ACTIVE_SESSION_KEY);
++      const session = raw ? normalizeSession(JSON.parse(raw)) : createEmptySafeSeatSession();
++      emit({ ready: true, session });
++    } catch (error) {
++      console.warn("SafeSeat session cache could not be read; starting clean:", error);
++      emit({ ready: true, session: createEmptySafeSeatSession() });
++    } finally {
++      loadPromise = null;
++    }
++  })();
++
++  return loadPromise;
++}
++
++export function subscribeSafeSeatSession(listener: () => void) {
++  listeners.add(listener);
++  return () => listeners.delete(listener);
++}
++
++export function getSafeSeatSessionSnapshot() {
++  return snapshot;
++}
++
++export function updateSafeSeatSession(
++  updater:
++    | Partial<SafeSeatActiveSession>
++    | ((current: SafeSeatActiveSession) => SafeSeatActiveSession),
++) {
++  const current = snapshot.session;
++  const next =
++    typeof updater === "function"
++      ? updater(current)
++      : { ...current, ...updater };
++
++  emit({ ready: true, session: next });
++  void persist(next);
++  return next;
++}
++
++export async function clearSafeSeatSession() {
++  const next = createEmptySafeSeatSession();
++  emit({ ready: true, session: next });
++  try {
++    await AsyncStorage.removeItem(ACTIVE_SESSION_KEY);
++  } catch (error) {
++    console.warn("SafeSeat session cache could not be cleared:", error);
++  }
++}
+diff --git a/src/services/safeseat-trip-sync.ts b/src/services/safeseat-trip-sync.ts
+new file mode 100644
+index 0000000..7ae28ee
+--- /dev/null
++++ b/src/services/safeseat-trip-sync.ts
+@@ -0,0 +1,126 @@
++import { arrayUnion, doc, writeBatch } from "firebase/firestore";
++
++import { db } from "@/firebase";
++import type { SafeSeatHardwareStatus } from "@/types/safeseat-hardware";
++
++export type PersistedSeatState = "safe" | "warning" | "emergency";
++
++type SyncHardwareTransitionArgs = {
++  uid: string;
++  seatNo: number;
++  previousSeatState?: string;
++  seatState: PersistedSeatState;
++  telemetry: SafeSeatHardwareStatus;
++};
++
++/**
++ * Mirrors only safety state / module availability into Firestore.
++ *
++ * Raw physiological/pressure/motion values remain local to the Main Hub and
++ * the evaluator-only UAT monitor. Firestore is not the live source of truth.
++ *
++ * When Main Hub Fusion confirms a DRIVER emergency and explicitly requests an
++ * alert, an alert-request document is queued for the secured Twilio backend.
++ * Passenger seats never create automatic SMS requests.
++ */
++export async function syncHardwareTransitionToActiveTrip({
++  uid,
++  seatNo,
++  previousSeatState,
++  seatState,
++  telemetry,
++}: SyncHardwareTransitionArgs) {
++  const tripDocRef = doc(db, "users", uid, "activeTrip", "current");
++  const enteredEmergency =
++    seatState === "emergency" && previousSeatState !== "emergency";
++  const shouldQueueDriverSms =
++    seatNo === 1 && enteredEmergency && telemetry.system.alert_requested;
++  const occurredAt = new Date().toISOString();
++
++  const batch = writeBatch(db);
++
++  batch.set(
++    tripDocRef,
++    {
++      seatStatuses: {
++        [String(seatNo)]: seatState,
++      },
++      hardware: {
++        seatNo,
++        source: "main_hub_local_api",
++        appReceivedAt: occurredAt,
++        hubUptimeMs: telemetry.uptime_ms,
++        schemaVersion: telemetry.schema_version,
++        fusionState: telemetry.system.fusion_state,
++        fusionValid: telemetry.system.fusion_valid,
++        fusionConfidence: telemetry.system.confidence,
++        occupancy: telemetry.system.occupancy,
++        emergencyActive: telemetry.system.emergency_active,
++        cameraVerificationRequested:
++          telemetry.system.camera_verification_requested,
++        alertRequested: telemetry.system.alert_requested,
++        modules: {
++          c1001: {
++            connected: telemetry.sensors.c1001.connected,
++            stale: telemetry.sensors.c1001.stale,
++            trustedVitals: telemetry.sensors.c1001.trusted_vitals,
++          },
++          mlx90614: {
++            connected: telemetry.sensors.mlx90614.connected,
++            valid: telemetry.sensors.mlx90614.valid,
++          },
++          fsr: {
++            connected: telemetry.sensors.fsr.connected,
++            calibrated: telemetry.sensors.fsr.calibrated,
++            occupied: telemetry.sensors.fsr.occupied,
++          },
++          mpu6050: {
++            connected: telemetry.sensors.mpu6050.connected,
++            valid: telemetry.sensors.mpu6050.valid,
++          },
++          camera: {
++            connected: telemetry.camera.connected,
++            ready: telemetry.camera.camera_ready,
++            busy: telemetry.camera.busy,
++            resultValid: telemetry.camera.result_valid,
++          },
++        },
++      },
++      ...(enteredEmergency
++        ? {
++            emergencyEvents: arrayUnion({
++              seatNo,
++              occurredAt,
++              source: "SafeSeat Main Hub",
++            }),
++          }
++        : {}),
++    },
++    { merge: true },
++  );
++
++  if (shouldQueueDriverSms) {
++    // Hub timestamp is monotonic for this boot and the write is only generated
++    // on an actual transition into EMERGENCY, giving us a deterministic ID and
++    // preventing the 1 Hz polling loop from producing duplicate SMS jobs.
++    const alertId = `driver-${telemetry.timestamp_ms}`;
++    const alertRef = doc(db, "users", uid, "alertRequests", alertId);
++
++    batch.set(alertRef, {
++      kind: "driver_confirmed_emergency",
++      seatNo: 1,
++      monitoredSeatNo: seatNo,
++      prototypeMode: "single_seat_uat",
++      source: "safeseat_main_hub",
++      status: "pending",
++      occurredAt,
++      fusionState: telemetry.system.fusion_state,
++      fusionConfidence: telemetry.system.confidence,
++      cameraVerificationRequested:
++        telemetry.system.camera_verification_requested,
++      createdByApp: true,
++    });
++  }
++
++  await batch.commit();
++}
+diff --git a/src/types/safeseat-hardware.ts b/src/types/safeseat-hardware.ts
+new file mode 100644
+index 0000000..7532693
+--- /dev/null
++++ b/src/types/safeseat-hardware.ts
+@@ -0,0 +1,170 @@
++export type SafeSeatFusionState = "SAFE" | "WATCH" | "WARNING" | "EMERGENCY";
++
++export type SafeSeatModelEvidence = {
++  available: boolean;
++  valid: boolean;
++  isolation_forest_anomaly?: boolean;
++  one_class_svm_anomaly?: boolean;
++  both_models_anomaly?: boolean;
++  either_model_anomaly?: boolean;
++  isolation_forest_score?: number | null;
++  one_class_svm_score?: number | null;
++  confidence?: number | null;
++};
++
++export type SafeSeatHubHealth = {
++  ok: boolean;
++  service?: string;
++  api_version?: string;
++  uptime_ms?: number;
++  telemetry_ready: boolean;
++  read_only?: boolean;
++};
++
++export type SafeSeatHardwareStatus = {
++  schema_version: string;
++  device: string;
++  telemetry_ready: boolean;
++  timestamp_ms: number;
++  uptime_ms: number;
++  system: {
++    fusion_authoritative: boolean;
++    fusion_valid: boolean;
++    fusion_state: SafeSeatFusionState;
++    confidence: number | null;
++    emergency_active: boolean;
++    camera_verification_requested: boolean;
++    alert_requested: boolean;
++    occupancy: string;
++    motion_context: string;
++    vitals_state: string;
++    pressure_state: string;
++    temperature_state: string;
++    respiration_state: string;
++    evidence: {
++      valid_sensor_count: number;
++      unavailable_sensor_count: number;
++      anomaly_evidence_count: number;
++      strong_anomaly_evidence_count: number;
++      normal_evidence_count: number;
++      supporting_context_count: number;
++      motion_artifact_possible: boolean;
++      multi_sensor_agreement: boolean;
++    };
++  };
++  network: {
++    ap_running: boolean;
++    ssid: string;
++    ip: string;
++    channel: number;
++    connected_clients: number;
++    local_only: boolean;
++    internet_required: boolean;
++    esp_now_enabled: boolean;
++  };
++  sensors: {
++    c1001: {
++      health: string;
++      connected: boolean;
++      stale: boolean;
++      packet_age_ms: number;
++      packets_received: number;
++      present: boolean;
++      status: string;
++      trusted_vitals: boolean;
++      heart_rate_bpm: number | null;
++      respiration_rate_bpm: number | null;
++      motion: number;
++      move_range: number;
++      motion_artifact_active: boolean;
++      model: SafeSeatModelEvidence;
++    };
++    mlx90614: {
++      health: string;
++      connected: boolean;
++      valid: boolean;
++      object_temperature_c: number | null;
++      sensor_ta_c: number | null;
++      object_minus_ta_c: number | null;
++      context: {
++        available: boolean;
++        thermal_target_qualified: boolean;
++        target_contrast_degraded: boolean;
++        low_contrast_samples: number;
++        target_losses: number;
++        baseline_ready: boolean;
++        context_change: boolean;
++        baseline_object_c: number | null;
++        deviation_from_baseline_c: number | null;
++      };
++      native_mlx_model: SafeSeatModelEvidence;
++      native_mlx_model_fusion_role: string;
++    };
++    fsr: {
++      health: string;
++      connected: boolean;
++      calibrated: boolean;
++      occupied: boolean;
++      back_contact: boolean;
++      sampling_rate_hz: number | null;
++      backrest_total: number | null;
++      cushion_total: number | null;
++      whole_seat_total: number | null;
++      pressure: Array<number | null>;
++      pressure_share: Array<number | null>;
++      model: SafeSeatModelEvidence;
++    };
++    mpu6050: {
++      health: string;
++      connected: boolean;
++      valid: boolean;
++      sampling_rate_hz: number | null;
++      accel_magnitude_g: number | null;
++      gyro_magnitude_dps: number | null;
++      dynamic_acceleration_g: number | null;
++      road_motion_model: SafeSeatModelEvidence;
++      model_interpretation: string;
++      fusion_role: string;
++    };
++  };
++  camera: {
++    available: boolean;
++    connected: boolean;
++    transport_connected: boolean;
++    stale: boolean;
++    camera_ready: boolean;
++    model_ready: boolean;
++    psram_ready: boolean;
++    busy: boolean;
++    packet_age_ms: number;
++    status_packets_received: number;
++    result_packets_received: number;
++    verification_requested: boolean;
++    request_active: boolean;
++    active_request_id: number;
++    result_valid: boolean;
++    result_request_id: number;
++    posture: string;
++    posture_normal: boolean;
++    posture_abnormal: boolean;
++    confidence: number | null;
++    verification_only: boolean;
++  };
++};
++
++export type SafeSeatHardwareConnectionState =
++  | "idle"
++  | "connecting"
++  | "online"
++  | "degraded"
++  | "offline";
++
++export type SafeSeatModuleState = "operational" | "degraded" | "not_detected";
++
++export type SafeSeatModuleSummary = {
++  id: string;
++  label: string;
++  state: SafeSeatModuleState;
++  detail: string;
++  action?: string;
++};
+diff --git a/src/types/safeseat-session.ts b/src/types/safeseat-session.ts
+new file mode 100644
+index 0000000..ec36d78
+--- /dev/null
++++ b/src/types/safeseat-session.ts
+@@ -0,0 +1,75 @@
++export type SafeSeatSeatNo = 1 | 2 | 3 | 4 | 5;
++export type SafeSeatPersistedSeatState = "safe" | "warning" | "emergency";
++
++export type SafeSeatAssignment = {
++  id: string;
++  name: string;
++  photoURL?: string | null;
++  icon?: string | null;
++  isAccountOwner?: boolean;
++  isGuest?: boolean;
++  sessionOnly?: boolean;
++};
++
++export type SafeSeatEmergencyEvent = {
++  seatNo: SafeSeatSeatNo;
++  occurredAt: string;
++  source?: string;
++};
++
++export type SafeSeatActiveSession = {
++  monitoredSeatNo: SafeSeatSeatNo;
++  assignments: Record<number, SafeSeatAssignment>;
++  isLockedIn: boolean;
++  lockedInAt: string | null;
++  seatStatuses: Record<number, SafeSeatPersistedSeatState>;
++  emergencyEvents: SafeSeatEmergencyEvent[];
++};
++
++export const SAFESEAT_SEATS: Array<{
++  seatNo: SafeSeatSeatNo;
++  seatCode: string;
++  label: string;
++}> = [
++  { seatNo: 1, seatCode: "driver", label: "Driver" },
++  { seatNo: 2, seatCode: "passenger", label: "Front Passenger" },
++  { seatNo: 3, seatCode: "l backseat", label: "Rear Left" },
++  { seatNo: 4, seatCode: "c backseat", label: "Rear Center" },
++  { seatNo: 5, seatCode: "r backseat", label: "Rear Right" },
++];
++
++export const DEFAULT_MONITORED_SEAT_NO: SafeSeatSeatNo = 1;
++
++export function createEmptySafeSeatSession(): SafeSeatActiveSession {
++  return {
++    monitoredSeatNo: DEFAULT_MONITORED_SEAT_NO,
++    assignments: {},
++    isLockedIn: false,
++    lockedInAt: null,
++    seatStatuses: {},
++    emergencyEvents: [],
++  };
++}
++
++export function normalizeSafeSeatSeatNo(value: unknown): SafeSeatSeatNo {
++  const parsed = Number(value);
++  return parsed >= 1 && parsed <= 5
++    ? (parsed as SafeSeatSeatNo)
++    : DEFAULT_MONITORED_SEAT_NO;
++}
++
++export function getSafeSeatLabel(seatNo: number): string {
++  return SAFESEAT_SEATS.find((seat) => seat.seatNo === seatNo)?.label ?? `Seat ${seatNo}`;
++}
++
++export function createGuestAssignment(seatNo: SafeSeatSeatNo): SafeSeatAssignment {
++  return {
++    id: `guest-${seatNo}-${Date.now()}`,
++    name: "Guest Occupant",
++    photoURL: null,
++    icon: null,
++    isAccountOwner: false,
++    isGuest: true,
++    sessionOnly: true,
++  };
++}

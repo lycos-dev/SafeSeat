@@ -84,6 +84,20 @@ void SafeSeatAccessPoint::update()
         return;
     }
 
+    // Stability patch: these Wi-Fi driver queries are diagnostics only.
+    // The main loop can execute hundreds/thousands of times per second;
+    // calling into the Wi-Fi driver on every pass can starve Core-0 Wi-Fi/IDLE
+    // tasks when SoftAP + ESP-NOW are active together. One refresh per second
+    // is more than enough for telemetry and does not affect networking.
+    static unsigned long lastStatusRefreshMillis = 0;
+    const unsigned long now = millis();
+    if (lastStatusRefreshMillis != 0
+        && now - lastStatusRefreshMillis < 1000UL)
+    {
+        return;
+    }
+    lastStatusRefreshMillis = now;
+
     const wifi_mode_t mode = WiFi.getMode();
     status.running =
         mode == WIFI_AP

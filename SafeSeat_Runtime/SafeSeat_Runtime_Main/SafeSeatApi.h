@@ -12,10 +12,12 @@
 //
 // Canonical endpoints:
 //   GET /api/v1/status
+//   GET /api/v1/fusion
 //   GET /api/v1/sensors
 //   GET /api/v1/camera
 //   GET /api/v1/network
 //   GET /health
+//   GET /uat  (UAT evaluator browser monitor)
 //
 // Short aliases are retained for development convenience:
 //   /status, /sensors, /camera, /network
@@ -23,7 +25,7 @@
 // IMPORTANT:
 // - This API exposes Main/Fusion state only.
 // - It does not make emergency decisions.
-// - It cannot trigger/cancel the camera or alerts.
+// - It cannot trigger/cancel camera verification or alerts.
 // - No Firebase/backend technology is assumed here.
 // ============================================================
 
@@ -52,7 +54,9 @@ private:
 
     void handleRoot();
     void handleHealth();
+    void handleUat();
     void handleStatus();
+    void handleFusion();
     void handleSensors();
     void handleCamera();
     void handleNetwork();
@@ -65,6 +69,7 @@ private:
 
     String buildHealthJson() const;
     String buildStatusJson() const;
+    String buildFusionJson() const;
     String buildSensorsJson() const;
     String buildCameraJson() const;
     String buildNetworkJson() const;

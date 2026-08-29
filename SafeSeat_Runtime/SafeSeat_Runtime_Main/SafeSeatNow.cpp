@@ -76,6 +76,7 @@ bool SafeSeatNow::begin()
     status.initialized = true;
     status.channel = WiFi.channel();
     lastBeaconMillis = 0;
+    lastChannelRefreshMillis = millis();
     pendingC1001Ready = false;
     pendingCameraStatusReady = false;
     pendingCameraResultReady = false;
@@ -107,9 +108,17 @@ void SafeSeatNow::update()
         return;
     }
 
-    status.channel = WiFi.channel();
-
     const unsigned long now = millis();
+
+    // Stability patch: channel does not need to be queried on every main-loop
+    // pass. The SafeSeat SoftAP is the channel authority and is fixed to the
+    // configured channel. Refresh only once per second for diagnostics.
+    if (now - lastChannelRefreshMillis >= 1000UL)
+    {
+        lastChannelRefreshMillis = now;
+        status.channel = WiFi.channel();
+    }
+
     if (now - lastBeaconMillis >= SAFESEAT_ESPNOW_HUB_BEACON_INTERVAL_MS)
     {
         lastBeaconMillis = now;
@@ -120,7 +129,11 @@ void SafeSeatNow::update()
 void SafeSeatNow::sendHubBeacon()
 {
     SafeSeatHubBeacon beacon;
-    beacon.channel = WiFi.channel();
+    // Use the cached channel rather than synchronously querying the Wi-Fi
+    // driver four times per second in addition to the main-loop polling.
+    beacon.channel = status.channel != 0
+        ? status.channel
+        : SAFESEAT_ESPNOW_DEFAULT_CHANNEL;
     beacon.checksum = 0;
     beacon.checksum = safeSeatHubBeaconChecksum(beacon);
 

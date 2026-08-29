@@ -270,6 +270,17 @@ private:
     static constexpr uint8_t OCCUPANCY_REARM_FRAMES = 6;
     static constexpr uint8_t OCCUPANCY_REARM_MAX_ACTIVE = 1;
 
+    // Strong re-entry override after a confirmed exit. Residual foam/FSR
+    // pressure in the observed dry-run remained around 25k-38k with only
+    // 1-3 active channels, while a real seated re-entry immediately rose
+    // well above 60k with 4+ active channels. This override prevents the
+    // anti-rebound guard from trapping occupancy at NO after a passenger
+    // sits again before all residual channels fully relax.
+    static constexpr float OCCUPANCY_REENTRY_TOTAL = 60000.0f;
+    static constexpr uint8_t OCCUPANCY_REENTRY_ACTIVE_MIN = 4;
+    static constexpr uint8_t OCCUPANCY_REENTRY_FRAMES = 3;
+    uint8_t occupancyStrongReentryStreak = 0;
+
     bool i2cProbe(uint8_t address);
     bool initADS1();
     bool initADS2();
