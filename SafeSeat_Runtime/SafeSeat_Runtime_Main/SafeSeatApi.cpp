@@ -6,6 +6,11 @@
 #include "CameraProtocol.h"
 #include "SafeSeatUatPage.h"
 
+// Implemented in SafeSeat_Runtime_Main.ino. These two narrow bridge
+// functions expose only the validated controlled-WARNING UAT stimulus.
+extern bool safeSeatSetUatControlledWarning(bool enabled);
+extern const char* safeSeatGetUatStimulusText();
+
 namespace
 {
 constexpr char API_SCHEMA_VERSION[] = "1.0.0";
@@ -33,7 +38,7 @@ bool SafeSeatApi::begin(
     server.begin();
     running = true;
 
-    Serial.println("[API] SafeSeat local read-only API started.");
+    Serial.println("[API] SafeSeat local telemetry API started.");
     Serial.println("[API] Base URL : http://192.168.4.1");
     Serial.println("[API] Status   : /api/v1/status");
     Serial.println("[API] Fusion   : /api/v1/fusion");
@@ -42,6 +47,7 @@ bool SafeSeatApi::begin(
     Serial.println("[API] Network  : /api/v1/network");
     Serial.println("[API] Health   : /health");
     Serial.println("[API] UAT View : /uat");
+    Serial.println("[API] UAT Ctrl : controlled WARNING only (researcher /uat)");
 
     return true;
 }
@@ -61,6 +67,12 @@ void SafeSeatApi::registerRoutes()
     server.on("/", HTTP_GET, [this]() { handleRoot(); });
     server.on("/health", HTTP_GET, [this]() { handleHealth(); });
     server.on("/uat", HTTP_GET, [this]() { handleUat(); });
+
+    // Researcher-only UAT control surface. POST is used for state changes
+    // so simply opening/crawling a URL can never activate a test stimulus.
+    server.on("/api/v1/uat/stimulus", HTTP_GET, [this]() { handleUatStimulusStatus(); });
+    server.on("/api/v1/uat/simulate-warning", HTTP_POST, [this]() { handleUatSimulateWarning(); });
+    server.on("/api/v1/uat/clear-simulation", HTTP_POST, [this]() { handleUatClearSimulation(); });
 
     server.on("/api/v1/status", HTTP_GET, [this]() { handleStatus(); });
     server.on("/api/v1/fusion", HTTP_GET, [this]() { handleFusion(); });
@@ -95,7 +107,7 @@ a{display:block;margin:8px 0}
 </head>
 <body>
 <h1>SafeSeat Main Hub</h1>
-<p>Local read-only telemetry API is running.</p>
+<p>Local telemetry API is running.</p>
 <p>The Main Hub Fusion state is authoritative; these endpoints only expose current state.</p>
 <a href="/api/v1/status">/api/v1/status</a>
 <a href="/api/v1/fusion">/api/v1/fusion</a>
@@ -103,6 +115,7 @@ a{display:block;margin:8px 0}
 <a href="/api/v1/camera">/api/v1/camera</a>
 <a href="/api/v1/network">/api/v1/network</a>
 <a href="/health">/health</a>
+<a href="/uat">/uat — researcher evaluator</a>
 </body>
 </html>
 )rawliteral";
@@ -120,6 +133,55 @@ void SafeSeatApi::handleUat()
 {
     server.sendHeader("Cache-Control", "no-store");
     server.send_P(200, "text/html", SAFESEAT_UAT_PAGE);
+}
+
+void SafeSeatApi::handleUatStimulusStatus()
+{
+    String out;
+    out.reserve(220);
+    out += F("{\"ok\":true,\"mode\":");
+    appendJsonString(out, safeSeatGetUatStimulusText());
+    out += F(",\"controlled_warning_active\":");
+    appendJsonBool(out, strcmp(safeSeatGetUatStimulusText(), "CONTROLLED_WARNING") == 0);
+    out += F(",\"fusion_authoritative\":true,\"emergency_web_injection\":false}");
+    sendJson(200, out);
+}
+
+void SafeSeatApi::handleUatSimulateWarning()
+{
+    // Standardized participant UAT should only inject a Warning while an
+    // occupant is actually present. This prevents accidental empty-seat
+    // activation and makes each participant run easier to interpret.
+    if (telemetry == nullptr || !telemetry->getSnapshot().ready)
+    {
+        sendJson(503, F("{\"ok\":false,\"error\":\"telemetry_not_ready\"}"));
+        return;
+    }
+
+    if (telemetry->getSnapshot().fusion.occupancy != FusionOccupancyState::OCCUPIED)
+    {
+        sendJson(409, F("{\"ok\":false,\"error\":\"occupant_required\",\"hint\":\"Lock monitoring with the participant seated before simulating Warning.\"}"));
+        return;
+    }
+
+    const bool ok = safeSeatSetUatControlledWarning(true);
+    sendJson(
+        ok ? 200 : 500,
+        ok
+            ? F("{\"ok\":true,\"mode\":\"CONTROLLED_WARNING\",\"note\":\"One strong FSR model vote injected; Fusion remains authoritative.\"}")
+            : F("{\"ok\":false,\"error\":\"stimulus_enable_failed\"}")
+    );
+}
+
+void SafeSeatApi::handleUatClearSimulation()
+{
+    const bool ok = safeSeatSetUatControlledWarning(false);
+    sendJson(
+        ok ? 200 : 500,
+        ok
+            ? F("{\"ok\":true,\"mode\":\"OFF\",\"note\":\"Injected evidence removed; Fusion recovers according to production hysteresis.\"}")
+            : F("{\"ok\":false,\"error\":\"stimulus_clear_failed\"}")
+    );
 }
 
 void SafeSeatApi::handleStatus()

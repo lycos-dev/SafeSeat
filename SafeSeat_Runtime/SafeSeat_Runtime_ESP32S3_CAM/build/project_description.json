@@ -1,7 +1,7 @@
 {
     "version":            "1.2",
     "project_name":       "safeseat_camera_pose_anomaly",
-    "project_version":    "d03ea01-dirty",
+    "project_version":    "e4994e1-dirty",
     "project_path":       "C:/Users/Lycos Blanza/Downloads/SAFESEAT/SafeSeat_Runtime/SafeSeat_Runtime_ESP32S3_CAM",
     "idf_path":           "C:/esp/v5.5.5/esp-idf",
     "build_dir":          "C:/Users/Lycos Blanza/Downloads/SAFESEAT/SafeSeat_Runtime/SafeSeat_Runtime_ESP32S3_CAM/build",

@@ -74,6 +74,189 @@ unsigned long lastDetailPrintTime = 0;
 
 
 // ============================================================
+// CONTROLLED UAT / ENGINEERING TEST STIMULUS
+//
+// Purpose:
+// - Give the researcher a standardized WARNING stimulus during UAT
+//   without keeping the Main Hub tethered to a laptop.
+// - Preserve the original Serial engineering commands for regression
+//   troubleshooting if needed later.
+//
+// IMPORTANT SAFETY / INTERPRETATION:
+// - This does NOT change trained models, thresholds, acquisition paths,
+//   Fusion rules, camera rules, or participant-app state directly.
+// - The UAT web control exposes ONLY the one-strong-vote WARNING stimulus.
+// - No EMERGENCY web injection is provided.
+// - The stimulus overrides ModelEvidence immediately before
+//   FusionEngine::update(); Fusion remains authoritative.
+//
+// Serial commands retained for engineering use:
+//   SYS02_ON    -> one strong FSR anomaly vote (WARNING stimulus)
+//   SYS03_ON    -> two strong votes, FSR + C1001 (engineering only)
+//   TEST_OFF    -> remove all injected evidence
+//   TEST_STATUS -> print current test state
+// ============================================================
+
+enum class EngineeringTestMode
+{
+    NONE,
+    SYS02_ONE_STRONG,
+    SYS03_TWO_STRONG
+};
+
+EngineeringTestMode engineeringTestMode = EngineeringTestMode::NONE;
+char engineeringCommandBuffer[32] = {0};
+uint8_t engineeringCommandLength = 0;
+
+const char* engineeringTestModeText()
+{
+    switch (engineeringTestMode)
+    {
+        case EngineeringTestMode::SYS02_ONE_STRONG:
+            return "SYS02_ONE_STRONG";
+        case EngineeringTestMode::SYS03_TWO_STRONG:
+            return "SYS03_TWO_STRONG";
+        default:
+            return "OFF";
+    }
+}
+
+const char* safeSeatGetUatStimulusText()
+{
+    switch (engineeringTestMode)
+    {
+        case EngineeringTestMode::SYS02_ONE_STRONG:
+            return "CONTROLLED_WARNING";
+        case EngineeringTestMode::SYS03_TWO_STRONG:
+            return "ENGINEERING_SYS03";
+        default:
+            return "OFF";
+    }
+}
+
+void printEngineeringTestStatus()
+{
+    Serial.print("[ENG-TEST] mode=");
+    Serial.println(engineeringTestModeText());
+}
+
+bool safeSeatSetUatControlledWarning(bool enabled)
+{
+    engineeringTestMode = enabled
+        ? EngineeringTestMode::SYS02_ONE_STRONG
+        : EngineeringTestMode::NONE;
+
+    if (enabled)
+    {
+        Serial.println("[UAT-STIMULUS] CONTROLLED WARNING enabled from /uat.");
+        Serial.println("[UAT-STIMULUS] One strong FSR model vote is injected; Fusion remains authoritative.");
+    }
+    else
+    {
+        Serial.println("[UAT-STIMULUS] Controlled stimulus cleared from /uat.");
+        Serial.println("[UAT-STIMULUS] Fusion will recover naturally according to production hysteresis.");
+    }
+
+    printEngineeringTestStatus();
+    return true;
+}
+
+void processEngineeringCommand(const char* command)
+{
+    if (strcmp(command, "SYS02_ON") == 0)
+    {
+        engineeringTestMode = EngineeringTestMode::SYS02_ONE_STRONG;
+        Serial.println("[ENG-TEST] SYS02_ON: injecting ONE strong FSR model anomaly vote.");
+        Serial.println("[ENG-TEST] Expected after persistence: FUS=WARNING, camera NOT requested.");
+    }
+    else if (strcmp(command, "SYS03_ON") == 0)
+    {
+        engineeringTestMode = EngineeringTestMode::SYS03_TWO_STRONG;
+        Serial.println("[ENG-TEST] SYS03_ON: injecting TWO strong votes (FSR + C1001).");
+        Serial.println("[ENG-TEST] Expected after persistence: FUS=WARNING + production camera verification request.");
+    }
+    else if (strcmp(command, "TEST_OFF") == 0)
+    {
+        engineeringTestMode = EngineeringTestMode::NONE;
+        Serial.println("[ENG-TEST] TEST_OFF: injected evidence removed.");
+        Serial.println("[ENG-TEST] Expected after clean hysteresis: return toward SAFE when live evidence is normal.");
+    }
+    else if (strcmp(command, "TEST_STATUS") == 0)
+    {
+        printEngineeringTestStatus();
+    }
+    else if (command[0] != '\0')
+    {
+        Serial.print("[ENG-TEST] Unknown command: ");
+        Serial.println(command);
+        Serial.println("[ENG-TEST] Valid: SYS02_ON | SYS03_ON | TEST_OFF | TEST_STATUS");
+    }
+}
+
+void handleEngineeringTestSerial()
+{
+    while (Serial.available() > 0)
+    {
+        const char c = (char)Serial.read();
+
+        if (c == '\r' || c == '\n')
+        {
+            if (engineeringCommandLength > 0)
+            {
+                engineeringCommandBuffer[engineeringCommandLength] = '\0';
+                processEngineeringCommand(engineeringCommandBuffer);
+                engineeringCommandLength = 0;
+                engineeringCommandBuffer[0] = '\0';
+            }
+            continue;
+        }
+
+        if (engineeringCommandLength < sizeof(engineeringCommandBuffer) - 1)
+        {
+            engineeringCommandBuffer[engineeringCommandLength++] = c;
+        }
+    }
+}
+
+void forceStrongModelAnomaly(ModelEvidence &model)
+{
+    model.available = true;
+    model.valid = true;
+    model.isolationForestAnomaly = true;
+    model.oneClassSVMAnomaly = true;
+    model.bothModelsAnomaly = true;
+    model.eitherModelAnomaly = true;
+    model.isolationForestScore = -1.0f;
+    model.oneClassSVMScore = -1.0f;
+    model.confidence = 1.0f;
+}
+
+void applyEngineeringTestInjection(FusionInput &fusionInput)
+{
+    if (engineeringTestMode == EngineeringTestMode::NONE)
+    {
+        return;
+    }
+
+    // One independent strong anomaly. Production Fusion persistence,
+    // hysteresis, and state transitions still perform all timing.
+    forceStrongModelAnomaly(fusionInput.fsr.model);
+
+    if (engineeringTestMode == EngineeringTestMode::SYS03_TWO_STRONG)
+    {
+        // Engineering regression path only. This mode is intentionally
+        // NOT exposed by the /uat web interface.
+        fusionInput.c1001.health = FusionSensorHealth::VALID;
+        fusionInput.c1001.reading.connected = true;
+        fusionInput.c1001.reading.present = true;
+        fusionInput.c1001.reading.trustedVitalsAvailable = true;
+        fusionInput.c1001.reading.motionArtifactActive = false;
+        forceStrongModelAnomaly(fusionInput.c1001.model);
+    }
+}
+
+
+// ============================================================
 // HELPERS
 // ============================================================
 
@@ -561,6 +744,8 @@ void setup()
 
 void loop()
 {
+    handleEngineeringTestSerial();
+
     // Cooperative yield keeps Wi-Fi/ESP-NOW/system tasks responsive without
     // subscribing loopTask to a panic/reboot watchdog.
     delay(1);
@@ -950,6 +1135,10 @@ void loop()
     {
         mpu.update();
     }
+    // Explicit controlled UAT / engineering evidence injection.
+    // Production sensor acquisition and Fusion logic remain unchanged.
+    applyEngineeringTestInjection(fusionInput);
+
     fusion.update(
         fusionInput
     );

@@ -6,7 +6,7 @@
 #include "SafeSeatTelemetry.h"
 
 // ============================================================
-// SAFESEAT LOCAL READ-ONLY API - STEP 5.9.8
+// SAFESEAT LOCAL TELEMETRY API + RESEARCHER UAT CONTROL
 //
 // Main Hub address: http://192.168.4.1
 //
@@ -17,15 +17,20 @@
 //   GET /api/v1/camera
 //   GET /api/v1/network
 //   GET /health
-//   GET /uat  (UAT evaluator browser monitor)
+//   GET /uat  (UAT evaluator browser monitor + controlled Warning stimulus)
+//   GET  /api/v1/uat/stimulus
+//   POST /api/v1/uat/simulate-warning
+//   POST /api/v1/uat/clear-simulation
 //
 // Short aliases are retained for development convenience:
 //   /status, /sensors, /camera, /network
 //
 // IMPORTANT:
-// - This API exposes Main/Fusion state only.
-// - It does not make emergency decisions.
-// - It cannot trigger/cancel camera verification or alerts.
+// - Telemetry endpoints expose Main/Fusion state only.
+// - Fusion remains authoritative; the API never writes a Fusion result directly.
+// - /uat exposes one researcher-only CONTROLLED WARNING stimulus for UAT.
+// - The UAT stimulus injects the already validated SYS02 one-strong-vote path.
+// - No web endpoint can inject EMERGENCY or directly trigger/cancel camera/alerts.
 // - No Firebase/backend technology is assumed here.
 // ============================================================
 
@@ -55,6 +60,9 @@ private:
     void handleRoot();
     void handleHealth();
     void handleUat();
+    void handleUatStimulusStatus();
+    void handleUatSimulateWarning();
+    void handleUatClearSimulation();
     void handleStatus();
     void handleFusion();
     void handleSensors();

@@ -58,7 +58,12 @@ constexpr uint8_t SAFESEAT_CHANNEL = 6;
 constexpr uint8_t BROADCAST_MAC[6] = {0xff,0xff,0xff,0xff,0xff,0xff};
 
 constexpr int CALIBRATION_SAMPLES = 5;
-constexpr int BURST_FRAMES = 3;
+constexpr int VERIFY_BURST_FRAMES = 3;
+// Calibration still requires five independent full pose inferences. These extra
+// cheap capture candidates reduce the chance that a transient blur/stale frame
+// wastes one ~27-28 s inference attempt.
+constexpr int CALIBRATION_BURST_FRAMES = 5;
+constexpr int CALIBRATION_FINAL_BURST_FRAMES = 7;
 constexpr int VERIFY_MAX_ATTEMPTS = 3;
 constexpr float MIN_BURST_SHARPNESS = 300.0f;
 constexpr float CALIBRATION_MIN_PERSON_SCORE = 0.35f;
@@ -402,9 +407,12 @@ esp_err_t init_camera()
     c.pixel_format = PIXFORMAT_JPEG;
     c.frame_size = FRAMESIZE_QVGA;
     c.jpeg_quality = 12;
-    c.fb_count = 1;
+    // Keep two JPEG buffers in PSRAM and always take the newest available
+    // frame. This changes acquisition scheduling only; model/quality gates stay
+    // identical to V5.3.2.
+    c.fb_count = 2;
     c.fb_location = CAMERA_FB_IN_PSRAM;
-    c.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+    c.grab_mode = CAMERA_GRAB_LATEST;
     esp_err_t e = esp_camera_init(&c);
     if (e != ESP_OK) ESP_LOGE(TAG, "esp_camera_init failed: 0x%x", e);
     return e;
@@ -510,7 +518,8 @@ void status_task(void *)
 
 PoseObservation run_pose_once(COCOPose *pose, const float *baseline_for_fallback = nullptr,
                              const SafeSeatOccupantAnchor *tracked_anchor = nullptr,
-                             bool calibration_mode = false)
+                             bool calibration_mode = false,
+                             int burst_frames = VERIFY_BURST_FRAMES)
 {
     PoseObservation obs;
     set_busy(true);
@@ -528,7 +537,7 @@ PoseObservation run_pose_once(COCOPose *pose, const float *baseline_for_fallback
     }
     esp_camera_fb_return(fb);
 
-    for (int i = 1; i < BURST_FRAMES; ++i) {
+    for (int i = 1; i < burst_frames; ++i) {
         fb = esp_camera_fb_get(); if (!fb) continue;
         dl::image::jpeg_img_t candidate_jpg{.data = static_cast<void *>(fb->buf), .data_len = fb->len};
         auto candidate = dl::image::sw_decode_jpeg(candidate_jpg, dl::image::DL_IMAGE_PIX_TYPE_RGB888);
@@ -633,7 +642,19 @@ void calibration_step(COCOPose *pose)
     }
     if (!should_calibrate || expected_session == 0) return;
 
-    PoseObservation obs = run_pose_once(pose, nullptr, nullptr, true);
+    uint8_t accepted_before = 0;
+    if (xSemaphoreTake(g_state_mutex, portMAX_DELAY) == pdTRUE) {
+        accepted_before = g_state.calibration_count;
+        xSemaphoreGive(g_state_mutex);
+    }
+    const int burst_frames = accepted_before >= (CALIBRATION_SAMPLES - 1)
+        ? CALIBRATION_FINAL_BURST_FRAMES
+        : CALIBRATION_BURST_FRAMES;
+
+    ESP_LOGI(TAG, "CAL session=%lu: attempt from %u/5; selecting sharpest of %d fresh frame(s) before full pose inference.",
+             (unsigned long)expected_session, accepted_before, burst_frames);
+
+    PoseObservation obs = run_pose_once(pose, nullptr, nullptr, true, burst_frames);
 
     // A RESET/CALIBRATE command can arrive during the ~28 s inference. Do not
     // let the old observation leak into a different passenger session.
@@ -645,11 +666,15 @@ void calibration_step(COCOPose *pose)
     if (!should_calibrate) return;
 
     if (!obs.sharp_enough) {
-        ESP_LOGW(TAG, "CAL session=%lu: blur rejected (sharp=%.1f).", (unsigned long)expected_session, obs.sharpness);
+        ESP_LOGW(TAG, "CAL session=%lu: blur rejected (sharp=%.1f decoded=%d elapsed=%lums); immediate retry, thresholds unchanged.",
+                 (unsigned long)expected_session, obs.sharpness, obs.burst_decoded, (unsigned long)obs.inference_ms);
         return;
     }
     if (!obs.pose_valid || obs.person_score < CALIBRATION_MIN_PERSON_SCORE) {
-        ESP_LOGW(TAG, "CAL session=%lu: waiting for valid nose+shoulders pose (score=%.3f).", (unsigned long)expected_session, obs.person_score);
+        ESP_LOGW(TAG, "CAL session=%lu: valid-pose gate rejected attempt (score=%.3f selected=%s ambiguous=%s bg_rejected=%d elapsed=%lums); immediate retry.",
+                 (unsigned long)expected_session, obs.person_score,
+                 obs.occupant_selected ? "YES" : "NO", obs.selection_ambiguous ? "YES" : "NO",
+                 obs.background_rejected, (unsigned long)obs.inference_ms);
         return;
     }
 
@@ -660,9 +685,11 @@ void calibration_step(COCOPose *pose)
         xSemaphoreGive(g_state_mutex);
     }
     if (update == CalibrationUpdate::DROPPED_OUTLIER)
-        ESP_LOGW(TAG, "CAL session=%lu: unstable sample dropped; %u/5 accepted.", (unsigned long)expected_session, count);
+        ESP_LOGW(TAG, "CAL session=%lu: unstable sample dropped by original z/RMS gates; %u/5 accepted (elapsed=%lums).",
+                 (unsigned long)expected_session, count, (unsigned long)obs.inference_ms);
     else
-        ESP_LOGI(TAG, "CAL session=%lu: %u/5 valid upright poses.", (unsigned long)expected_session, count);
+        ESP_LOGI(TAG, "CAL session=%lu: %u/5 valid upright poses (sharp=%.1f score=%.3f elapsed=%lums).",
+                 (unsigned long)expected_session, count, obs.sharpness, obs.person_score, (unsigned long)obs.inference_ms);
 }
 
 void verify_request(COCOPose *pose, const CameraCommandPacket &command)
@@ -703,7 +730,7 @@ void verify_request(COCOPose *pose, const CameraCommandPacket &command)
              (unsigned long)command.requestId, (unsigned long)command.sessionId);
 
     for (int attempt = 0; attempt < VERIFY_MAX_ATTEMPTS; ++attempt) {
-        PoseObservation obs = run_pose_once(pose, baseline, &anchor, false);
+        PoseObservation obs = run_pose_once(pose, baseline, &anchor, false, VERIFY_BURST_FRAMES);
         cumulative_ms += obs.inference_ms;
 
         RuntimeState current;
@@ -855,8 +882,8 @@ void handle_command(COCOPose *pose, const CameraCommandPacket &command)
 extern "C" void app_main(void)
 {
     ESP_LOGI(TAG, "====================================================");
-    ESP_LOGI(TAG, "SafeSeat ESP32-S3 Camera V5.3.2 - ESP-NOW VERIFICATION-SAFE Integrated");
-    ESP_LOGI(TAG, "V4.3.2 camera contract: occupant lock + forward fallback + temporal filter + UNKNOWN never clears");
+    ESP_LOGI(TAG, "SafeSeat ESP32-S3 Camera V5.3.3 - CALIBRATION-ACQUISITION OPTIMIZED");
+    ESP_LOGI(TAG, "V5.3.2 safety contract preserved: 5/5 baseline + original gates + occupant lock + UNKNOWN never clears");
     ESP_LOGI(TAG, "====================================================");
 
     g_state_mutex = xSemaphoreCreateMutex();
@@ -911,7 +938,7 @@ extern "C" void app_main(void)
             xSemaphoreGive(g_state_mutex);
         }
         if (calibrating) {
-            calibration_step(pose); // one ~28 s sample, then return to command queue
+            calibration_step(pose); // five full pose samples still required; only capture preselection is optimized
             continue;
         }
 

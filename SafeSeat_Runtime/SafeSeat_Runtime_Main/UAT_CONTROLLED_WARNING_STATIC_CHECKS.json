@@ -1,0 +1,34 @@
+{
+  "package": "SafeSeat Main Hub UAT controlled Warning",
+  "date": "2026-08-30",
+  "changed_files": [
+    "SafeSeatApi.cpp",
+    "SafeSeatApi.h",
+    "SafeSeatUatPage.h",
+    "SafeSeat_Runtime_Main.ino",
+    "UAT_CONTROLLED_WARNING_README.txt"
+  ],
+  "critical_runtime_files_unchanged": {
+    "Fusion.cpp": true,
+    "Fusion.h": true,
+    "FSRML.cpp": true,
+    "FSRML.h": true,
+    "MLXML.cpp": true,
+    "MLXML.h": true,
+    "CameraComm.cpp": true,
+    "CameraComm.h": true,
+    "SafeSeatAccessPoint.cpp": true,
+    "SafeSeatNow.cpp": true,
+    "SafeSeatNow.h": true
+  },
+  "web_emergency_injection_present": false,
+  "uat_warning_post_endpoint": "/api/v1/uat/simulate-warning",
+  "uat_clear_post_endpoint": "/api/v1/uat/clear-simulation",
+  "uat_status_get_endpoint": "/api/v1/uat/stimulus",
+  "occupant_required_for_warning": true,
+  "participant_app_state_directly_forced": false,
+  "fusion_authoritative": true,
+  "uat_csv_contains_stimulus_state": true,
+  "javascript_syntax_check": "PASS (node --check)",
+  "full_arduino_compile": "NOT RUN in this environment (Arduino toolchain unavailable)"
+}
