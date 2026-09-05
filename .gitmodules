@@ -4,3 +4,6 @@
 [submodule "safeseat-app"]
 	path = safeseat-app
 	url = https://github.com/ollymt/safeseat-app.git
+[submodule "safeseat-admin"]
+	path = safeseat-admin
+	url = https://github.com/lycos-dev/safeseat-admin.git
