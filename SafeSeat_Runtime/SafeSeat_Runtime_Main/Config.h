@@ -96,6 +96,17 @@ constexpr unsigned long MAIN_LIVE_INTERVAL_MS = 1000UL;
 constexpr unsigned long MAIN_DETAIL_INTERVAL_MS = 5000UL;
 constexpr bool MAIN_VERBOSE_DASHBOARD_ENABLED = false;
 
+// ============================================================
+// MAIN-LOOP FREEZE RECOVERY
+//
+// The supervisor starts only AFTER blocking startup calibration completes.
+// If loop() stops reporting progress for this long, a controlled software
+// restart is issued. FSR empty-seat calibration is retained in RTC memory
+// specifically for that recovery restart.
+// ============================================================
+
+constexpr unsigned long MAIN_FREEZE_RECOVERY_TIMEOUT_MS = 12000UL;
+
 
 // ============================================================
 // DEBUG

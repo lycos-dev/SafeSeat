@@ -318,8 +318,15 @@ void FusionEngine::update(
     }
 
 
-    if (
+    // Electrical sensor health and usable passenger target are different.
+    // A healthy MLX whose intended skin target is obstructed must not count
+    // as a valid Fusion modality until the Main Hub reacquires that target.
+    const bool mlxFusionUsable =
         mlxUsable
+        && !input.mlx.contributionSuspended;
+
+    if (
+        mlxFusionUsable
     )
     {
         reading.evidence.validSensorCount++;
@@ -895,7 +902,7 @@ void FusionEngine::update(
         input.mlx.context.reacquiring;
 
     const bool mlxModelReady =
-        mlxUsable
+        mlxFusionUsable
         && input.mlx.context.baselineReady
         && hasModelEvidence(input.mlx.model);
 
@@ -919,11 +926,6 @@ void FusionEngine::update(
     {
         reading.temperature = FusionTemperatureState::UNKNOWN;
     }
-    else if (!isfinite(input.mlx.reading.filteredAmbientC)
-        || !isfinite(input.mlx.reading.filteredObjectC))
-    {
-        reading.temperature = FusionTemperatureState::INVALID;
-    }
     else if (
         reading.occupancy
         !=
@@ -931,6 +933,18 @@ void FusionEngine::update(
     )
     {
         reading.temperature = FusionTemperatureState::NO_THERMAL_TARGET;
+    }
+    else if (input.mlx.contributionSuspended)
+    {
+        // Hair/clothing/posture/FOV obstruction is not temperature evidence.
+        // Keep the channel visible diagnostically, but exclude it from all
+        // normal/anomaly voting until stable target reacquisition completes.
+        reading.temperature = FusionTemperatureState::TARGET_DEGRADED;
+    }
+    else if (!isfinite(input.mlx.reading.filteredAmbientC)
+        || !isfinite(input.mlx.reading.filteredObjectC))
+    {
+        reading.temperature = FusionTemperatureState::INVALID;
     }
     else if (mlxGeometryDegraded)
     {
@@ -977,6 +991,7 @@ void FusionEngine::update(
     // only and never becomes a second independent anomaly vote.
     if (
         mlxContextChanged
+        && !input.mlx.contributionSuspended
         && !mlxGeometryDegraded
         && !mlxStrongAnomaly
         && !mlxWeakAnomaly

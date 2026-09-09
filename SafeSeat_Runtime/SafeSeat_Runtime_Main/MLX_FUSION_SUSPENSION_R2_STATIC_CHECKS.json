@@ -1,0 +1,10 @@
+{
+  "version": "5.9.9-R2",
+  "mlx_target_fields_in_fusion_contract": true,
+  "fusion_excludes_suspended_mlx_from_valid_sensor_count": true,
+  "fusion_temperature_marks_suspended_target_degraded": true,
+  "main_reacquire_interval_3000ms": true,
+  "main_preserves_baseline_by_not_feeding_suspended_samples": true,
+  "api_exposes_suspension_state": true,
+  "auto_recovery_still_present": true
+}

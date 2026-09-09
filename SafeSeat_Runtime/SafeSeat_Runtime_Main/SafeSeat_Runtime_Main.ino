@@ -18,6 +18,7 @@
 #include "NetworkConfig.h"
 #include "SafeSeatTelemetry.h"
 #include "SafeSeatApi.h"
+#include "SafeSeatRecovery.h"
 
 
 // ============================================================
@@ -74,6 +75,23 @@ unsigned long lastDetailPrintTime = 0;
 
 
 // ============================================================
+// MLX TARGET / FUSION SUSPENSION GATE
+//
+// A connected MLX90614 is not automatically trustworthy evidence. Hair,
+// clothing, posture, or another object can block the intended skin target.
+// During that condition we preserve any completed MLX session baseline but
+// temporarily remove MLX from Fusion. Once the intended target becomes
+// usable again, require a short continuous stable reacquisition period before
+// MLX is allowed to vote again.
+// ============================================================
+
+static constexpr unsigned long MLX_FUSION_REACQUIRE_MS = 3000UL;
+bool mlxFusionContributionSuspended = false;
+bool mlxTargetReacquiring = false;
+unsigned long mlxTargetVisibleSinceMillis = 0UL;
+
+
+// ============================================================
 // CONTROLLED UAT / ENGINEERING TEST STIMULUS
 //
 // Purpose:
@@ -94,7 +112,9 @@ unsigned long lastDetailPrintTime = 0;
 //   SYS02_ON    -> one strong FSR anomaly vote (WARNING stimulus)
 //   SYS03_ON    -> two strong votes, FSR + C1001 (engineering only)
 //   TEST_OFF    -> remove all injected evidence
-//   TEST_STATUS -> print current test state
+//   TEST_STATUS   -> print current test state
+//   RECOVERY_TEST -> intentionally stall loop() long enough to verify
+//                    supervisor reboot + FSR baseline retention
 // ============================================================
 
 enum class EngineeringTestMode
@@ -185,11 +205,18 @@ void processEngineeringCommand(const char* command)
     {
         printEngineeringTestStatus();
     }
+    else if (strcmp(command, "RECOVERY_TEST") == 0)
+    {
+        Serial.println("[RECOVERY-TEST] Intentionally pausing loop() past the freeze timeout.");
+        Serial.println("[RECOVERY-TEST] Expected: supervisor software restart, then FSR baseline restore without recalibration.");
+        delay(MAIN_FREEZE_RECOVERY_TIMEOUT_MS + 5000UL);
+        Serial.println("[RECOVERY-TEST] ERROR: supervisor did not restart the Main Hub.");
+    }
     else if (command[0] != '\0')
     {
         Serial.print("[ENG-TEST] Unknown command: ");
         Serial.println(command);
-        Serial.println("[ENG-TEST] Valid: SYS02_ON | SYS03_ON | TEST_OFF | TEST_STATUS");
+        Serial.println("[ENG-TEST] Valid: SYS02_ON | SYS03_ON | TEST_OFF | TEST_STATUS | RECOVERY_TEST");
     }
 }
 
@@ -422,14 +449,24 @@ void setup()
     );
 
     Serial.println(
-        " Step 5.9.9 - V4 camera ESP-NOW passenger-session integration"
+        " Step 5.9.9-R2 - MLX obstruction-aware Fusion suspension"
     );
 
     Serial.println(
         "=========================================="
     );
     Serial.println("[SERIAL] Runtime baud: 460800. Upload Speed is independent.");
-    Serial.println("[SAFETY] Application watchdog reboot is DISABLED.");
+    Serial.print("[BOOT] Reset reason: ");
+    Serial.print(safeSeatResetReasonText());
+    Serial.print(" (code ");
+    Serial.print(safeSeatResetReasonCode());
+    Serial.println(")");
+    Serial.print("[RECOVERY] Previous supervisor restart: ");
+    Serial.println(safeSeatRecoveryWasSupervisorRestart() ? "YES" : "NO");
+    Serial.println("[SAFETY] Main-loop freeze supervisor will start after sensor initialization.");
+    Serial.println("[SAFETY] FSR empty-seat baseline is retained only for supervisor recovery restart.");
+    Serial.println("[MLX-GATE] Obstructed/unusable MLX target suspends only MLX Fusion contribution.");
+    Serial.println("[MLX-GATE] Completed MLX baseline is preserved; 3 s stable target reacquisition resumes it.");
     Serial.println("[SAFETY] Giant periodic dashboard is DISABLED; compact telemetry is used.");
 // ========================================================
     // ONE SHARED I2C BUS
@@ -734,6 +771,18 @@ void setup()
     }
 
     printInitializationSummary();
+
+    const bool supervisorReady =
+        safeSeatSupervisorStart(
+            MAIN_FREEZE_RECOVERY_TIMEOUT_MS
+        );
+
+    Serial.print("[SAFETY] Main-loop freeze recovery: ");
+    Serial.print(supervisorReady ? "ENABLED" : "FAILED");
+    Serial.print(" timeout=");
+    Serial.print(MAIN_FREEZE_RECOVERY_TIMEOUT_MS);
+    Serial.println(" ms");
+
     Serial.println("[LIVE] 1-second ML/status heartbeat enabled (C1001 + Camera included).");
 }
 
@@ -744,10 +793,15 @@ void setup()
 
 void loop()
 {
+    // Independent supervisor heartbeat. If this stops advancing for the
+    // configured timeout, the core-0 supervisor performs a controlled restart.
+    safeSeatSupervisorHeartbeat();
+
     handleEngineeringTestSerial();
 
-    // Cooperative yield keeps Wi-Fi/ESP-NOW/system tasks responsive without
-    // subscribing loopTask to a panic/reboot watchdog.
+    // Cooperative yield keeps Wi-Fi/ESP-NOW/system tasks responsive. The
+    // recovery supervisor is separate from Arduino loopTask's panic watchdog,
+    // avoiding the earlier false reboot caused by giant debug Serial output.
     delay(1);
 
     if (safeSeatAccessPointInitialized)
@@ -895,6 +949,76 @@ void loop()
         &&
         f.backrestTotal >= 1500.0f;
 
+    const unsigned long mlxGateNow = millis();
+
+    // --------------------------------------------------------
+    // MLX FUSION SUSPENSION / REACQUISITION
+    // --------------------------------------------------------
+    // Do not guess the physical cause (hair, clothing, posture, etc.).
+    // We only know whether the intended target is currently usable.
+    //
+    // Loss of target while occupied immediately suspends MLX as Fusion
+    // evidence. Any completed native-MLX session baseline is left untouched.
+    // When the target returns, it must remain continuously usable for 3 s
+    // before MLX is permitted to contribute to Fusion again.
+    if (!thermalOccupancy)
+    {
+        mlxFusionContributionSuspended = false;
+        mlxTargetReacquiring = false;
+        mlxTargetVisibleSinceMillis = 0UL;
+    }
+    else if (!mlxTargetVisible)
+    {
+        if (!mlxFusionContributionSuspended)
+        {
+            Serial.println();
+            Serial.println(
+                "[MLX-GATE] Intended target unavailable/obstructed -> MLX Fusion contribution SUSPENDED."
+            );
+        }
+
+        mlxFusionContributionSuspended = true;
+        mlxTargetReacquiring = false;
+        mlxTargetVisibleSinceMillis = 0UL;
+    }
+    else if (mlxFusionContributionSuspended)
+    {
+        if (mlxTargetVisibleSinceMillis == 0UL)
+        {
+            mlxTargetVisibleSinceMillis = mlxGateNow;
+            mlxTargetReacquiring = true;
+
+            Serial.println();
+            Serial.println(
+                "[MLX-GATE] Target visible again -> requiring 3 s stable reacquisition before Fusion resume."
+            );
+        }
+        else if (
+            mlxGateNow - mlxTargetVisibleSinceMillis
+            >=
+            MLX_FUSION_REACQUIRE_MS
+        )
+        {
+            mlxFusionContributionSuspended = false;
+            mlxTargetReacquiring = false;
+            mlxTargetVisibleSinceMillis = 0UL;
+
+            Serial.println();
+            Serial.println(
+                "[MLX-GATE] Stable target reacquired -> MLX Fusion contribution RESUMED."
+            );
+        }
+        else
+        {
+            mlxTargetReacquiring = true;
+        }
+    }
+    else
+    {
+        mlxTargetReacquiring = false;
+        mlxTargetVisibleSinceMillis = 0UL;
+    }
+
     // Read current ML state BEFORE deciding whether to advance it.
     const MLXMLReading &tmlBefore =
         mlxML.getReading();
@@ -907,7 +1031,10 @@ void loop()
             false
         );
     }
-    else if (mlxTargetVisible)
+    else if (
+        mlxTargetVisible
+        && !mlxFusionContributionSuspended
+    )
     {
         // Valid nape/headrest target: normal MLX acquisition/inference.
         mlxML.update(
@@ -926,9 +1053,9 @@ void loop()
     }
     else
     {
-        // Baseline already exists but target left the FOV (e.g. lean forward).
-        // Deliberately DO NOT feed background samples into MLXML and do not
-        // destroy the established baseline. Fusion is gated below.
+        // Baseline already exists but target left the FOV, or is currently in
+        // the 3-s stable reacquisition window. Deliberately DO NOT feed those
+        // samples into MLXML and do not destroy the established baseline.
     }
 
     const MLXMLReading &tml =
@@ -939,6 +1066,7 @@ void loop()
         t,
         tml,
         mlxTargetVisible
+        && !mlxFusionContributionSuspended
     );
 
     if (mpuInitialized)
@@ -994,6 +1122,17 @@ void loop()
     fusionInput.mlx.reading =
         t;
 
+    fusionInput.mlx.targetVisible =
+        mlxTargetVisible;
+
+    fusionInput.mlx.contributionSuspended =
+        thermalOccupancy
+        && mlxFusionContributionSuspended;
+
+    fusionInput.mlx.reacquiringTarget =
+        thermalOccupancy
+        && mlxTargetReacquiring;
+
     fusionInput.mlx.context =
         tx;
 
@@ -1006,8 +1145,8 @@ void loop()
 
     fusionInput.mlx.model.valid =
         tml.valid
-        &&
-        mlxTargetVisible;
+        && mlxTargetVisible
+        && !mlxFusionContributionSuspended;
 
     fusionInput.mlx.model.isolationForestAnomaly =
         tml.isolationForestAnomaly;
@@ -1030,8 +1169,8 @@ void loop()
     fusionInput.mlx.model.confidence =
         (
             tml.valid
-            &&
-            mlxTargetVisible
+            && mlxTargetVisible
+            && !mlxFusionContributionSuspended
         )
             ? 1.0f
             : 0.0f;
@@ -1222,15 +1361,22 @@ void loop()
         Serial.print(f.occupancyExitStreak);
         Serial.print("/6");
         Serial.print(" MLX=");
-        Serial.print(
-            mlxTargetVisible
-                ? "TARGET"
-                : (
-                    thermalOccupancy
-                        ? "HELD"
-                        : "IDLE"
-                )
-        );
+        if (!thermalOccupancy)
+        {
+            Serial.print("IDLE");
+        }
+        else if (mlxTargetReacquiring)
+        {
+            Serial.print("REACQ");
+        }
+        else if (mlxFusionContributionSuspended)
+        {
+            Serial.print("OCCLUDED");
+        }
+        else
+        {
+            Serial.print("TARGET");
+        }
         Serial.print(" base=");
         Serial.print(tml.baselineBlocksCollected);
         Serial.print("/30");
@@ -1292,6 +1438,10 @@ void loop()
         if (!thermalOccupancy)
         {
             Serial.print("IDLE");
+        }
+        else if (mlxTargetReacquiring)
+        {
+            Serial.print("REACQ-HOLD");
         }
         else if (!mlxTargetVisible)
         {
@@ -1791,6 +1941,16 @@ void loop()
 
     Serial.print("  Session gate : ");
     Serial.println(tml.seatOccupied ? "OCCUPIED / QUALIFIED" : "WAITING FOR OCCUPANT");
+
+    Serial.print("  Fusion gate  : ");
+    if (!thermalOccupancy)
+        Serial.println("IDLE - NO OCCUPIED SESSION");
+    else if (mlxTargetReacquiring)
+        Serial.println("SUSPENDED - TARGET REACQUIRING");
+    else if (mlxFusionContributionSuspended)
+        Serial.println("SUSPENDED - TARGET UNAVAILABLE / OBSTRUCTED");
+    else
+        Serial.println("ACTIVE");
 
     Serial.print("  Contrast ctx : ");
     Serial.println(tml.targetContrastDegraded ? "LOW (INFO ONLY)" : "HIGH");

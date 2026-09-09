@@ -2,6 +2,8 @@
 
 #include <math.h>
 
+#include "SafeSeatRecovery.h"
+
 // ============================================================
 // SAFESEAT FSR ARRAY - IMPLEMENTATION
 // ============================================================
@@ -83,6 +85,17 @@ bool FSRSensor::begin()
 {
     setStatus(FSRStatus::UNINITIALIZED);
 
+    // Read RTC-retained calibration before hardware initialization. The
+    // recovery marker is consumed immediately so a later manual reset cannot
+    // accidentally reuse an old passenger-session calibration.
+    pendingRetainedBaselineValid =
+        safeSeatRecoveryLoadFsrBaseline(
+            pendingRetainedBaseline,
+            FSR_COUNT
+        );
+
+    safeSeatRecoveryClearRestartRequest();
+
     Serial.println();
     Serial.println("[FSR] Initializing validated 9-channel array...");
 
@@ -134,10 +147,37 @@ bool FSRSensor::begin()
         return true;
     }
 
-    setStatus(FSRStatus::CALIBRATING);
+    if (pendingRetainedBaselineValid)
+    {
+        Serial.println();
+        Serial.println(
+            "[FSR-RECOVERY] Supervisor restart detected; restoring retained empty-seat baseline."
+        );
 
-    baselineReady = calibrateEmptySeat();
-    reading.baselineValid = baselineReady;
+        baselineReady = applyPendingRetainedBaseline();
+        reading.baselineValid = baselineReady;
+
+        if (baselineReady)
+        {
+            Serial.println(
+                "[FSR-RECOVERY] Baseline restored. Empty-seat recalibration skipped for this recovery boot."
+            );
+        }
+        else
+        {
+            Serial.println(
+                "[FSR-RECOVERY] Retained baseline was invalid; falling back to normal empty-seat calibration."
+            );
+        }
+    }
+
+    if (!baselineReady)
+    {
+        setStatus(FSRStatus::CALIBRATING);
+
+        baselineReady = calibrateEmptySeat();
+        reading.baselineValid = baselineReady;
+    }
 
     if (!baselineReady)
     {
@@ -341,6 +381,7 @@ bool FSRSensor::calibrateEmptySeat()
         return false;
     }
 
+    checkpointEmptyBaselineForRecovery();
     return true;
 }
 
@@ -365,6 +406,60 @@ bool FSRSensor::calibrationLooksValid() const
     }
 
     return true;
+}
+
+
+bool FSRSensor::applyPendingRetainedBaseline()
+{
+    if (!pendingRetainedBaselineValid)
+    {
+        return false;
+    }
+
+    for (int i = 0; i < FSR_COUNT; ++i)
+    {
+        reading.electricalBaseline[i] = pendingRetainedBaseline[i];
+        electricalFilteredLoad[i] = 0.0f;
+    }
+
+    mapElectricalToLogical(
+        reading.electricalBaseline,
+        reading.baseline
+    );
+
+    pendingRetainedBaselineValid = false;
+
+    if (!calibrationLooksValid())
+    {
+        return false;
+    }
+
+    checkpointEmptyBaselineForRecovery();
+
+    Serial.println("[FSR-RECOVERY] Restored logical baselines:");
+    for (int i = 0; i < FSR_COUNT; ++i)
+    {
+        Serial.print("  ");
+        Serial.print(getSensorLabel(i));
+        Serial.print(" baseline: ");
+        Serial.println(reading.baseline[i], 1);
+    }
+
+    return true;
+}
+
+
+void FSRSensor::checkpointEmptyBaselineForRecovery()
+{
+    if (!calibrationLooksValid())
+    {
+        return;
+    }
+
+    safeSeatRecoverySaveFsrBaseline(
+        reading.electricalBaseline,
+        FSR_COUNT
+    );
 }
 
 
@@ -533,6 +628,18 @@ void FSRSensor::processFrame(
     }
 
     updateDerivedQuantities();
+
+    // RTC memory writes do not consume flash endurance. Keep the recovery
+    // snapshot aligned with the adaptive empty-seat drift tracker, but never
+    // update it while pressure occupancy or remote occupant presence is active.
+    if (
+        baselineReady
+        && !pressureOccupancyLatched
+        && !occupantPresent
+    )
+    {
+        checkpointEmptyBaselineForRecovery();
+    }
 }
 
 
@@ -989,6 +1096,19 @@ void FSRSensor::update(bool occupantPresent)
             return;
         }
 
+        if (!baselineReady && pendingRetainedBaselineValid)
+        {
+            baselineReady = applyPendingRetainedBaseline();
+            reading.baselineValid = baselineReady;
+
+            if (baselineReady)
+            {
+                Serial.println(
+                    "[FSR-RECOVERY] ADS recovered; retained empty-seat baseline applied without recalibration."
+                );
+            }
+        }
+
         if (!baselineReady)
         {
             setStatus(FSRStatus::CALIBRATION_FAILED);
@@ -1155,6 +1275,7 @@ void FSRSensor::forceRecalibration()
         reading.valid = false;
 
         setStatus(FSRStatus::READING);
+        checkpointEmptyBaselineForRecovery();
 
         Serial.println(
             "[FSR-MAINT] Empty-seat recalibration completed successfully."

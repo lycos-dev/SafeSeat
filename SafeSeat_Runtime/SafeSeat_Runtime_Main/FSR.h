@@ -250,6 +250,13 @@ private:
     bool initialized = false;
     bool baselineReady = false;
 
+    // If the Main Hub supervisor performed a controlled software restart,
+    // FSR.cpp caches the last valid empty-seat electrical baseline here before
+    // touching the ADS devices. This lets recovery survive a temporary ADS
+    // reconnect during boot without recalibrating under an occupied passenger.
+    bool pendingRetainedBaselineValid = false;
+    float pendingRetainedBaseline[FSR_COUNT] = {0};
+
     float electricalFilteredLoad[FSR_COUNT] = {0};
 
     unsigned long lastHealthCheckMillis = 0;
@@ -288,6 +295,8 @@ private:
 
     bool calibrateEmptySeat();
     bool calibrationLooksValid() const;
+    bool applyPendingRetainedBaseline();
+    void checkpointEmptyBaselineForRecovery();
 
     bool acquireElectricalRaw(float out[FSR_COUNT]);
     void mapElectricalToLogical(

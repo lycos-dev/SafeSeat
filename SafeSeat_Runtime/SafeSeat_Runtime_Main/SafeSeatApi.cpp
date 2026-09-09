@@ -511,6 +511,12 @@ String SafeSeatApi::buildSensorsJson() const
     appendJsonBool(out, in.mlx.reading.connected);
     out += F(",\"valid\":");
     appendJsonBool(out, in.mlx.reading.valid);
+    out += F(",\"target_visible\":");
+    appendJsonBool(out, in.mlx.targetVisible);
+    out += F(",\"fusion_contribution_suspended\":");
+    appendJsonBool(out, in.mlx.contributionSuspended);
+    out += F(",\"target_reacquiring\":");
+    appendJsonBool(out, in.mlx.reacquiringTarget);
     out += F(",\"object_temperature_c\":");
     appendJsonFloat(out, in.mlx.reading.filteredObjectC, 2);
     out += F(",\"sensor_ta_c\":");
@@ -539,7 +545,14 @@ String SafeSeatApi::buildSensorsJson() const
     out += F("}");
     out += F(",\"native_mlx_model\":");
     appendModelEvidence(out, in.mlx.model);
-    out += F(",\"native_mlx_model_fusion_role\":\"active_conservative_evidence\"}");
+    out += F(",\"native_mlx_model_fusion_role\":");
+    appendJsonString(
+        out,
+        in.mlx.contributionSuspended
+            ? "temporarily_suspended_target_unavailable"
+            : "active_conservative_evidence"
+    );
+    out += F("}");
 
     // --------------------------------------------------------
     // FSR

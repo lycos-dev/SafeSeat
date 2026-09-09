@@ -282,6 +282,19 @@ struct MLXFusionInput
 
     MLXReading reading;
 
+    // Target/FOV qualification is separate from electrical sensor health.
+    // A connected MLX90614 may still be unable to observe the intended
+    // passenger skin area because hair, clothing, posture, or another
+    // obstruction is inside the field of view.
+    //
+    // When contributionSuspended is true, Fusion must treat MLX as
+    // temporarily unavailable evidence rather than NORMAL or ANOMALOUS.
+    // The Main Hub preserves any completed occupant/session baseline and
+    // automatically resumes MLX after stable target reacquisition.
+    bool targetVisible = false;
+    bool contributionSuspended = false;
+    bool reacquiringTarget = false;
+
     // Deployment-safe MLX context evidence.
     // Filtered OBJECT temperature is primary; MLX Ta and
     // Object-Ta remain context/quality only.
