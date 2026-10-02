@@ -3,6 +3,7 @@
 #include <math.h>
 
 #include "SafeSeatRecovery.h"
+#include "Config.h"
 
 // ============================================================
 // SAFESEAT FSR ARRAY - IMPLEMENTATION
@@ -31,6 +32,127 @@ namespace
 
 FSRSensor::FSRSensor()
 {
+}
+
+
+void FSRSensor::configureSharedI2CBusTimeout()
+{
+    // Bound a wedged I2C transaction so a single peripheral cannot hold the
+    // Main Hub loop indefinitely. The independent freeze supervisor remains a
+    // final fallback, but normal FSR recovery should happen long before 12 s.
+    Wire.setTimeOut(I2C_TRANSACTION_TIMEOUT_MS);
+}
+
+
+bool FSRSensor::recoverSharedI2CBusAndADS(
+    const char* reason,
+    bool ignoreCooldown
+)
+{
+    const unsigned long now = millis();
+
+    if (
+        !ignoreCooldown
+        && lastFullBusRecoveryMillis != 0
+        && now - lastFullBusRecoveryMillis < FULL_BUS_RECOVERY_COOLDOWN_MS
+    )
+    {
+        return false;
+    }
+
+    lastFullBusRecoveryMillis = now;
+    reading.maintenanceActive = true;
+    setStatus(FSRStatus::RECOVERING);
+
+    Serial.println();
+    Serial.print("[FSR-I2C] Shared-bus recovery: ");
+    Serial.println(reason != nullptr ? reason : "unspecified fault");
+
+    // Release the Arduino I2C driver first, then attempt the standard bus-clear
+    // sequence. A peripheral that was interrupted mid-byte can hold SDA low
+    // across an ESP32 software restart because the peripheral itself was not
+    // power-cycled.
+    Wire.end();
+
+    pinMode(I2C_SDA_PIN, INPUT_PULLUP);
+    pinMode(I2C_SCL_PIN, INPUT_PULLUP);
+    delayMicroseconds(20);
+
+    if (digitalRead(I2C_SDA_PIN) == LOW)
+    {
+        Serial.println("[FSR-I2C] SDA held low; clocking bus up to 9 times.");
+
+        for (uint8_t pulse = 0; pulse < 9 && digitalRead(I2C_SDA_PIN) == LOW; ++pulse)
+        {
+            pinMode(I2C_SCL_PIN, OUTPUT_OPEN_DRAIN);
+            digitalWrite(I2C_SCL_PIN, LOW);
+            delayMicroseconds(8);
+            pinMode(I2C_SCL_PIN, INPUT_PULLUP);
+            delayMicroseconds(8);
+        }
+
+        // Generate a STOP condition if SCL can be released high.
+        pinMode(I2C_SDA_PIN, OUTPUT_OPEN_DRAIN);
+        digitalWrite(I2C_SDA_PIN, LOW);
+        delayMicroseconds(8);
+        pinMode(I2C_SCL_PIN, INPUT_PULLUP);
+        delayMicroseconds(8);
+        pinMode(I2C_SDA_PIN, INPUT_PULLUP);
+        delayMicroseconds(8);
+    }
+
+    Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
+    Wire.setClock(I2C_CLOCK_HZ);
+    configureSharedI2CBusTimeout();
+    delay(4);
+
+    const bool ok1 = initADS1();
+    const bool ok2 = initADS2();
+
+    reading.ads1Connected = ok1;
+    reading.ads2Connected = ok2;
+    reading.connected = ok1 && ok2;
+    initialized = reading.connected;
+
+    if (reading.connected)
+    {
+        adsProbeFaultStreak = 0;
+        readFailureStreak = 0;
+        suddenZeroStreak = 0;
+        reading.recoveryCount++;
+
+        if (!baselineReady && pendingRetainedBaselineValid)
+        {
+            baselineReady = applyPendingRetainedBaseline();
+            reading.baselineValid = baselineReady;
+        }
+
+        reading.maintenanceActive = false;
+
+        Serial.println("[FSR-I2C] Shared bus and both ADS1115 devices recovered.");
+        if (baselineReady)
+        {
+            Serial.println("[FSR-I2C] Existing empty-seat baseline preserved.");
+            setStatus(FSRStatus::READING);
+        }
+        else
+        {
+            Serial.println("[FSR-I2C] Hardware recovered; startup baseline path will continue.");
+        }
+
+        return true;
+    }
+
+    reading.valid = false;
+    reading.maintenanceActive = false;
+    setStatus(FSRStatus::DEGRADED);
+
+    Serial.print("[FSR-I2C] Recovery incomplete. SDA=");
+    Serial.print(digitalRead(I2C_SDA_PIN) == HIGH ? "HIGH" : "LOW");
+    Serial.print(" SCL=");
+    Serial.println(digitalRead(I2C_SCL_PIN) == HIGH ? "HIGH" : "LOW");
+
+    return false;
 }
 
 
@@ -100,9 +222,10 @@ bool FSRSensor::begin()
     Serial.println("[FSR] Initializing validated 9-channel array...");
 
     pinMode(CUSHION_RIGHT_GPIO, INPUT);
+    configureSharedI2CBusTimeout();
 
-    const bool ads1OK = initADS1();
-    const bool ads2OK = initADS2();
+    bool ads1OK = initADS1();
+    bool ads2OK = initADS2();
 
     Serial.println(
         ads1OK
@@ -123,6 +246,19 @@ bool FSRSensor::begin()
     Serial.println("[FSR] Occupancy: >=12k total + >=2 active sensors for 3 frames.");
     Serial.println("[FSR] Exit: hard-empty, residual-release, or sustained <=30% seated-peak collapse.");
     Serial.println("[FSR] Re-arm: residual <=1 active FSR, or strong new seated pattern >=60k / >=4 active.");
+
+    // If a runtime restart interrupted an I2C transaction, the ESP32 can come
+    // back while an ADS1115 is still holding the bus in a bad transaction
+    // state. Try one full bus clear before declaring the FSR path degraded.
+    if (!(ads1OK && ads2OK))
+    {
+        Serial.println("[FSR-I2C] Startup ADS fault; attempting one shared-bus recovery.");
+        if (recoverSharedI2CBusAndADS("startup ADS detection failure", true))
+        {
+            ads1OK = reading.ads1Connected;
+            ads2OK = reading.ads2Connected;
+        }
+    }
 
     initialized = ads1OK && ads2OK;
     reading.connected = initialized;
@@ -151,7 +287,7 @@ bool FSRSensor::begin()
     {
         Serial.println();
         Serial.println(
-            "[FSR-RECOVERY] Supervisor restart detected; restoring retained empty-seat baseline."
+            "[FSR-RECOVERY] Recoverable runtime restart detected; restoring retained empty-seat baseline."
         );
 
         baselineReady = applyPendingRetainedBaseline();
@@ -992,6 +1128,7 @@ void FSRSensor::checkAndRecoverADS()
     }
 
     lastHealthCheckMillis = now;
+    configureSharedI2CBusTimeout();
 
     const bool probe1 = i2cProbe(ADS1_ADDRESS);
     const bool probe2 = i2cProbe(ADS2_ADDRESS);
@@ -1002,6 +1139,8 @@ void FSRSensor::checkAndRecoverADS()
 
     if (probe1 && probe2)
     {
+        adsProbeFaultStreak = 0;
+
         if (
             reading.status == FSRStatus::DEGRADED
             ||
@@ -1018,6 +1157,11 @@ void FSRSensor::checkAndRecoverADS()
         return;
     }
 
+    if (adsProbeFaultStreak < 255)
+    {
+        adsProbeFaultStreak++;
+    }
+
     if (
         now - lastRecoveryAttemptMillis
         <
@@ -1032,8 +1176,11 @@ void FSRSensor::checkAndRecoverADS()
     setStatus(FSRStatus::RECOVERING);
 
     Serial.println();
-    Serial.println("[FSR-MAINT] ADS health fault detected.");
+    Serial.print("[FSR-MAINT] ADS health fault streak=");
+    Serial.println(adsProbeFaultStreak);
 
+    // First recovery stage: re-open only the ADS device(s) that failed. This
+    // avoids bouncing the shared MLX/MPU bus for a one-off probe miss.
     if (!probe1)
     {
         Serial.println("[FSR-MAINT] Reinitializing ADS1115 #1 (0x48)...");
@@ -1053,6 +1200,8 @@ void FSRSensor::checkAndRecoverADS()
 
     if (reading.connected)
     {
+        adsProbeFaultStreak = 0;
+        readFailureStreak = 0;
         reading.recoveryCount++;
         reading.maintenanceActive = false;
 
@@ -1065,15 +1214,28 @@ void FSRSensor::checkAndRecoverADS()
                 ? FSRStatus::READING
                 : FSRStatus::CALIBRATION_FAILED
         );
+        return;
     }
-    else
-    {
-        Serial.println(
-            "[FSR-MAINT] Recovery incomplete. Check ADS power, SDA/SCL, GND and jumpers."
-        );
 
-        setStatus(FSRStatus::DEGRADED);
+    reading.maintenanceActive = false;
+
+    // Second recovery stage: only after repeated health failures, clear and
+    // restart the shared I2C bus itself. The cooldown prevents a physically
+    // unplugged ADS from causing a rapid reset loop on the shared bus.
+    if (adsProbeFaultStreak >= ADS_PROBE_FAILURES_BEFORE_BUS_RECOVERY)
+    {
+        if (recoverSharedI2CBusAndADS("repeated ADS probe/reinitialization failure"))
+        {
+            return;
+        }
     }
+
+    Serial.println(
+        "[FSR-MAINT] Recovery incomplete; FSR remains temporarily degraded and will retry."
+    );
+
+    reading.valid = false;
+    setStatus(FSRStatus::DEGRADED);
 }
 
 
@@ -1152,54 +1314,73 @@ void FSRSensor::update(bool occupantPresent)
 
     if (!acquireElectricalRaw(electrical))
     {
-        reading.valid = false;
-        setStatus(FSRStatus::DEGRADED);
+        // Do not permanently degrade the array on one bad transaction. Pace
+        // retries at the normal FSR frame rate, and only escalate after a
+        // short consecutive-failure streak.
+        if (readFailureStreak < 255)
+        {
+            readFailureStreak++;
+        }
+
+        reading.lastSampleMillis = now;
+
+        if (readFailureStreak >= READ_FAILURES_BEFORE_BUS_RECOVERY)
+        {
+            Serial.println();
+            Serial.println("[FSR-MAINT] Repeated FSR read failures; attempting shared-bus recovery.");
+            reading.valid = false;
+
+            if (!recoverSharedI2CBusAndADS("repeated FSR acquisition failure"))
+            {
+                setStatus(FSRStatus::DEGRADED);
+            }
+        }
+        else
+        {
+            setStatus(FSRStatus::RECOVERING);
+        }
+
         return;
     }
+
+    readFailureStreak = 0;
 
     if (frameLooksSuddenlyZero(electrical, occupantPresent))
     {
-        suddenZeroStreak++;
-    }
-    else
-    {
-        suddenZeroStreak = 0;
-    }
-
-    // A short transient is ignored. Sustained all-zero collapse while an
-    // occupant/previous load is expected triggers an ADS reinitialization.
-    if (suddenZeroStreak >= 6)
-    {
-        Serial.println();
-        Serial.println(
-            "[FSR-MAINT] Sustained unexpected all-zero ADS frame detected."
-        );
-        Serial.println(
-            "[FSR-MAINT] Reinitializing both ADS1115 devices without erasing baseline."
-        );
-
-        setStatus(FSRStatus::RECOVERING);
-        reading.maintenanceActive = true;
-
-        const bool ok1 = initADS1();
-        const bool ok2 = initADS2();
-
-        reading.connected = ok1 && ok2;
-        reading.recoveryCount++;
-        reading.maintenanceActive = false;
-
-        suddenZeroStreak = 0;
-
-        if (!reading.connected)
+        if (suddenZeroStreak < 255)
         {
-            setStatus(FSRStatus::DEGRADED);
-            reading.valid = false;
-            return;
+            suddenZeroStreak++;
         }
 
-        setStatus(FSRStatus::READING);
+        // Never feed a suspicious all-zero ADC collapse into occupancy/Fusion
+        // as if the passenger suddenly vanished. Hold the last pressure frame,
+        // mark FSR temporarily recovering, and pace the next attempt normally.
+        reading.lastSampleMillis = now;
+        reading.valid = false;
+        setStatus(FSRStatus::RECOVERING);
+
+        if (suddenZeroStreak >= SUDDEN_ZERO_FRAMES_BEFORE_BUS_RECOVERY)
+        {
+            Serial.println();
+            Serial.println(
+                "[FSR-MAINT] Sustained unexpected all-zero ADS frames detected."
+            );
+            Serial.println(
+                "[FSR-MAINT] Clearing/restarting shared I2C without erasing baseline."
+            );
+
+            suddenZeroStreak = 0;
+
+            if (!recoverSharedI2CBusAndADS("sustained unexpected all-zero ADS frames"))
+            {
+                setStatus(FSRStatus::DEGRADED);
+            }
+        }
+
         return;
     }
+
+    suddenZeroStreak = 0;
 
     processFrame(electrical, occupantPresent);
 
@@ -1257,6 +1438,8 @@ void FSRSensor::forceRecalibration()
         }
 
         previousWholeSeatTotal = 0.0f;
+        adsProbeFaultStreak = 0;
+        readFailureStreak = 0;
         suddenZeroStreak = 0;
 
         pressureOccupancyLatched = false;

@@ -1,0 +1,14 @@
+{
+  "build": "5.9.9-R3",
+  "checks": {
+    "fsr_cpp_host_syntax": "PASS",
+    "recovery_cpp_host_syntax": "PASS",
+    "i2c_timeout_present": true,
+    "staged_ads_recovery_present": true,
+    "shared_bus_clear_present": true,
+    "rtc_baseline_restore_on_panic_watchdog": true,
+    "rtc_baseline_restore_on_brownout": false,
+    "legacy_uat_autopoll_disabled": true,
+    "app_local_uat_expected": true
+  }
+}

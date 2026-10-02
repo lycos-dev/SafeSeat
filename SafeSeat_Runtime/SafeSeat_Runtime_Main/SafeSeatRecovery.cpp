@@ -194,12 +194,25 @@ bool safeSeatRecoveryLoadFsrBaseline(
         return false;
     }
 
-    // The retained calibration is intentionally used only for the controlled
-    // freeze-recovery path. Cold boots, brownouts and ordinary user resets
-    // keep the original empty-seat calibration behavior.
+    // Reuse the empty-seat calibration after runtime failures that do not
+    // remove power from the hardware. This includes our controlled supervisor
+    // restart as well as panic/watchdog resets. Cold boots, brownouts,
+    // deep-sleep wakeups and external/manual resets still perform the normal
+    // empty-seat calibration so a stale physical setup is never trusted.
+    const esp_reset_reason_t resetReason = esp_reset_reason();
+
+    const bool supervisorRestart =
+        supervisorRestartMarker == SUPERVISOR_RESTART_MAGIC
+        && resetReason == ESP_RST_SW;
+
+    const bool unexpectedRuntimeRestart =
+        resetReason == ESP_RST_PANIC
+        || resetReason == ESP_RST_INT_WDT
+        || resetReason == ESP_RST_TASK_WDT
+        || resetReason == ESP_RST_WDT;
+
     if (
-        supervisorRestartMarker != SUPERVISOR_RESTART_MAGIC
-        || esp_reset_reason() != ESP_RST_SW
+        (!supervisorRestart && !unexpectedRuntimeRestart)
         || !retainedBaselineLooksStructurallyValid()
     )
     {

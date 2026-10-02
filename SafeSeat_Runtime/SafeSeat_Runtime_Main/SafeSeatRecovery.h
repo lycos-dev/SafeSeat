@@ -10,11 +10,12 @@
 // - If loop() makes no progress for the configured timeout, the
 //   supervisor performs a controlled ESP restart.
 // - The FSR empty-seat electrical baseline is kept in RTC memory.
-//   It is restored ONLY after a supervisor-requested software restart,
-//   so an occupied passenger does not need to leave the seat just to
-//   recalibrate after a firmware stall.
-// - RTC memory is not used as permanent calibration storage. A true
-//   power cycle/brownout still performs the normal empty-seat calibration.
+//   It is restored after a supervisor restart or an unexpected panic/watchdog
+//   runtime reset, so an occupied passenger does not need to leave the seat
+//   just to recalibrate after a firmware failure.
+// - RTC memory is not used as permanent calibration storage. A true power
+//   cycle, brownout, external reset, or deep-sleep wake still performs the
+//   normal empty-seat calibration.
 // ============================================================
 
 static constexpr size_t SAFESEAT_RETAINED_FSR_COUNT = 9;

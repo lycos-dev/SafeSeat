@@ -17,7 +17,7 @@
 //   GET /api/v1/camera
 //   GET /api/v1/network
 //   GET /health
-//   GET /uat  (UAT evaluator browser monitor + controlled Warning stimulus)
+//   GET /uat  (read-only maintenance monitor; manual refresh by default)
 //   GET  /api/v1/uat/stimulus
 //   POST /api/v1/uat/simulate-warning
 //   POST /api/v1/uat/clear-simulation
@@ -28,9 +28,9 @@
 // IMPORTANT:
 // - Telemetry endpoints expose Main/Fusion state only.
 // - Fusion remains authoritative; the API never writes a Fusion result directly.
-// - /uat exposes one researcher-only CONTROLLED WARNING stimulus for UAT.
-// - The UAT stimulus injects the already validated SYS02 one-strong-vote path.
-// - No web endpoint can inject EMERGENCY or directly trigger/cancel camera/alerts.
+// - R3 keeps /uat lightweight; UAT state simulation is local to the mobile app.
+// - Legacy UAT POST endpoints are disabled and return HTTP 410.
+// - No web endpoint injects WARNING/EMERGENCY or directly triggers/cancels camera/alerts.
 // - No Firebase/backend technology is assumed here.
 // ============================================================
 

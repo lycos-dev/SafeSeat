@@ -95,18 +95,16 @@ unsigned long mlxTargetVisibleSinceMillis = 0UL;
 // CONTROLLED UAT / ENGINEERING TEST STIMULUS
 //
 // Purpose:
-// - Give the researcher a standardized WARNING stimulus during UAT
-//   without keeping the Main Hub tethered to a laptop.
 // - Preserve the original Serial engineering commands for regression
 //   troubleshooting if needed later.
+// - Participant-facing UAT state simulation now runs locally inside the app
+//   and does NOT send test commands to the Main Hub.
 //
 // IMPORTANT SAFETY / INTERPRETATION:
-// - This does NOT change trained models, thresholds, acquisition paths,
-//   Fusion rules, camera rules, or participant-app state directly.
-// - The UAT web control exposes ONLY the one-strong-vote WARNING stimulus.
-// - No EMERGENCY web injection is provided.
-// - The stimulus overrides ModelEvidence immediately before
-//   FusionEngine::update(); Fusion remains authoritative.
+// - These Serial-only engineering injections do not change trained models,
+//   thresholds, acquisition paths, or Fusion rules.
+// - The old auto-refreshing /uat browser simulation is disabled in R3.
+// - Fusion remains authoritative for all live app monitoring.
 //
 // Serial commands retained for engineering use:
 //   SYS02_ON    -> one strong FSR anomaly vote (WARNING stimulus)
@@ -449,7 +447,7 @@ void setup()
     );
 
     Serial.println(
-        " Step 5.9.9-R2 - MLX obstruction-aware Fusion suspension"
+        " Step 5.9.9-R3 - resilient I2C/FSR recovery + app-local UAT"
     );
 
     Serial.println(
@@ -464,7 +462,7 @@ void setup()
     Serial.print("[RECOVERY] Previous supervisor restart: ");
     Serial.println(safeSeatRecoveryWasSupervisorRestart() ? "YES" : "NO");
     Serial.println("[SAFETY] Main-loop freeze supervisor will start after sensor initialization.");
-    Serial.println("[SAFETY] FSR empty-seat baseline is retained only for supervisor recovery restart.");
+    Serial.println("[SAFETY] FSR baseline restore covers supervisor/panic/watchdog runtime resets; cold/brownout resets recalibrate.");
     Serial.println("[MLX-GATE] Obstructed/unusable MLX target suspends only MLX Fusion contribution.");
     Serial.println("[MLX-GATE] Completed MLX baseline is preserved; 3 s stable target reacquisition resumes it.");
     Serial.println("[SAFETY] Giant periodic dashboard is DISABLED; compact telemetry is used.");
@@ -491,6 +489,9 @@ void setup()
     Wire.setClock(
         I2C_CLOCK_HZ
     );
+    // Bound individual I2C transactions so a wedged peripheral cannot hold
+    // the main loop until the 12-second freeze supervisor has to reboot it.
+    Wire.setTimeOut(50);
 
     Serial.print(
         "[MAIN] I2C ready on SDA="

@@ -1,0 +1,19 @@
+{
+  "package": "SafeSeat Main Hub 5.9.9-R4 Maintenance /uat Restoration",
+  "uat_route": "/uat",
+  "maintenance_alias": "/maintenance",
+  "read_only": true,
+  "default_auto_refresh": false,
+  "live_refresh_interval_ms": 5000,
+  "requests_per_refresh": 1,
+  "snapshot_endpoint": "/api/v1/status",
+  "hub_warning_injection_enabled": false,
+  "r3_recovery_files_unchanged": [
+    "SafeSeatRecovery.h",
+    "FSR.cpp",
+    "FSR.h",
+    "Fusion.cpp",
+    "MLX.cpp",
+    "SafeSeat_Runtime_Main.ino"
+  ]
+}

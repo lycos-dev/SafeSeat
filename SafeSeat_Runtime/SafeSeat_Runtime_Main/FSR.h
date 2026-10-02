@@ -182,7 +182,12 @@ private:
     static constexpr unsigned long SAMPLE_INTERVAL_MS = 220UL;
 
     static constexpr unsigned long HEALTH_CHECK_INTERVAL_MS = 2000UL;
-    static constexpr unsigned long RECOVERY_COOLDOWN_MS = 2000UL;
+    static constexpr unsigned long RECOVERY_COOLDOWN_MS = 2500UL;
+    static constexpr unsigned long FULL_BUS_RECOVERY_COOLDOWN_MS = 15000UL;
+    static constexpr uint8_t ADS_PROBE_FAILURES_BEFORE_BUS_RECOVERY = 2;
+    static constexpr uint8_t READ_FAILURES_BEFORE_BUS_RECOVERY = 3;
+    static constexpr uint8_t SUDDEN_ZERO_FRAMES_BEFORE_BUS_RECOVERY = 3;
+    static constexpr uint16_t I2C_TRANSACTION_TIMEOUT_MS = 50;
 
     // The ADS gain change exposed a slow empty-seat settling/drift
     // on the cushion channels. Give the hardware more time and use
@@ -261,8 +266,11 @@ private:
 
     unsigned long lastHealthCheckMillis = 0;
     unsigned long lastRecoveryAttemptMillis = 0;
+    unsigned long lastFullBusRecoveryMillis = 0;
     unsigned long previousFrameMillis = 0;
 
+    uint8_t adsProbeFaultStreak = 0;
+    uint8_t readFailureStreak = 0;
     uint8_t suddenZeroStreak = 0;
     float previousWholeSeatTotal = 0.0f;
 
@@ -291,6 +299,8 @@ private:
     bool i2cProbe(uint8_t address);
     bool initADS1();
     bool initADS2();
+    void configureSharedI2CBusTimeout();
+    bool recoverSharedI2CBusAndADS(const char* reason, bool ignoreCooldown = false);
     void checkAndRecoverADS();
 
     bool calibrateEmptySeat();
