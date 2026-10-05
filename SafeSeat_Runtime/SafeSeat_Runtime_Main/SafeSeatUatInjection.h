@@ -30,15 +30,36 @@ struct SafeSeatUatInjectionState
     uint32_t revision = 0;
     unsigned long startedMillis = 0;
 
-    bool injectFsr = true;
-    bool injectMlx = true;
+    // Overrides default OFF. Arming/recording a UAT session must not
+    // silently replace physical sensors.
+    bool injectFsr = false;
+    bool injectMlx = false;
     bool injectMpu = false;
-    bool injectC1001 = true;
+    bool injectC1001 = false;
 
+    // UAT-only policy: while a controlled test is armed, allow an abrupt
+    // MLX step (physical hot-object test OR injected value) to reach the
+    // existing baseline-relative model. Stability, IF+OCSVM, anomaly
+    // persistence and Fusion persistence remain authoritative.
+    bool mlxRapidTransitionBypass = true;
+
+    // Optional synthetic temporal FSR sequence. This mimics the real seat
+    // behavior observed during hard side slumps: loaded sensors are commonly
+    // ~20k-26k while unloaded contact points collapse toward zero.
+    bool fsrDynamicPattern = false;
+
+    // Read-only runtime state for the controlled physical/injected FSR test.
+    bool fsrControlledPatternActive = false;
+    bool fsrControlledStrongVote = false;
+    uint32_t fsrControlledCandidateMs = 0;
+    int8_t fsrControlledSide = 0; // -1=LEFT, +1=RIGHT, 0=NONE
+
+    // Realistic occupied-seat defaults for the installed FSR hardware.
+    // These are only used when FSR injection is explicitly enabled.
     float fsrPressure[NUM_FSR] = {
-        3200.0f, 3400.0f, 3100.0f,
-        3000.0f, 3300.0f, 3150.0f,
-        3500.0f, 3450.0f, 3550.0f
+        24000.0f, 23000.0f, 22000.0f,
+        23500.0f, 24000.0f, 22500.0f,
+        25000.0f, 24000.0f, 25000.0f
     };
 
     float mlxAmbientC = 29.0f;
@@ -71,6 +92,8 @@ public:
     void setInjectMlx(bool enabled);
     void setInjectMpu(bool enabled);
     void setInjectC1001(bool enabled);
+    void setMlxRapidTransitionBypass(bool enabled);
+    void setFsrDynamicPattern(bool enabled);
 
     void setFsrPressure(uint8_t index, float value);
     void setMlx(float ambientC, float objectC);
@@ -85,6 +108,11 @@ public:
     void applyFsr(FSRReading &reading);
     void applyMlx(MLXReading &reading);
     void applyMpu(MPUReading &reading);
+
+    // Evaluate a sustained, extreme side-unload pattern during an armed
+    // controlled UAT session. This is intentionally separate from the
+    // deployed FSR IF/OCSVM so /uat can show both results independently.
+    void updateControlledFsrObservation(const FSRReading &reading);
 
     // Sends the C1001 value-injection command to the dedicated C1001 node.
     // The remote node still runs the real C1001 IF + OCSVM model.
@@ -109,6 +137,8 @@ private:
     uint32_t syntheticFsrFrame = 0;
     uint32_t syntheticMlxSample = 0;
     uint32_t syntheticMpuSample = 0;
+
+    unsigned long fsrControlledCandidateSinceMillis = 0;
 
     unsigned long lastC1001CommandMillis = 0;
     uint32_t c1001CommandSequence = 0;

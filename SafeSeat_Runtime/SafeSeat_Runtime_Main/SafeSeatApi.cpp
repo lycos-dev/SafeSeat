@@ -195,6 +195,12 @@ void SafeSeatApi::applyUatRequestArgs()
     uat.setInjectMlx(readBool("use_mlx", s.injectMlx));
     uat.setInjectMpu(readBool("use_mpu", s.injectMpu));
     uat.setInjectC1001(readBool("use_c1001", s.injectC1001));
+    uat.setMlxRapidTransitionBypass(
+        readBool("mlx_rapid_bypass", s.mlxRapidTransitionBypass)
+    );
+    uat.setFsrDynamicPattern(
+        readBool("fsr_dynamic", s.fsrDynamicPattern)
+    );
 
     for (uint8_t i = 0; i < NUM_FSR; ++i)
     {
@@ -244,7 +250,7 @@ void SafeSeatApi::handleUatInjectionStatus()
 {
     const SafeSeatUatInjectionState &s = SafeSeatUatInjection::instance().getState();
     String out;
-    out.reserve(1800);
+    out.reserve(2200);
     out += F("{\"ok\":true,\"active\":");
     appendJsonBool(out, s.active);
     out += F(",\"session_id\":"); out += String(s.sessionId);
@@ -252,15 +258,33 @@ void SafeSeatApi::handleUatInjectionStatus()
     out += F(",\"elapsed_ms\":"); out += String(s.active ? millis() - s.startedMillis : 0UL);
     out += F(",\"fusion_authoritative\":true,\"direct_warning_write\":false");
     out += F(",\"demo_policy\":{\"mlx_rapid_transition_bypass\":");
-    appendJsonBool(out, s.active && s.injectMlx);
-    out += F(",\"object_ta_fusion_gate\":false,\"baseline_and_ml_still_active\":true}");
+    appendJsonBool(out, s.active && s.mlxRapidTransitionBypass);
+    out += F(",\"object_ta_fusion_gate\":false,\"baseline_and_ml_still_active\":true");
+    out += F(",\"start_preserves_windows\":true}");
     out += F(",\"sources\":{");
     out += F("\"fsr\":"); appendJsonBool(out, s.injectFsr);
+    out += F(",\"fsr_dynamic\":"); appendJsonBool(out, s.fsrDynamicPattern);
     out += F(",\"mlx\":"); appendJsonBool(out, s.injectMlx);
     out += F(",\"mpu\":"); appendJsonBool(out, s.injectMpu);
     out += F(",\"c1001\":"); appendJsonBool(out, s.injectC1001);
     out += F("}");
     out += F(",\"fsr_pressure\":"); appendFloatArray(out, s.fsrPressure, NUM_FSR, 1);
+    out += F(",\"fsr_controlled\":{\"pattern_active\":");
+    appendJsonBool(out, s.active && s.fsrControlledPatternActive);
+    out += F(",\"strong_vote\":");
+    appendJsonBool(out, s.active && s.fsrControlledStrongVote);
+    out += F(",\"candidate_ms\":");
+    out += String(s.active ? s.fsrControlledCandidateMs : 0U);
+    out += F(",\"side\":");
+    appendJsonString(
+        out,
+        s.fsrControlledSide < 0
+            ? "LEFT"
+            : s.fsrControlledSide > 0
+                ? "RIGHT"
+                : "NONE"
+    );
+    out += F("}");
     out += F(",\"mlx\":{\"ambient_c\":"); appendJsonFloat(out, s.mlxAmbientC, 2);
     out += F(",\"object_c\":"); appendJsonFloat(out, s.mlxObjectC, 2); out += F("}");
     out += F(",\"c1001\":{\"present\":"); appendJsonBool(out, s.c1001Present);
@@ -288,6 +312,15 @@ void SafeSeatApi::handleUatInjectionStart()
 void SafeSeatApi::handleUatInjectionUpdate()
 {
     applyUatRequestArgs();
+
+    // APPLY must actually apply. R5.1 only edited stored values when the
+    // controlled session was OFF, which made the UI appear broken.
+    // Auto-arm here without clearing any existing baseline/window.
+    if (!SafeSeatUatInjection::instance().getState().active)
+    {
+        SafeSeatUatInjection::instance().start();
+    }
+
     handleUatInjectionStatus();
 }
 
@@ -711,6 +744,22 @@ String SafeSeatApi::buildSensorsJson() const
     appendFloatArray(out, in.fsr.reading.modelShare, NUM_FSR, 5);
     out += F(",\"model\":");
     appendModelEvidence(out, in.fsr.model);
+    out += F(",\"controlled_uat\":{\"pattern_active\":");
+    appendJsonBool(out, in.fsr.controlledUatPatternActive);
+    out += F(",\"strong_vote\":");
+    appendJsonBool(out, in.fsr.controlledUatStrongVote);
+    out += F(",\"candidate_ms\":");
+    out += String(in.fsr.controlledUatCandidateMs);
+    out += F(",\"side\":");
+    appendJsonString(
+        out,
+        in.fsr.controlledUatSide < 0
+            ? "LEFT"
+            : in.fsr.controlledUatSide > 0
+                ? "RIGHT"
+                : "NONE"
+    );
+    out += F("}");
     out += F(",\"model_runtime\":{\"window_samples_collected\":"); out += String(s.fsrMl.windowSamplesCollected);
     out += F(",\"window_samples_required\":"); out += String(s.fsrMl.windowSamplesRequired);
     out += F(",\"samples_until_next_inference\":"); out += String(s.fsrMl.samplesUntilNextInference);

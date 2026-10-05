@@ -23,7 +23,7 @@ void MLXML::begin()
     Serial.println("[MLX-ML] Low thermal contrast is reported but does NOT reset/block baseline or ML.");
     Serial.println("[MLX-ML] Filtered 1-s transition guard: std <= 1.00 C.");
     Serial.println("[MLX-ML] FOV guard: rapid 1-2 s shifts -> TARGET GEOMETRY DEGRADED.");
-    Serial.println("[MLX-ML] UAT synthetic MLX injection can bypass ONLY that rapid-transition guard.");
+    Serial.println("[MLX-ML] Controlled UAT can bypass ONLY that rapid-transition guard (physical or injected MLX).");
     Serial.println("[MLX-ML] Geometry hold preserves baseline; 3 stable near-baseline sec reacquire.");
     Serial.println("[MLX-ML] Anomaly vote requires 3 consecutive trusted anomalous blocks.");
     Serial.println("[MLX-ML] IF + tuned OCSVM active and available to Fusion.");

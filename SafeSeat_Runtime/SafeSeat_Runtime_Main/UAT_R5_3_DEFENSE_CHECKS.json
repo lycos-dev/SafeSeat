@@ -1,0 +1,28 @@
+{
+  "revision": "R5.3 Defense UAT",
+  "package_scope": "complete SafeSeat_Runtime_Main folder only",
+  "node_uat_js_syntax": "PASS",
+  "host_cpp_syntax": {
+    "Fusion.cpp": "PASS",
+    "SafeSeatUatInjection.cpp": "PASS",
+    "MLXML.cpp": "PASS",
+    "MLXContext.cpp": "PASS"
+  },
+  "behavior_checks": {
+    "start_preserves_local_windows": "PASS",
+    "apply_auto_arms_without_window_reset": "PASS",
+    "mlx_object_ta_diagnostic_only": "PASS",
+    "mlx_uat_physical_or_injected_transition_bypass": "PASS",
+    "fsr_uat_vote_requires_2s_sustained_pattern": "PASS",
+    "fusion_warning_persistence_remains_4s": "PASS",
+    "camera_actual_calibration_count_exposed_in_uat": "PASS",
+    "record_session_camera_and_fsr_uat_fields": "PASS"
+  },
+  "user_trace_fsr_validation": {
+    "candidate_rows": 64,
+    "longest_candidate_run_rows": 61,
+    "longest_candidate_run_seconds_approx": 65.247,
+    "condition": "dominant backrest >=35000; >=2 opposite sensors <=5000; abs side balance >=0.40; persist >=2000ms"
+  },
+  "board_compile": "NOT_RUN - ESP32 Arduino toolchain unavailable in this environment"
+}

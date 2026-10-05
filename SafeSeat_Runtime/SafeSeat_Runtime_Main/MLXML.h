@@ -120,11 +120,11 @@ public:
     void begin();
     void update(const MLXReading &sensorReading, bool seatOccupied);
 
-    // Research/UAT only: synthetic MLX value injection may intentionally
+    // Research/UAT only: a controlled physical or injected MLX test may intentionally
     // create an instantaneous temperature step (for example 31 -> 40 C).
     // When enabled, only the rapid-transition/FOV geometry hold is bypassed;
     // the 30-s baseline, stability check, IF+OCSVM and anomaly persistence
-    // remain active. Live sensor mode must keep this disabled.
+    // remain active. Normal non-UAT live mode must keep this disabled.
     void setUatRapidTransitionBypass(bool enabled);
     bool isUatRapidTransitionBypassEnabled() const;
 

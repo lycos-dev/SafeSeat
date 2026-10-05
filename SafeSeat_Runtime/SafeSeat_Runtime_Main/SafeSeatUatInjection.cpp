@@ -15,6 +15,17 @@ constexpr unsigned long UAT_CAMERA_RESULT_DELAY_MS = 350UL;
 constexpr float UAT_FSR_COMMON_SCALE = 26000.0f;
 constexpr float UAT_FSR_ACTIVE_THRESHOLD = 0.025f;
 
+// Controlled physical/injected FSR validation thresholds.
+// These reflect the observed installed seat behavior: loaded contact points
+// are commonly ~20k-26k, while a hard side slump can unload multiple
+// opposite-side sensors toward zero.
+constexpr float UAT_FSR_UNLOADED_MAX = 5000.0f;
+constexpr float UAT_FSR_DOMINANT_BACKREST_MIN = 35000.0f;
+constexpr float UAT_FSR_SIDE_BALANCE_MIN = 0.40f;
+constexpr uint8_t UAT_FSR_OPPOSITE_UNLOADED_MIN = 2U;
+constexpr unsigned long UAT_FSR_CONTROLLED_PERSIST_MS = 2000UL;
+constexpr unsigned long UAT_FSR_DYNAMIC_SIDE_MS = 1800UL;
+
 float safeBalanceUat(float left, float right)
 {
     const float total = left + right;
@@ -57,6 +68,18 @@ void SafeSeatUatInjection::setInjectMpu(bool enabled)
 void SafeSeatUatInjection::setInjectC1001(bool enabled)
 {
     state.injectC1001 = enabled;
+    state.revision++;
+}
+
+void SafeSeatUatInjection::setMlxRapidTransitionBypass(bool enabled)
+{
+    state.mlxRapidTransitionBypass = enabled;
+    state.revision++;
+}
+
+void SafeSeatUatInjection::setFsrDynamicPattern(bool enabled)
+{
+    state.fsrDynamicPattern = enabled;
     state.revision++;
 }
 
@@ -112,6 +135,12 @@ void SafeSeatUatInjection::resetSyntheticClocks()
     syntheticFsrFrame = 0;
     syntheticMlxSample = 0;
     syntheticMpuSample = 0;
+
+    fsrControlledCandidateSinceMillis = 0;
+    state.fsrControlledPatternActive = false;
+    state.fsrControlledStrongVote = false;
+    state.fsrControlledCandidateMs = 0;
+    state.fsrControlledSide = 0;
 
     lastFusionCameraTrigger = false;
     syntheticCameraPending = false;
@@ -201,9 +230,37 @@ void SafeSeatUatInjection::applyFsr(FSRReading &reading)
     reading.maintenanceActive = false;
     reading.emptyBaselineTracking = false;
 
+    // Manual mode uses exactly the evaluator-entered values.
+    // Dynamic mode deliberately imitates the REAL installed seat behavior
+    // observed during hard side slumps: one side stays heavily loaded
+    // (~20k-26k) while the opposite side loses contact toward zero.
+    // It changes sides slowly (~1.8 s) rather than every frame.
+    static const float UAT_FSR_DYNAMIC_LEFT[NUM_FSR] = {
+        25500.0f, 25000.0f, 22000.0f,
+        0.0f, 0.0f, 0.0f,
+        26000.0f, 24000.0f, 0.0f
+    };
+    static const float UAT_FSR_DYNAMIC_RIGHT[NUM_FSR] = {
+        0.0f, 0.0f, 0.0f,
+        25500.0f, 25000.0f, 22000.0f,
+        0.0f, 24000.0f, 26000.0f
+    };
+
+    const float *activePattern = state.fsrPressure;
+    if (state.fsrDynamicPattern)
+    {
+        const bool leftPhase =
+            ((now / UAT_FSR_DYNAMIC_SIDE_MS) & 1UL) == 0UL;
+
+        activePattern =
+            leftPhase
+                ? UAT_FSR_DYNAMIC_LEFT
+                : UAT_FSR_DYNAMIC_RIGHT;
+    }
+
     for (uint8_t i = 0; i < NUM_FSR; ++i)
     {
-        const float p = clampPressure(state.fsrPressure[i]);
+        const float p = clampPressure(activePattern[i]);
         reading.pressure[i] = p;
         reading.raw[i] = p;
         reading.baseline[i] = 0.0f;
@@ -215,6 +272,75 @@ void SafeSeatUatInjection::applyFsr(FSRReading &reading)
     reading.sampleCount = syntheticFsrFrame;
     reading.lastSampleMillis = lastFsrSampleMillis;
     reading.actualSamplingRateHz = 1000.0f / static_cast<float>(UAT_FSR_INTERVAL_MS);
+}
+
+
+void SafeSeatUatInjection::updateControlledFsrObservation(const FSRReading &reading)
+{
+    const unsigned long now = millis();
+
+    if (!state.active
+        || !reading.connected
+        || !reading.valid
+        || !reading.occupiedByPressure)
+    {
+        fsrControlledCandidateSinceMillis = 0;
+        state.fsrControlledPatternActive = false;
+        state.fsrControlledStrongVote = false;
+        state.fsrControlledCandidateMs = 0;
+        state.fsrControlledSide = 0;
+        return;
+    }
+
+    uint8_t leftUnloaded = 0;
+    uint8_t rightUnloaded = 0;
+
+    for (uint8_t i = 0; i < 3; ++i)
+    {
+        if (reading.pressure[i] <= UAT_FSR_UNLOADED_MAX) leftUnloaded++;
+        if (reading.pressure[i + 3] <= UAT_FSR_UNLOADED_MAX) rightUnloaded++;
+    }
+
+    const bool hardLeft =
+        reading.backrestLeftTotal >= UAT_FSR_DOMINANT_BACKREST_MIN
+        && rightUnloaded >= UAT_FSR_OPPOSITE_UNLOADED_MIN
+        && reading.backrestLRBalance >= UAT_FSR_SIDE_BALANCE_MIN;
+
+    const bool hardRight =
+        reading.backrestRightTotal >= UAT_FSR_DOMINANT_BACKREST_MIN
+        && leftUnloaded >= UAT_FSR_OPPOSITE_UNLOADED_MIN
+        && reading.backrestLRBalance <= -UAT_FSR_SIDE_BALANCE_MIN;
+
+    const bool patternActive = hardLeft || hardRight;
+
+    state.fsrControlledPatternActive = patternActive;
+    state.fsrControlledSide =
+        hardLeft && !hardRight
+            ? -1
+            : hardRight && !hardLeft
+                ? 1
+                : 0;
+
+    if (!patternActive)
+    {
+        fsrControlledCandidateSinceMillis = 0;
+        state.fsrControlledCandidateMs = 0;
+        state.fsrControlledStrongVote = false;
+        return;
+    }
+
+    if (fsrControlledCandidateSinceMillis == 0)
+    {
+        fsrControlledCandidateSinceMillis = now;
+    }
+
+    state.fsrControlledCandidateMs =
+        static_cast<uint32_t>(
+            now - fsrControlledCandidateSinceMillis
+        );
+
+    state.fsrControlledStrongVote =
+        state.fsrControlledCandidateMs >= UAT_FSR_CONTROLLED_PERSIST_MS;
 }
 
 void SafeSeatUatInjection::applyMlx(MLXReading &reading)

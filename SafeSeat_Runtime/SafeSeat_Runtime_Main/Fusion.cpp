@@ -787,7 +787,16 @@ void FusionEngine::update(
             >
             0.28f;
 
-        if (
+        // During an explicitly armed controlled UAT session, a sustained
+        // extreme side-unload/contact-loss pattern can supply ONE strong FSR
+        // vote. This is separate from the deployed IF/OCSVM result and is
+        // never active in normal monitoring.
+        if (input.fsr.controlledUatStrongVote)
+        {
+            fsrStrongAnomaly =
+                true;
+        }
+        else if (
             hasStrongModelAnomaly(
                 input.fsr.model
             )
@@ -814,13 +823,6 @@ void FusionEngine::update(
                 FusionPressureState::CONTACT_LOSS;
         }
         else if (
-            stronglyAsymmetric
-        )
-        {
-            reading.pressure =
-                FusionPressureState::ASYMMETRIC;
-        }
-        else if (
             fsrStrongAnomaly
             ||
             fsrWeakAnomaly
@@ -828,6 +830,13 @@ void FusionEngine::update(
         {
             reading.pressure =
                 FusionPressureState::ANOMALOUS;
+        }
+        else if (
+            stronglyAsymmetric
+        )
+        {
+            reading.pressure =
+                FusionPressureState::ASYMMETRIC;
         }
         else if (
             modelEvidenceReady
@@ -1095,13 +1104,26 @@ void FusionEngine::update(
     // Persistence / hysteresis
     // --------------------------------------------------------
 
+    // In normal/live operation, strong vehicle/radar motion remains an
+    // artifact gate. During an explicitly armed controlled UAT hard-slump,
+    // however, the body movement itself is the intended stimulus. Do not let
+    // that same movement erase the UAT FSR candidate we are demonstrating.
+    // This exception can only exist when the UAT-only FSR pattern detector
+    // has already persisted long enough to produce its strong vote.
+    const bool controlledFsrUatCandidate =
+        input.fsr.controlledUatStrongVote;
+
+    const bool warningMotionGateClear =
+        !motionArtifactPossible
+        || controlledFsrUatCandidate;
+
     const bool warningCandidate =
         (
             reading.evidence.anomalyEvidenceCount
             >=
             1
             &&
-            !motionArtifactPossible
+            warningMotionGateClear
         )
         ||
         reading.occupancy
@@ -1113,7 +1135,7 @@ void FusionEngine::update(
         >=
         2
         &&
-        !motionArtifactPossible;
+        warningMotionGateClear;
 
     if (
         warningCandidate

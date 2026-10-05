@@ -314,7 +314,17 @@ struct FSRFusionInput
 
     FSRReading reading;
 
+    // Raw deployed FSR IF + OCSVM evidence.
     ModelEvidence model;
+
+    // Research/UAT-only corroborating pressure-pattern evidence.
+    // This never runs outside an explicitly armed /uat controlled test.
+    // It is derived from the REAL/INJECTED 9-FSR contact map and requires
+    // a sustained extreme side-unload pattern before becoming a strong vote.
+    bool controlledUatPatternActive = false;
+    bool controlledUatStrongVote = false;
+    uint32_t controlledUatCandidateMs = 0;
+    int8_t controlledUatSide = 0; // -1=LEFT, +1=RIGHT, 0=NONE
 };
 
 

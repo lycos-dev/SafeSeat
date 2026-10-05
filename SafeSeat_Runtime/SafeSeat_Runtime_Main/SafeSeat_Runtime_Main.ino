@@ -804,30 +804,51 @@ void loop()
 
     handleEngineeringTestSerial();
 
-    // UAT sessions are isolated from live model history. Starting/stopping a
-    // value-injection session clears model windows and Fusion persistence, but
-    // does not change trained parameters or production decision rules.
+    // R5.2 UAT lifecycle:
+    // START / APPLY preserves the live MLX baseline and FSR/MPU/Fusion model
+    // windows. This is essential for a controlled sequence such as
+    // "normal seated baseline -> sustained abnormal value". R5.1 reset the
+    // model here, so an injected 40 C value could become a NEW baseline.
+    // STOP clears UAT-contaminated rolling history before returning to live.
     const SafeSeatUatInjectionState &uatState = uatInjection.getState();
     if (uatState.active != lastUatPipelineActive
         || uatState.sessionId != lastUatPipelineSessionId)
     {
-        fsrML.begin();
-        mlxML.begin();
-        mlxContext.begin();
-        mpuML.begin();
-        fusion.begin();
+        const bool stoppingUat =
+            lastUatPipelineActive
+            && !uatState.active;
 
-        mlxFusionContributionSuspended = false;
-        mlxTargetReacquiring = false;
-        mlxTargetVisibleSinceMillis = 0UL;
+        if (stoppingUat)
+        {
+            fsrML.begin();
+            mlxML.begin();
+            mlxContext.begin();
+            mpuML.begin();
+            fusion.begin();
+
+            mlxFusionContributionSuspended = false;
+            mlxTargetReacquiring = false;
+            mlxTargetVisibleSinceMillis = 0UL;
+
+            Serial.println(
+                "[UAT-INJECT] STOP -> cleared UAT model history; live monitoring will rebuild clean windows."
+            );
+        }
+        else if (uatState.active && !lastUatPipelineActive)
+        {
+            Serial.println(
+                "[UAT-INJECT] START -> preserving existing model windows/baselines."
+            );
+        }
+        else if (uatState.active)
+        {
+            Serial.println(
+                "[UAT-INJECT] New UAT session id -> preserving existing model windows/baselines."
+            );
+        }
 
         lastUatPipelineActive = uatState.active;
         lastUatPipelineSessionId = uatState.sessionId;
-
-        Serial.print("[UAT-INJECT] Main pipeline reset; active=");
-        Serial.print(uatState.active ? "YES" : "NO");
-        Serial.print(" session=");
-        Serial.println(uatState.sessionId);
     }
 
     // Cooperative yield keeps Wi-Fi/ESP-NOW/system tasks responsive. The
@@ -933,6 +954,11 @@ void loop()
     uatInjection.applyMlx(t);
     uatInjection.applyFsr(f);
 
+    // During an explicitly armed UAT session, inspect the resulting physical
+    // or injected FSR contact map for a sustained extreme side unload. This
+    // does not replace the deployed FSR IF/OCSVM; both are shown separately.
+    uatInjection.updateControlledFsrObservation(f);
+
     // ========================================================
     // MLX SESSION / TARGET QUALIFICATION
     //
@@ -974,8 +1000,10 @@ void loop()
     }
 
     // Target-quality gate only -- NOT a medical temperature threshold.
-    // Require a plausible nearby skin-surface signal and meaningful
-    // backrest contact for the headrest-mounted MLX.
+    // The deployed MLX model is session-baseline-relative. A narrow 28-40 C
+    // absolute gate was rejecting valid in-vehicle/headrest observations in
+    // the high-20s and then reporting TARGET DEGRADED even though the sensor
+    // and baseline were otherwise valid. Keep only a broad sanity range.
     const bool mlxTargetVisible =
         thermalOccupancy
         &&
@@ -985,9 +1013,11 @@ void loop()
         &&
         t.valid
         &&
-        t.filteredObjectC >= 28.0f
+        isfinite(t.filteredObjectC)
         &&
-        t.filteredObjectC <= 40.0f
+        t.filteredObjectC >= 20.0f
+        &&
+        t.filteredObjectC <= 50.0f
         &&
         f.backrestTotal >= 1500.0f;
 
@@ -1061,12 +1091,15 @@ void loop()
         mlxTargetVisibleSinceMillis = 0UL;
     }
 
-    // UAT-only deterministic thermal transition policy. When synthetic MLX
-    // injection is active, allow an intentional instantaneous value change
-    // (e.g. 31 -> 40 C) to reach the REAL baseline-relative IF+OCSVM path.
-    // Live MLX acquisition always keeps the rapid FOV/geometry guard enabled.
+    // UAT-only deterministic thermal transition policy. While a controlled
+    // test is armed, the evaluator may intentionally create a sudden and then
+    // sustained MLX change using EITHER the physical sensor (hot-water demo)
+    // or value injection. Bypass only the rapid FOV quarantine in that mode.
+    // The 1-s stability gate, personal baseline, IF+OCSVM, 3-block anomaly
+    // persistence and 4-s Fusion warning persistence still remain active.
     mlxML.setUatRapidTransitionBypass(
-        uatState.active && uatState.injectMlx
+        uatState.active
+        && uatState.mlxRapidTransitionBypass
     );
 
     // Read current ML state BEFORE deciding whether to advance it.
@@ -1269,6 +1302,26 @@ void loop()
         fml.valid
             ? 1.0f
             : 0.0f;
+
+    // UAT-only physical/injected contact-pattern corroboration. Outside an
+    // armed controlled test these fields are always false/zero.
+    fusionInput.fsr.controlledUatPatternActive =
+        uatState.active
+        && uatState.fsrControlledPatternActive;
+
+    fusionInput.fsr.controlledUatStrongVote =
+        uatState.active
+        && uatState.fsrControlledStrongVote;
+
+    fusionInput.fsr.controlledUatCandidateMs =
+        uatState.active
+            ? uatState.fsrControlledCandidateMs
+            : 0U;
+
+    fusionInput.fsr.controlledUatSide =
+        uatState.active
+            ? uatState.fsrControlledSide
+            : 0;
 
     fusionInput.mpu.health =
         mapSensorHealth(
