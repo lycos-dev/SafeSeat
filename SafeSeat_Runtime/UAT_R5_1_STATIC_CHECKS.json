@@ -1,0 +1,34 @@
+{
+  "package": "SafeSeat Runtime 5.9.9-R5.1",
+  "date": "2026-10-05",
+  "result": "PASS",
+  "checks": {
+    "uat_bypass_declared_and_defined": true,
+    "uat_bypass_only_skips_geometry_guard": true,
+    "uat_bypass_main_condition_active_and_inject_mlx": true,
+    "live_guard_default_false": true,
+    "object_ta_not_fusion_degraded_branch": true,
+    "true_geometry_still_degrades_fusion": true,
+    "target_loss_suspension_still_degrades_fusion": true,
+    "explicit_low_contrast_info_flag": true,
+    "low_contrast_not_context_degraded": true,
+    "api_exposes_demo_policy": true,
+    "api_object_ta_gate_false": true,
+    "api_exposes_low_contrast_info": true,
+    "recorder_ui_present": true,
+    "recorder_capture_present": true,
+    "recorder_csv_download_present": true,
+    "recorder_contains_fusion_and_models": true,
+    "mlx_jump_preset_40": true,
+    "uat_page_explains_demo_only": true,
+    "main_c1001_protocol_headers_identical": true,
+    "no_direct_warning_endpoint_reintroduced": true,
+    "uat_javascript_syntax": true,
+    "mlx_context_host_syntax_compile": true
+  },
+  "notes": [
+    "The embedded /uat JavaScript passed node --check.",
+    "Modified MLXML.cpp, MLXContext.cpp and MLXNativeInference.cpp passed a host -fsyntax-only compile with lightweight Arduino/MLX hardware stubs.",
+    "This remains source/static validation; the actual ESP32 board build/flash and hardware bench test must be run on the SafeSeat setup."
+  ]
+}

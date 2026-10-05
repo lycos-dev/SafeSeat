@@ -41,8 +41,8 @@ bool SafeSeatApi::begin(
     Serial.println("[API] Camera   : /api/v1/camera");
     Serial.println("[API] Network  : /api/v1/network");
     Serial.println("[API] Health   : /health");
-    Serial.println("[API] Maint.   : /uat (read-only; manual refresh by default)");
-    Serial.println("[API] MaintLive: optional 5-second single-snapshot refresh");
+    Serial.println("[API] UAT      : /uat (live monitor + sensor-value injection)");
+    Serial.println("[API] UAT API  : /api/v1/uat/injection");
 
     return true;
 }
@@ -65,10 +65,15 @@ void SafeSeatApi::registerRoutes()
     server.on("/maintenance", HTTP_GET, [this]() { handleUat(); });
 
     // Legacy UAT endpoints are retained only so old bookmarks/tools fail
-    // explicitly. R3 never injects UAT state from the Main Hub web server.
+    // explicitly. They never inject UAT state directly into Fusion.
     server.on("/api/v1/uat/stimulus", HTTP_GET, [this]() { handleUatStimulusStatus(); });
     server.on("/api/v1/uat/simulate-warning", HTTP_POST, [this]() { handleUatSimulateWarning(); });
     server.on("/api/v1/uat/clear-simulation", HTTP_POST, [this]() { handleUatClearSimulation(); });
+
+    server.on("/api/v1/uat/injection", HTTP_GET, [this]() { handleUatInjectionStatus(); });
+    server.on("/api/v1/uat/injection/start", HTTP_POST, [this]() { handleUatInjectionStart(); });
+    server.on("/api/v1/uat/injection/update", HTTP_POST, [this]() { handleUatInjectionUpdate(); });
+    server.on("/api/v1/uat/injection/stop", HTTP_POST, [this]() { handleUatInjectionStop(); });
 
     server.on("/api/v1/status", HTTP_GET, [this]() { handleStatus(); });
     server.on("/api/v1/fusion", HTTP_GET, [this]() { handleFusion(); });
@@ -104,14 +109,14 @@ a{display:block;margin:8px 0}
 <body>
 <h1>SafeSeat Main Hub</h1>
 <p>Local telemetry API is running.</p>
-<p>The Main Hub Fusion state is authoritative; these endpoints only expose current state.</p>
+<p>The Main Hub Fusion state is authoritative. Telemetry is read-only; /uat additionally provides an explicit research sensor-value injection console.</p>
 <a href="/api/v1/status">/api/v1/status</a>
 <a href="/api/v1/fusion">/api/v1/fusion</a>
 <a href="/api/v1/sensors">/api/v1/sensors</a>
 <a href="/api/v1/camera">/api/v1/camera</a>
 <a href="/api/v1/network">/api/v1/network</a>
 <a href="/health">/health</a>
-<a href="/uat">/uat — maintenance monitor</a>
+<a href="/uat">/uat — research & validation console</a>
 </body>
 </html>
 )rawliteral";
@@ -127,10 +132,8 @@ void SafeSeatApi::handleHealth()
 
 void SafeSeatApi::handleUat()
 {
-    // R4 restores /uat as a maintenance/service monitor. The page is read-only
-    // and uses the consolidated /api/v1/status endpoint so each refresh costs
-    // one HTTP request rather than the old four-endpoint burst. Auto-refresh is
-    // OFF by default and, when explicitly enabled, runs only every 5 seconds.
+    // Research & validation console. Sensor-value injection is explicitly
+    // labeled TEST MODE and never writes a Fusion result directly.
     server.sendHeader("Cache-Control", "no-store");
     server.send_P(200, "text/html", SAFESEAT_UAT_PAGE);
 }
@@ -147,7 +150,7 @@ void SafeSeatApi::handleUatSimulateWarning()
 {
     sendJson(
         410,
-        F("{\"ok\":false,\"error\":\"hub_uat_simulation_disabled\",\"hint\":\"Hub-side simulation is disabled. Use the app researcher control for UAT simulation.\"}")
+        F("{\"ok\":false,\"error\":\"direct_warning_simulation_disabled\",\"hint\":\"Direct Warning forcing is disabled. Use /uat sensor-value injection so the real model and Fusion path decides the state.\"}")
     );
 }
 
@@ -155,8 +158,143 @@ void SafeSeatApi::handleUatClearSimulation()
 {
     sendJson(
         410,
-        F("{\"ok\":false,\"error\":\"hub_uat_simulation_disabled\",\"hint\":\"Hub-side simulation is disabled. Clear any UAT simulation from the app researcher control.\"}")
+        F("{\"ok\":false,\"error\":\"direct_warning_simulation_disabled\",\"hint\":\"Direct Warning forcing is disabled. Stop a value-injection test with POST /api/v1/uat/injection/stop.\"}")
     );
+}
+
+
+void SafeSeatApi::applyUatRequestArgs()
+{
+    SafeSeatUatInjection &uat = SafeSeatUatInjection::instance();
+    const SafeSeatUatInjectionState s = uat.getState();
+
+    auto readBool = [this](const char *name, bool fallback) -> bool
+    {
+        if (!server.hasArg(name)) return fallback;
+        String v = server.arg(name);
+        v.toLowerCase();
+        return v == "1" || v == "true" || v == "yes" || v == "on";
+    };
+
+    auto readFloat = [this](const char *name, float fallback, float minValue, float maxValue) -> float
+    {
+        if (!server.hasArg(name)) return fallback;
+        const float value = server.arg(name).toFloat();
+        if (!isfinite(value)) return fallback;
+        return constrain(value, minValue, maxValue);
+    };
+
+    auto readInt = [this](const char *name, int fallback, int minValue, int maxValue) -> int
+    {
+        if (!server.hasArg(name)) return fallback;
+        const int value = server.arg(name).toInt();
+        return constrain(value, minValue, maxValue);
+    };
+
+    uat.setInjectFsr(readBool("use_fsr", s.injectFsr));
+    uat.setInjectMlx(readBool("use_mlx", s.injectMlx));
+    uat.setInjectMpu(readBool("use_mpu", s.injectMpu));
+    uat.setInjectC1001(readBool("use_c1001", s.injectC1001));
+
+    for (uint8_t i = 0; i < NUM_FSR; ++i)
+    {
+        const String name = String("fsr") + String(i + 1);
+        uat.setFsrPressure(
+            i,
+            readFloat(name.c_str(), s.fsrPressure[i], 0.0f, 26000.0f)
+        );
+    }
+
+    uat.setMlx(
+        readFloat("mlx_ambient", s.mlxAmbientC, -40.0f, 85.0f),
+        readFloat("mlx_object", s.mlxObjectC, -40.0f, 125.0f)
+    );
+
+    uat.setMpu(
+        readFloat("mpu_ax", s.mpuAccelX, -16.0f, 16.0f),
+        readFloat("mpu_ay", s.mpuAccelY, -16.0f, 16.0f),
+        readFloat("mpu_az", s.mpuAccelZ, -16.0f, 16.0f),
+        readFloat("mpu_gx", s.mpuGyroX, -2000.0f, 2000.0f),
+        readFloat("mpu_gy", s.mpuGyroY, -2000.0f, 2000.0f),
+        readFloat("mpu_gz", s.mpuGyroZ, -2000.0f, 2000.0f)
+    );
+
+    uat.setC1001(
+        readBool("c_present", s.c1001Present),
+        readInt("c_hr", s.c1001HeartRate, 1, 254),
+        readInt("c_rr", s.c1001Respiration, 1, 254),
+        readInt("c_motion", s.c1001Motion, -32768, 32767),
+        readInt("c_move_range", s.c1001MoveRange, -32768, 32767)
+    );
+
+    if (server.hasArg("camera_mode"))
+    {
+        String mode = server.arg("camera_mode");
+        mode.toLowerCase();
+        if (mode == "upright")
+            uat.setCameraMode(SafeSeatUatCameraMode::INJECT_UPRIGHT);
+        else if (mode == "non_upright" || mode == "non-upright")
+            uat.setCameraMode(SafeSeatUatCameraMode::INJECT_NON_UPRIGHT);
+        else
+            uat.setCameraMode(SafeSeatUatCameraMode::REAL_CAMERA);
+    }
+}
+
+void SafeSeatApi::handleUatInjectionStatus()
+{
+    const SafeSeatUatInjectionState &s = SafeSeatUatInjection::instance().getState();
+    String out;
+    out.reserve(1800);
+    out += F("{\"ok\":true,\"active\":");
+    appendJsonBool(out, s.active);
+    out += F(",\"session_id\":"); out += String(s.sessionId);
+    out += F(",\"revision\":"); out += String(s.revision);
+    out += F(",\"elapsed_ms\":"); out += String(s.active ? millis() - s.startedMillis : 0UL);
+    out += F(",\"fusion_authoritative\":true,\"direct_warning_write\":false");
+    out += F(",\"demo_policy\":{\"mlx_rapid_transition_bypass\":");
+    appendJsonBool(out, s.active && s.injectMlx);
+    out += F(",\"object_ta_fusion_gate\":false,\"baseline_and_ml_still_active\":true}");
+    out += F(",\"sources\":{");
+    out += F("\"fsr\":"); appendJsonBool(out, s.injectFsr);
+    out += F(",\"mlx\":"); appendJsonBool(out, s.injectMlx);
+    out += F(",\"mpu\":"); appendJsonBool(out, s.injectMpu);
+    out += F(",\"c1001\":"); appendJsonBool(out, s.injectC1001);
+    out += F("}");
+    out += F(",\"fsr_pressure\":"); appendFloatArray(out, s.fsrPressure, NUM_FSR, 1);
+    out += F(",\"mlx\":{\"ambient_c\":"); appendJsonFloat(out, s.mlxAmbientC, 2);
+    out += F(",\"object_c\":"); appendJsonFloat(out, s.mlxObjectC, 2); out += F("}");
+    out += F(",\"c1001\":{\"present\":"); appendJsonBool(out, s.c1001Present);
+    out += F(",\"heart_rate\":"); out += String(s.c1001HeartRate);
+    out += F(",\"respiration\":"); out += String(s.c1001Respiration);
+    out += F(",\"motion\":"); out += String(s.c1001Motion);
+    out += F(",\"move_range\":"); out += String(s.c1001MoveRange);
+    out += F(",\"processing\":\"remote_node_real_ml\"}");
+    out += F(",\"camera\":{\"mode\":");
+    appendJsonString(out,
+        s.cameraMode == SafeSeatUatCameraMode::INJECT_UPRIGHT ? "upright" :
+        s.cameraMode == SafeSeatUatCameraMode::INJECT_NON_UPRIGHT ? "non_upright" : "real");
+    out += F(",\"verification_only\":true,\"event_triggered\":true}");
+    out += F("}");
+    sendJson(200, out);
+}
+
+void SafeSeatApi::handleUatInjectionStart()
+{
+    applyUatRequestArgs();
+    SafeSeatUatInjection::instance().start();
+    handleUatInjectionStatus();
+}
+
+void SafeSeatApi::handleUatInjectionUpdate()
+{
+    applyUatRequestArgs();
+    handleUatInjectionStatus();
+}
+
+void SafeSeatApi::handleUatInjectionStop()
+{
+    SafeSeatUatInjection::instance().stop();
+    handleUatInjectionStatus();
 }
 
 
@@ -226,7 +364,7 @@ String SafeSeatApi::buildHealthJson() const
     out += String(millis());
     out += F(",\"telemetry_ready\":");
     appendJsonBool(out, telemetryReady);
-    out += F(",\"read_only\":true}");
+    out += F(",\"telemetry_read_only\":true,\"uat_injection_available\":true}");
 
     return out;
 }
@@ -475,7 +613,13 @@ String SafeSeatApi::buildSensorsJson() const
     appendJsonBool(out, in.c1001.reading.motionArtifactActive);
     out += F(",\"model\":");
     appendModelEvidence(out, in.c1001.model);
-    out += F("}");
+    out += F(",\"model_runtime\":{\"status\":");
+    appendJsonString(out, c1001RemoteMLStatusShort(s.c1001Link.remoteMLStatus));
+    out += F(",\"window_samples_collected\":"); out += String(s.c1001Link.remoteWindowSamplesCollected);
+    out += F(",\"window_samples_required\":"); out += String(s.c1001Link.remoteWindowSamplesRequired);
+    out += F(",\"samples_until_next_inference\":"); out += String(s.c1001Link.remoteSamplesUntilNextInference);
+    out += F(",\"windows_evaluated\":"); out += String(s.c1001Link.remoteWindowsEvaluated);
+    out += F("}}");
 
     // --------------------------------------------------------
     // MLX90614
@@ -506,6 +650,8 @@ String SafeSeatApi::buildSensorsJson() const
     appendJsonBool(out, in.mlx.context.thermalContrastQualified);
     out += F(",\"target_contrast_degraded\":");
     appendJsonBool(out, in.mlx.context.targetContrastDegraded);
+    out += F(",\"low_thermal_contrast_info_only\":");
+    appendJsonBool(out, in.mlx.context.lowThermalContrast);
     out += F(",\"low_contrast_samples\":");
     out += String(in.mlx.context.lowContrastSamples);
     out += F(",\"target_losses\":");
@@ -521,6 +667,13 @@ String SafeSeatApi::buildSensorsJson() const
     out += F("}");
     out += F(",\"native_mlx_model\":");
     appendModelEvidence(out, in.mlx.model);
+    out += F(",\"model_runtime\":{\"baseline_blocks_collected\":"); out += String(s.mlxMl.baselineBlocksCollected);
+    out += F(",\"baseline_blocks_required\":"); out += String(s.mlxMl.baselineBlocksRequired);
+    out += F(",\"evaluated_blocks\":"); out += String(s.mlxMl.evaluatedBlocks);
+    out += F(",\"anomaly_candidate_blocks\":"); out += String(s.mlxMl.anomalyCandidateBlocks);
+    out += F(",\"geometry_degraded\":"); appendJsonBool(out, s.mlxMl.geometryDegraded);
+    out += F(",\"reacquiring\":"); appendJsonBool(out, s.mlxMl.reacquiring);
+    out += F("}");
     out += F(",\"native_mlx_model_fusion_role\":");
     appendJsonString(
         out,
@@ -558,7 +711,11 @@ String SafeSeatApi::buildSensorsJson() const
     appendFloatArray(out, in.fsr.reading.modelShare, NUM_FSR, 5);
     out += F(",\"model\":");
     appendModelEvidence(out, in.fsr.model);
-    out += F("}");
+    out += F(",\"model_runtime\":{\"window_samples_collected\":"); out += String(s.fsrMl.windowSamplesCollected);
+    out += F(",\"window_samples_required\":"); out += String(s.fsrMl.windowSamplesRequired);
+    out += F(",\"samples_until_next_inference\":"); out += String(s.fsrMl.samplesUntilNextInference);
+    out += F(",\"windows_evaluated\":"); out += String(s.fsrMl.windowsEvaluated);
+    out += F("}}");
 
     // --------------------------------------------------------
     // MPU6050
@@ -580,6 +737,12 @@ String SafeSeatApi::buildSensorsJson() const
     appendJsonFloat(out, in.mpu.reading.dynamicAcceleration, 4);
     out += F(",\"road_motion_model\":");
     appendModelEvidence(out, in.mpu.model);
+    out += F(",\"model_runtime\":{\"baseline_ready\":"); appendJsonBool(out, s.mpuMl.stationaryBaselineReady);
+    out += F(",\"baseline_samples_collected\":"); out += String(s.mpuMl.baselineSamplesCollected);
+    out += F(",\"window_samples_collected\":"); out += String(s.mpuMl.windowSamplesCollected);
+    out += F(",\"window_samples_required\":"); out += String(s.mpuMl.windowSamplesRequired);
+    out += F(",\"windows_evaluated\":"); out += String(s.mpuMl.windowsEvaluated);
+    out += F("}");
     out += F(",\"model_interpretation\":\"road_domain_diagnostic_only_after_physical_motion\",\"fusion_role\":\"vehicle_motion_context_for_fsr_artifact_handling\"}");
 
     // Close the top-level sensors object opened before c1001.

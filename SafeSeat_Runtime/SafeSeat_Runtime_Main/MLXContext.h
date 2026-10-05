@@ -45,6 +45,11 @@ struct MLXContextReading
     // Optical/thermal quality gate only. This is NOT a body-
     // temperature calculation and is NOT a medical threshold.
     bool thermalContrastQualified = false;
+
+    // Low Object-Ta contrast is diagnostic information only. It has no
+    // authority over baseline/model/Fusion voting. targetContrastDegraded is
+    // reserved for actual geometry/reacquisition quality loss.
+    bool lowThermalContrast = false;
     bool targetContrastDegraded = false;
     bool geometryDegraded = false;
     bool reacquiring = false;

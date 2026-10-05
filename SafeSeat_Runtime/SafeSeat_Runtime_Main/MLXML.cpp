@@ -4,6 +4,7 @@
 
 void MLXML::begin()
 {
+    uatRapidTransitionBypass = false;
     reading = MLXMLReading{};
     reading.modelAvailable = true;
     reading.baselineBlocksRequired = BASELINE_BLOCK_COUNT;
@@ -22,9 +23,34 @@ void MLXML::begin()
     Serial.println("[MLX-ML] Low thermal contrast is reported but does NOT reset/block baseline or ML.");
     Serial.println("[MLX-ML] Filtered 1-s transition guard: std <= 1.00 C.");
     Serial.println("[MLX-ML] FOV guard: rapid 1-2 s shifts -> TARGET GEOMETRY DEGRADED.");
+    Serial.println("[MLX-ML] UAT synthetic MLX injection can bypass ONLY that rapid-transition guard.");
     Serial.println("[MLX-ML] Geometry hold preserves baseline; 3 stable near-baseline sec reacquire.");
     Serial.println("[MLX-ML] Anomaly vote requires 3 consecutive trusted anomalous blocks.");
     Serial.println("[MLX-ML] IF + tuned OCSVM active and available to Fusion.");
+}
+
+void MLXML::setUatRapidTransitionBypass(bool enabled)
+{
+    // This switch exists only so the /uat synthetic-value console can
+    // exercise the deployed baseline-relative model deterministically.
+    // It is set false during normal/live acquisition.
+    if (enabled && !uatRapidTransitionBypass)
+    {
+        // Do not carry a prior geometry quarantine into a controlled
+        // injection sequence. The learned session baseline is preserved.
+        geometryHold = false;
+        geometryReacquireCount = 0;
+        reading.geometryDegraded = false;
+        reading.reacquiring = false;
+        reading.geometryReacquireStableBlocks = 0;
+    }
+
+    uatRapidTransitionBypass = enabled;
+}
+
+bool MLXML::isUatRapidTransitionBypassEnabled() const
+{
+    return uatRapidTransitionBypass;
 }
 
 void MLXML::clearDecision()
@@ -195,7 +221,7 @@ void MLXML::processOneSecondBlock()
     // the MLX channel instead of creating immediate anomaly
     // evidence. The personal baseline is preserved.
     // --------------------------------------------------------
-    if (reading.baselineReady)
+    if (reading.baselineReady && !uatRapidTransitionBypass)
     {
         const float deviationFromBaseline =
             objectMean - reading.baselineObjectC;

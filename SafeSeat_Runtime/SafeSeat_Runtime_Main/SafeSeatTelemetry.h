@@ -6,9 +6,12 @@
 #include "C1001Comm.h"
 #include "CameraComm.h"
 #include "SafeSeatAccessPoint.h"
+#include "FSRML.h"
+#include "MLXML.h"
+#include "MPUML.h"
 
 // ============================================================
-// SAFESEAT TELEMETRY SNAPSHOT - STEP 5.9.8
+// SAFESEAT TELEMETRY SNAPSHOT - STEP 5.9.9-R5
 //
 // This is a read-only copy of the latest Main Hub state for the
 // local API/frontend layer. It does not change sensor, Fusion,
@@ -24,6 +27,9 @@ struct SafeSeatTelemetrySnapshot
     FusionReading fusion{};
 
     C1001RemoteStatus c1001Link{};
+    FSRMLReading fsrMl{};
+    MLXMLReading mlxMl{};
+    MPUMLReading mpuMl{};
     CameraRemoteStatus cameraLink{};
     SafeSeatAccessPointStatus network{};
 };
@@ -35,6 +41,9 @@ public:
         const FusionInput &input,
         const FusionReading &fusionReading,
         const C1001RemoteStatus &c1001Status,
+        const FSRMLReading &fsrMlReading,
+        const MLXMLReading &mlxMlReading,
+        const MPUMLReading &mpuMlReading,
         const CameraRemoteStatus &cameraStatus,
         const SafeSeatAccessPointStatus &networkStatus
     );

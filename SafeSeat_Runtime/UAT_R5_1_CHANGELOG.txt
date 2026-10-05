@@ -1,0 +1,25 @@
+SafeSeat 5.9.9-R5.1 changes — 2026-10-05
+
+Modified Main Hub source:
+- MLXML.h / MLXML.cpp
+  * UAT-only rapid transition/FOV guard bypass for synthetic MLX values.
+  * Live path remains guarded.
+- MLXContext.h / MLXContext.cpp
+  * Explicit lowThermalContrast diagnostic flag.
+  * Low Object-Ta no longer means target degraded/held.
+- Fusion.cpp
+  * Removed low-contrast -> TARGET_DEGRADED mapping.
+- SafeSeat_Runtime_Main.ino
+  * Enables rapid-transition bypass only while UAT is active + MLX injected.
+  * Adds clear serial indication of UAT bypass vs live guard.
+- SafeSeatApi.cpp
+  * Adds UAT demo_policy telemetry and explicit low-contrast-info-only field.
+- SafeSeatUatPage.h
+  * Record Session -> downloadable CSV.
+  * MLX Object-Ta/fusion/guard visibility.
+  * 40 C thermal jump preset.
+  * Updated UAT explanation.
+
+No trained model parameters or Fusion vote thresholds were changed.
+No camera firmware was changed.
+No direct Warning/Emergency write was added.

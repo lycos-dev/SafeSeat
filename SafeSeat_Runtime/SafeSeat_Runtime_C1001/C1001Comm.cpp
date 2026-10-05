@@ -68,6 +68,9 @@ bool C1001Comm::begin()
     hubBeaconsReceived = 0;
     nextScanChannel = currentChannel;
     lastChannelHopMillis = millis();
+    uat = C1001UatInjectionState{};
+    lastUatSyntheticSampleMillis = 0;
+    uatSyntheticSampleSequence = 0;
 
     return true;
 }
@@ -169,34 +172,126 @@ void C1001Comm::onReceive(
 {
     (void)info;
 
-    if (
-        data == nullptr
-        || len != static_cast<int>(sizeof(SafeSeatHubBeacon))
-    )
+    if (data == nullptr || len < 4)
     {
         return;
     }
 
-    SafeSeatHubBeacon beacon;
-    memcpy(&beacon, data, sizeof(beacon));
+    uint16_t magic = 0;
+    memcpy(&magic, data, sizeof(magic));
 
     if (
-        beacon.magic != SAFESEAT_HUB_BEACON_MAGIC
-        || beacon.version != SAFESEAT_NOW_PROTOCOL_VERSION
-        || beacon.packetSize != sizeof(SafeSeatHubBeacon)
-        || beacon.checksum != safeSeatHubBeaconChecksum(beacon)
-        || beacon.channel < SAFESEAT_ESPNOW_MIN_CHANNEL
-        || beacon.channel > SAFESEAT_ESPNOW_MAX_CHANNEL
+        magic == SAFESEAT_HUB_BEACON_MAGIC
+        && len == static_cast<int>(sizeof(SafeSeatHubBeacon))
     )
     {
+        SafeSeatHubBeacon beacon;
+        memcpy(&beacon, data, sizeof(beacon));
+
+        if (
+            beacon.version != SAFESEAT_NOW_PROTOCOL_VERSION
+            || beacon.packetSize != sizeof(SafeSeatHubBeacon)
+            || beacon.checksum != safeSeatHubBeaconChecksum(beacon)
+            || beacon.channel < SAFESEAT_ESPNOW_MIN_CHANNEL
+            || beacon.channel > SAFESEAT_ESPNOW_MAX_CHANNEL
+        )
+        {
+            return;
+        }
+
+        currentChannel = beacon.channel;
+        nextScanChannel = beacon.channel;
+        lastHubBeaconMillis = millis();
+        hubBeaconsReceived++;
+        hubLocked = true;
         return;
     }
 
-    currentChannel = beacon.channel;
-    nextScanChannel = beacon.channel;
-    lastHubBeaconMillis = millis();
-    hubBeaconsReceived++;
-    hubLocked = true;
+    if (
+        magic == C1001_UAT_COMMAND_MAGIC
+        && len == static_cast<int>(sizeof(C1001UatCommandPacket))
+    )
+    {
+        C1001UatCommandPacket packet;
+        memcpy(&packet, data, sizeof(packet));
+
+        if (
+            packet.version != C1001_UAT_COMMAND_VERSION
+            || packet.packetSize != sizeof(C1001UatCommandPacket)
+            || packet.checksum != c1001UatCommandChecksum(packet)
+        )
+        {
+            return;
+        }
+
+        const bool sessionChanged = packet.sessionId != uat.sessionId;
+        uat.enabled = (packet.flags & C1001_UAT_FLAG_ENABLED) != 0;
+        uat.present = (packet.flags & C1001_UAT_FLAG_PRESENT) != 0;
+        uat.sessionId = packet.sessionId;
+        uat.sequence = packet.sequence;
+        uat.heartRate = packet.heartRate;
+        uat.respiration = packet.respiration;
+        uat.motion = packet.motion;
+        uat.moveRange = packet.moveRange;
+        uat.lastCommandMillis = millis();
+
+        if (sessionChanged)
+        {
+            lastUatSyntheticSampleMillis = 0;
+            uatSyntheticSampleSequence = 0;
+        }
+        return;
+    }
+}
+
+
+
+bool C1001Comm::isUatInjectionActive() const
+{
+    return uat.enabled
+        && uat.lastCommandMillis != 0
+        && millis() - uat.lastCommandMillis <= 2500UL;
+}
+
+bool C1001Comm::applyUatInjection(C1001Reading &reading)
+{
+    if (!isUatInjectionActive())
+    {
+        return false;
+    }
+
+    const unsigned long now = millis();
+    if (lastUatSyntheticSampleMillis == 0
+        || now - lastUatSyntheticSampleMillis >= 1000UL)
+    {
+        lastUatSyntheticSampleMillis = now;
+        uatSyntheticSampleSequence++;
+    }
+
+    reading = C1001Reading{};
+    reading.connected = true;
+    reading.present = uat.present;
+    reading.motion = uat.motion;
+    reading.moveRange = uat.moveRange;
+    reading.rawRespiration = uat.respiration;
+    reading.rawHeartRate = uat.heartRate;
+    reading.medianRespiration = uat.respiration;
+    reading.medianHeartRate = uat.heartRate;
+    reading.filteredRespiration = static_cast<float>(uat.respiration);
+    reading.filteredHeartRate = static_cast<float>(uat.heartRate);
+    reading.validRespiration = uat.respiration > 0;
+    reading.validHeartRate = uat.heartRate > 0;
+    reading.validPair = reading.validRespiration && reading.validHeartRate;
+    reading.warmedUp = true;
+    reading.trustedVitalsAvailable = reading.present && reading.validPair;
+    reading.motionArtifactActive = uat.moveRange >= 30;
+    reading.sampleSequence = uatSyntheticSampleSequence;
+    reading.sampleTimestampMillis = lastUatSyntheticSampleMillis;
+    reading.status = reading.present
+        ? C1001Status::TRUSTED
+        : C1001Status::NO_OCCUPANT;
+    reading.warmupRemainingSeconds = 0;
+    return true;
 }
 
 void C1001Comm::update(

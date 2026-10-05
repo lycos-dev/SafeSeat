@@ -1,0 +1,27 @@
+{
+  "package": "SafeSeat Runtime 5.9.9-R5",
+  "date": "2026-10-05",
+  "result": "PASS",
+  "checks": {
+    "uat_routes_registered": true,
+    "direct_warning_web_endpoint_disabled_410": true,
+    "camera_synthetic_requires_fusion_trigger_edge": true,
+    "camera_synthetic_only_when_uat_selected": true,
+    "physical_camera_verification_suppressed_for_synthetic_uat": true,
+    "camera_event_ordering_evidence_fusion_request_service": true,
+    "c1001_uat_received_on_remote_node": true,
+    "c1001_real_ml_runs_after_injection": true,
+    "c1001_command_timeout_present": true,
+    "fsr_real_ml_called_after_local_injection": true,
+    "mlx_real_ml_called_after_local_injection": true,
+    "mpu_real_ml_called_after_local_injection": true,
+    "fusion_authoritative_exposed": true,
+    "uat_javascript_syntax": true,
+    "raw_source_brace_counts_balanced": true
+  },
+  "notes": [
+    "Embedded /uat JavaScript passed node --check.",
+    "Main and C1001 UAT protocol headers are byte-identical and host-compile with the 24-byte packet static_assert.",
+    "This is source/static validation only; the ESP32 Arduino hardware toolchain and physical devices were not available in this environment."
+  ]
+}

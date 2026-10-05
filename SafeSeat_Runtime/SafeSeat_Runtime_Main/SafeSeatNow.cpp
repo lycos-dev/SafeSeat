@@ -324,3 +324,29 @@ bool SafeSeatNow::sendCameraCommand(
     status.cameraCommandSendErrors++;
     return false;
 }
+
+bool SafeSeatNow::sendC1001UatCommand(
+    const C1001UatCommandPacket &packet
+)
+{
+    if (!status.initialized)
+    {
+        return false;
+    }
+
+    const esp_err_t result = esp_now_send(
+        BROADCAST_MAC,
+        reinterpret_cast<const uint8_t *>(&packet),
+        sizeof(packet)
+    );
+
+    if (result == ESP_OK)
+    {
+        status.c1001UatCommandsSent++;
+        return true;
+    }
+
+    status.c1001UatCommandSendErrors++;
+    return false;
+}
+

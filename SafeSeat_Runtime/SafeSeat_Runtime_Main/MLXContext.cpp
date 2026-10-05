@@ -25,6 +25,7 @@ void MLXContext::begin()
         0U;
 
     resetBaseline();
+    reading.lowThermalContrast = false;
     reading.targetContrastDegraded = false;
     reading.lowContrastSamples = 0;
 
@@ -98,6 +99,7 @@ void MLXContext::update(
     {
         reading.valid = false;
         reading.thermalContrastQualified = false;
+        reading.lowThermalContrast = false;
         reading.targetContrastDegraded = false;
         reading.status =
             MLXContextStatus::UNAVAILABLE;
@@ -125,15 +127,18 @@ void MLXContext::update(
     reading.reacquiring =
         modelReading.reacquiring;
 
+    reading.lowThermalContrast =
+        !reading.thermalContrastQualified;
+
+    // Only true geometry/reacquisition problems are degraded/held.
+    // Object-Ta < 2 C remains visible as information, not a gate.
     reading.targetContrastDegraded =
         modelReading.geometryDegraded
         ||
-        modelReading.reacquiring
-        ||
-        !reading.thermalContrastQualified;
+        modelReading.reacquiring;
 
     reading.lowContrastSamples =
-        reading.targetContrastDegraded
+        reading.lowThermalContrast
             ? 1U
             : 0U;
 
@@ -203,7 +208,9 @@ void MLXContext::update(
             -
             reading.baselineObjectC;
         reading.status =
-            MLXContextStatus::TARGET_CONTRAST_DEGRADED;
+            (reading.geometryDegraded || reading.reacquiring)
+                ? MLXContextStatus::TARGET_CONTRAST_DEGRADED
+                : MLXContextStatus::STABLE;
         return;
     }
 
@@ -221,13 +228,6 @@ void MLXContext::update(
     {
         reading.status =
             MLXContextStatus::CONTEXT_CHANGE;
-    }
-    else if (reading.targetContrastDegraded)
-    {
-        // Still valid. Low contrast is only a confidence/context
-        // annotation and does not suppress the native model.
-        reading.status =
-            MLXContextStatus::TARGET_CONTRAST_DEGRADED;
     }
     else
     {

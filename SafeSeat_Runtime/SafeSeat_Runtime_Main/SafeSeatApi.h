@@ -4,34 +4,39 @@
 #include <WebServer.h>
 
 #include "SafeSeatTelemetry.h"
+#include "SafeSeatUatInjection.h"
 
 // ============================================================
-// SAFESEAT LOCAL TELEMETRY API + RESEARCHER UAT CONTROL
+// SAFESEAT LOCAL TELEMETRY API + RESEARCHER UAT CONTROL — R5
 //
 // Main Hub address: http://192.168.4.1
 //
-// Canonical endpoints:
+// Canonical telemetry endpoints:
 //   GET /api/v1/status
 //   GET /api/v1/fusion
 //   GET /api/v1/sensors
 //   GET /api/v1/camera
 //   GET /api/v1/network
 //   GET /health
-//   GET /uat  (read-only maintenance monitor; manual refresh by default)
-//   GET  /api/v1/uat/stimulus
-//   POST /api/v1/uat/simulate-warning
-//   POST /api/v1/uat/clear-simulation
 //
-// Short aliases are retained for development convenience:
-//   /status, /sensors, /camera, /network
+// Research / validation console:
+//   GET  /uat
+//   GET  /api/v1/uat/injection
+//   POST /api/v1/uat/injection/start
+//   POST /api/v1/uat/injection/update
+//   POST /api/v1/uat/injection/stop
+//
+// Legacy direct-Warning simulation endpoints remain disabled (HTTP 410).
 //
 // IMPORTANT:
-// - Telemetry endpoints expose Main/Fusion state only.
-// - Fusion remains authoritative; the API never writes a Fusion result directly.
-// - R3 keeps /uat lightweight; UAT state simulation is local to the mobile app.
-// - Legacy UAT POST endpoints are disabled and return HTTP 410.
-// - No web endpoint injects WARNING/EMERGENCY or directly triggers/cancels camera/alerts.
-// - No Firebase/backend technology is assumed here.
+// - Fusion remains authoritative; no API endpoint writes WARNING/EMERGENCY.
+// - Injected FSR/MLX/MPU values enter their deployed processing/model path.
+// - C1001 injected HR/RR are sent to the remote C1001 node, whose deployed
+//   30-second IF + OCSVM model still produces the evidence returned to Main.
+// - Camera remains verification-only and event-triggered. A configured
+//   synthetic UPRIGHT/NON_UPRIGHT result is held until Fusion itself requests
+//   camera verification; it cannot create the original emergency candidate.
+// - Stopping a test restores live sensor acquisition; reboot starts live.
 // ============================================================
 
 class SafeSeatApi
@@ -63,6 +68,11 @@ private:
     void handleUatStimulusStatus();
     void handleUatSimulateWarning();
     void handleUatClearSimulation();
+    void handleUatInjectionStatus();
+    void handleUatInjectionStart();
+    void handleUatInjectionUpdate();
+    void handleUatInjectionStop();
+    void applyUatRequestArgs();
     void handleStatus();
     void handleFusion();
     void handleSensors();

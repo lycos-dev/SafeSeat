@@ -1,77 +1,43 @@
-SAFESEAT RUNTIME — CAMERA ESP-NOW V5 INTEGRATED
-================================================
-Step: 5.9.9
-Date: 2026-08-26
+SAFESEAT RUNTIME — R5.1 UAT RECORDER + MLX DEMO POLICY
+=======================================================
+Step: 5.9.9-R5.1
+Date: 2026-10-05
 
-WHAT THIS PACKAGE IS
---------------------
-This is the matched SafeSeat runtime package for the Main Hub, remote C1001
-node, and ESP32-S3 camera node. It is based on the uploaded current runtime and
-adds the validated Robust 7D camera as a passenger-session ESP-NOW verifier.
-
-ACTIVE NODES
+WHAT CHANGED
 ------------
-1) SafeSeat_Runtime_Main
-   Arduino Main Hub. Existing FSR / MLX90614 / MPU6050 / Fusion behavior is
-   preserved. CameraComm + CameraProtocol + SafeSeatNow were updated for the
-   new command/session protocol.
+This package is based on the uploaded R5 sensor-value injection runtime.
+The researcher console remains at:
 
-2) SafeSeat_Runtime_C1001
-   Existing C1001 ESP-NOW node. Functional files are unchanged.
+  http://192.168.4.1/uat
 
-3) SafeSeat_Runtime_ESP32S3_CAM
-   ESP-IDF camera node. Uses the exact validated V4 Robust 7D model core plus
-   passenger-session calibration, true idle, and ESP-NOW commands/results.
+R5.1 adds:
+- Record Session -> downloadable CSV with Fusion/sensor/model evidence.
+- MLX Object-Ta < 2 C is diagnostic information only; it no longer makes
+  Fusion report TARGET DEGRADED / HELD by itself.
+- During active SYNTHETIC MLX UAT injection only, the rapid 1-2 s FOV
+  transition hold is bypassed so a controlled jump such as 31 -> 40 C can
+  reach the real baseline-relative MLX IF+OCSVM model.
+- The live physical MLX path keeps its geometry/FOV guard enabled.
 
-PVDF/Piezo is NOT part of the final runtime and is intentionally omitted.
+WHAT DID NOT CHANGE
+-------------------
+- Fusion remains authoritative. The page does not directly force Warning or
+  Emergency.
+- MLX still uses the 30-s session baseline, 1-s stability check, IF+OCSVM and
+  3-block anomaly persistence.
+- Existing multi-sensor voting thresholds were not changed.
+- Camera remains event-triggered verification only.
 
-PASSENGER / CAMERA LIFECYCLE
-----------------------------
-Seat becomes stably occupied
- -> Main Hub creates a passenger camera session
- -> Main sends CALIBRATE_UPRIGHT
- -> camera collects 5 valid upright poses in the background
- -> baseline is tagged to that passenger session and saved to NVS
- -> camera becomes IDLE (no continuous YOLO inference)
-
-Fusion later requests verification
- -> Main sends VERIFY_POSTURE
- -> camera wakes and performs pose verification
- -> UPRIGHT_CONFIRMED can finish after one valid normal inference
- -> non-upright requires two valid abnormal observations
- -> UNKNOWN / low-confidence / blur never votes anomaly
- -> camera returns to IDLE after the transaction
-
-Seat becomes stably empty
- -> Main sends RESET_SESSION
- -> passenger baseline is invalidated
- -> next passenger receives a new calibration session
-
-IMPORTANT ABOUT CALIBRATION TIME
---------------------------------
-The camera still uses the proven 5-valid-pose calibration. Each YOLO11n-Pose
-inference is slow on ESP32-S3, so first-passenger calibration can take minutes,
-especially if a frame is blurred or nose/shoulders are not detected. This is
-intentional for reliability. The improvement in V5 is lifecycle: calibration
-runs only once per passenger session in the background and is NOT on the
-emergency verification path.
-
-FILES TO OPEN
+FLASHING NOTE
 -------------
-Main Hub (Arduino IDE):
-  SafeSeat_Runtime_Main\SafeSeat_Runtime_Main.ino
+Flash SafeSeat_Runtime_Main for the R5.1 changes.
 
-C1001 node (Arduino IDE):
-  SafeSeat_Runtime_C1001\SafeSeat_Runtime_C1001.ino
+R5 already introduced the shared C1001 UAT command. If the C1001 node is not
+already running the matching R5 firmware from this package, flash
+SafeSeat_Runtime_C1001 as well. Camera firmware is unchanged by R5.1.
 
-Integrated camera (ESP-IDF):
-  SafeSeat_Runtime_ESP32S3_CAM\
-
-START WITH
-----------
-Read:
-  STEP_5_9_9_CAMERA_ESPNOW_README.txt
-  CAMERA_V5_INTEGRATION_TEST_REPORT.json
-
-Do not merge the separate standalone diagnostic camera package into this
-integrated camera folder. They serve different purposes.
+READ NEXT
+---------
+UAT_SENSOR_VALUE_INJECTION_R5_README.txt
+UAT_R5_1_CHANGELOG.txt
+FINAL_RUNTIME_README.txt

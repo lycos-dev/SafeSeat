@@ -120,6 +120,14 @@ public:
     void begin();
     void update(const MLXReading &sensorReading, bool seatOccupied);
 
+    // Research/UAT only: synthetic MLX value injection may intentionally
+    // create an instantaneous temperature step (for example 31 -> 40 C).
+    // When enabled, only the rapid-transition/FOV geometry hold is bypassed;
+    // the 30-s baseline, stability check, IF+OCSVM and anomaly persistence
+    // remain active. Live sensor mode must keep this disabled.
+    void setUatRapidTransitionBypass(bool enabled);
+    bool isUatRapidTransitionBypassEnabled() const;
+
     const MLXMLReading& getReading() const;
     const char* getStatusText() const;
 
@@ -166,6 +174,7 @@ private:
     uint8_t lowContrastBlockCount = 0; // diagnostic only
 
     bool geometryHold = false;
+    bool uatRapidTransitionBypass = false;
     uint8_t geometryReacquireCount = 0;
     uint8_t consecutiveAnomalyBlocks = 0;
 

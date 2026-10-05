@@ -1,9 +1,19 @@
 USE THIS BUILD
 ==============
-SafeSeat Camera Integrated V5.3.2 ESP-NOW Verification-Safe
+SafeSeat Runtime Step 5.9.9-R5 — UAT Sensor-Value Injection
+Date: 2026-10-05
 
-Overlay target:
-C:\Users\Lycos Blanza\Downloads\SAFESEAT\SafeSeat_Runtime
+Main Hub:
+  SafeSeat_Runtime_Main\SafeSeat_Runtime_Main.ino
 
-This package changes the ESP32-S3 camera runtime only.
-ESP-NOW protocol remains v2; NVS passenger baseline remains baseline_v53.
+C1001 node:
+  SafeSeat_Runtime_C1001\SafeSeat_Runtime_C1001.ino
+
+Camera:
+  SafeSeat_Runtime_ESP32S3_CAM\
+  (camera code is unchanged by R5 value injection)
+
+After flashing Main + C1001, connect to the SafeSeat AP and open:
+  http://192.168.4.1/uat
+
+Read UAT_SENSOR_VALUE_INJECTION_R5_README.txt before use.

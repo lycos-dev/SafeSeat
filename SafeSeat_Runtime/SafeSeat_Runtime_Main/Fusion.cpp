@@ -893,8 +893,10 @@ void FusionEngine::update(
     // suppress the baseline-relative IF/OCSVM model.
     // --------------------------------------------------------
 
-    const bool mlxTargetDegraded =
-        input.mlx.context.targetContrastDegraded;
+    // Object-Ta / low thermal contrast is diagnostic context only.
+    // The native MLX model is baseline-relative, so low contrast must not
+    // be translated into TARGET_DEGRADED / HELD by Fusion. True geometry
+    // degradation and target-loss suspension are handled separately below.
 
     const bool mlxGeometryDegraded =
         input.mlx.context.geometryDegraded
@@ -961,12 +963,6 @@ void FusionEngine::update(
     else if (mlxContextChanged)
     {
         reading.temperature = FusionTemperatureState::CONTEXT_CHANGE;
-    }
-    else if (mlxTargetDegraded)
-    {
-        // LOW Object-Ta contrast is visible to Fusion but does
-        // not invalidate the shared baseline/model anymore.
-        reading.temperature = FusionTemperatureState::TARGET_DEGRADED;
     }
     else
     {

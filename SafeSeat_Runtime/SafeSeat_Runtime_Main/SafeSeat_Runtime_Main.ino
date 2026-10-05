@@ -19,6 +19,7 @@
 #include "SafeSeatTelemetry.h"
 #include "SafeSeatApi.h"
 #include "SafeSeatRecovery.h"
+#include "SafeSeatUatInjection.h"
 
 
 // ============================================================
@@ -38,6 +39,9 @@ CameraComm cameraComm;
 SafeSeatAccessPoint safeSeatAccessPoint;
 SafeSeatTelemetry safeSeatTelemetry;
 SafeSeatApi safeSeatApi;
+SafeSeatUatInjection &uatInjection = SafeSeatUatInjection::instance();
+bool lastUatPipelineActive = false;
+uint32_t lastUatPipelineSessionId = 0;
 
 
 // ============================================================
@@ -447,7 +451,7 @@ void setup()
     );
 
     Serial.println(
-        " Step 5.9.9-R3 - resilient I2C/FSR recovery + app-local UAT"
+        " Step 5.9.9-R5 - UAT sensor-value injection + event camera"
     );
 
     Serial.println(
@@ -800,6 +804,32 @@ void loop()
 
     handleEngineeringTestSerial();
 
+    // UAT sessions are isolated from live model history. Starting/stopping a
+    // value-injection session clears model windows and Fusion persistence, but
+    // does not change trained parameters or production decision rules.
+    const SafeSeatUatInjectionState &uatState = uatInjection.getState();
+    if (uatState.active != lastUatPipelineActive
+        || uatState.sessionId != lastUatPipelineSessionId)
+    {
+        fsrML.begin();
+        mlxML.begin();
+        mlxContext.begin();
+        mpuML.begin();
+        fusion.begin();
+
+        mlxFusionContributionSuspended = false;
+        mlxTargetReacquiring = false;
+        mlxTargetVisibleSinceMillis = 0UL;
+
+        lastUatPipelineActive = uatState.active;
+        lastUatPipelineSessionId = uatState.sessionId;
+
+        Serial.print("[UAT-INJECT] Main pipeline reset; active=");
+        Serial.print(uatState.active ? "YES" : "NO");
+        Serial.print(" session=");
+        Serial.println(uatState.sessionId);
+    }
+
     // Cooperative yield keeps Wi-Fi/ESP-NOW/system tasks responsive. The
     // recovery supervisor is separate from Arduino loopTask's panic watchdog,
     // avoiding the earlier false reboot caused by giant debug Serial output.
@@ -823,6 +853,12 @@ void loop()
     {
         c1001Comm.update();
     }
+
+    // Refresh the remote C1001 test command while UAT value injection is
+    // active. The remote node expires the command automatically if this hub
+    // stops refreshing it.
+    uatInjection.serviceC1001Transport();
+
     if (
         cameraCommInitialized
     )
@@ -886,11 +922,16 @@ void loop()
     // C1001 acquisition + ML now run on the remote M1A node.
     // c / cml above are fresh ESP-NOW evidence snapshots.
 
-    const MLXReading &t =
+    MLXReading t =
         mlx.getReading();
 
-    const FSRReading &f =
+    FSRReading f =
         fsr.getReading();
+
+    // Research value injection occurs at the accepted sensor-reading boundary
+    // before the existing ML wrappers and Fusion consume the values.
+    uatInjection.applyMlx(t);
+    uatInjection.applyFsr(f);
 
     // ========================================================
     // MLX SESSION / TARGET QUALIFICATION
@@ -911,7 +952,7 @@ void loop()
     // fallback so the system does not lose all occupancy context.
     // ========================================================
     const bool fsrOccupancyUsable =
-        fsrInitialized
+        (fsrInitialized || (uatState.active && uatState.injectFsr))
         && f.connected
         && f.valid
         && f.baselineValid;
@@ -938,7 +979,7 @@ void loop()
     const bool mlxTargetVisible =
         thermalOccupancy
         &&
-        mlxInitialized
+        (mlxInitialized || (uatState.active && uatState.injectMlx))
         &&
         t.connected
         &&
@@ -1020,6 +1061,14 @@ void loop()
         mlxTargetVisibleSinceMillis = 0UL;
     }
 
+    // UAT-only deterministic thermal transition policy. When synthetic MLX
+    // injection is active, allow an intentional instantaneous value change
+    // (e.g. 31 -> 40 C) to reach the REAL baseline-relative IF+OCSVM path.
+    // Live MLX acquisition always keeps the rapid FOV/geometry guard enabled.
+    mlxML.setUatRapidTransitionBypass(
+        uatState.active && uatState.injectMlx
+    );
+
     // Read current ML state BEFORE deciding whether to advance it.
     const MLXMLReading &tmlBefore =
         mlxML.getReading();
@@ -1090,8 +1139,9 @@ void loop()
     const FSRMLReading &fml =
         fsrML.getReading();
 
-    const MPUReading &m =
+    MPUReading m =
         mpu.getReading();
+    uatInjection.applyMpu(m);
     mpuML.update(
         m
     );
@@ -1112,7 +1162,7 @@ void loop()
 
     fusionInput.mlx.health =
         mapSensorHealth(
-            mlxInitialized,
+            mlxInitialized || (uatState.active && uatState.injectMlx),
             t.connected,
             t.valid,
             t.status
@@ -1178,7 +1228,7 @@ void loop()
 
     fusionInput.fsr.health =
         mapSensorHealth(
-            fsrInitialized,
+            fsrInitialized || (uatState.active && uatState.injectFsr),
             f.connected,
             f.valid,
             f.status
@@ -1222,7 +1272,7 @@ void loop()
 
     fusionInput.mpu.health =
         mapSensorHealth(
-            mpuInitialized,
+            mpuInitialized || (uatState.active && uatState.injectMpu),
             m.connected,
             m.valid,
             false
@@ -1269,7 +1319,9 @@ void loop()
     // any leaning class can confirm it. Transaction IDs prevent
     // stale camera results from affecting later candidates.
     fusionInput.camera =
-        cameraComm.getFusionEvidence();
+        uatInjection.cameraEvidence(
+            cameraComm.getFusionEvidence()
+        );
 
     if (mpuInitialized)
     {
@@ -1286,13 +1338,21 @@ void loop()
     const FusionReading &fusionReading =
         fusion.getReading();
 
-    // Trigger/cancel the camera transaction AFTER Fusion computes
-    // whether verification is actually required. Production Fusion is the
-    // only verification authority in the dry-run/final runtime.
+    // Camera injection is verification-only and strictly event-triggered:
+    // note the authoritative Fusion request first, then a synthetic posture
+    // result may be released on a later loop. It can never create the strong
+    // candidate that caused the request.
+    uatInjection.noteFusionReading(fusionReading);
+
+    // Trigger/cancel the physical camera transaction AFTER Fusion computes
+    // whether verification is actually required. During a synthetic UAT
+    // posture test, keep the real verification transaction idle.
     if (cameraCommInitialized)
     {
         cameraComm.serviceVerificationRequest(
-            fusionReading.triggerCamera
+            uatInjection.usingSyntheticCamera()
+                ? false
+                : fusionReading.triggerCamera
         );
     }
 
@@ -1308,6 +1368,9 @@ void loop()
         fusionInput,
         fusionReading,
         c1001Comm.getStatus(),
+        fml,
+        tml,
+        mml,
         cameraComm.getStatus(),
         safeSeatAccessPoint.getStatus()
     );
@@ -1974,6 +2037,13 @@ void loop()
     else
         Serial.println("TRUSTED");
 
+    Serial.print("  Rapid guard  : ");
+    Serial.println(
+        mlxML.isUatRapidTransitionBypassEnabled()
+            ? "UAT BYPASS (SYNTHETIC MLX ONLY)"
+            : "ACTIVE"
+    );
+
     if (tml.geometryDegraded || tml.reacquiring)
     {
         Serial.print("  Reacquire    : ");
@@ -2092,7 +2162,7 @@ void loop()
         Serial.println("TARGET/FOV GEOMETRY DEGRADED");
     else if (tx.reacquiring)
         Serial.println("TARGET REACQUIRING");
-    else if (tx.targetContrastDegraded)
+    else if (tx.lowThermalContrast)
         Serial.println("LOW CONTRAST (INFO ONLY)");
     else
         Serial.println("NORMAL");

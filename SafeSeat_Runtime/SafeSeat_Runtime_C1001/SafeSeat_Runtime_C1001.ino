@@ -12,6 +12,8 @@ C1001Comm c1001Comm;
 bool c1001Initialized = false;
 bool commInitialized = false;
 unsigned long lastPrintMillis = 0;
+bool lastUatInjectionActive = false;
+uint32_t lastUatSessionId = 0;
 
 void setup()
 {
@@ -44,7 +46,30 @@ void loop()
         c1001.update();
     }
 
-    const C1001Reading &reading = c1001.getReading();
+    const C1001Reading &liveReading = c1001.getReading();
+    C1001Reading reading = liveReading;
+
+    const bool uatActive =
+        commInitialized
+        && c1001Comm.applyUatInjection(reading);
+
+    const uint32_t uatSessionId =
+        commInitialized
+            ? c1001Comm.getUatSessionId()
+            : 0;
+
+    if (uatActive != lastUatInjectionActive
+        || (uatActive && uatSessionId != lastUatSessionId))
+    {
+        c1001ML.begin();
+        Serial.print("[UAT-INJECT] C1001 model window reset; active=");
+        Serial.print(uatActive ? "YES" : "NO");
+        Serial.print(" session=");
+        Serial.println(uatSessionId);
+    }
+
+    lastUatInjectionActive = uatActive;
+    lastUatSessionId = uatSessionId;
 
     c1001ML.update(reading);
     const C1001MLReading &model = c1001ML.getReading();
@@ -69,8 +94,10 @@ void loop()
 
     Serial.print("Sensor         : ");
     Serial.println(c1001Initialized ? "READY" : "FAILED");
+    Serial.print("UAT injection  : ");
+    Serial.println(lastUatInjectionActive ? "ACTIVE" : "OFF");
     Serial.print("Status         : ");
-    Serial.println(c1001.getStatusText());
+    Serial.println(lastUatInjectionActive ? "UAT SYNTHETIC" : c1001.getStatusText());
     Serial.print("Presence       : ");
     Serial.println(reading.present ? "YES" : "NO");
     Serial.print("MoveRange      : ");

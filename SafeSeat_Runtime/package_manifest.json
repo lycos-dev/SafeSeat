@@ -1,21 +1,43 @@
 {
-  "package": "SafeSeat Runtime Camera ESP-NOW V5 Integrated",
-  "step": "5.9.9",
-  "date": "2026-08-26",
-  "based_on_uploaded_runtime": "SafeSeat_Runtime(5).zip",
+  "package": "SafeSeat Runtime R5.1 UAT Recorder + MLX Demo Policy",
+  "step": "5.9.9-R5.1",
+  "date": "2026-10-05",
+  "based_on_user_upload": "SafeSeat_Runtime_R5_UAT_Value_Injection.zip",
   "nodes": {
-    "SafeSeat_Runtime_Main": "Arduino Main Hub; existing sensor pipelines plus camera passenger-session ESP-NOW lifecycle",
-    "SafeSeat_Runtime_C1001": "Existing remote C1001 ESP-NOW node, unchanged",
-    "SafeSeat_Runtime_ESP32S3_CAM": "ESP-IDF command-driven V4 Robust 7D camera + ESP-NOW V2"
+    "SafeSeat_Runtime_Main": "Arduino Main Hub with /uat value injection, browser CSV recorder, Object-Ta diagnostic-only Fusion semantics, UAT-only MLX rapid-transition bypass, authoritative Fusion, and event-triggered camera verification",
+    "SafeSeat_Runtime_C1001": "Remote C1001 ESP-NOW node updated to accept temporary UAT HR/RR/presence values and run its deployed 30-second IF+OCSVM model",
+    "SafeSeat_Runtime_ESP32S3_CAM": "Existing event-triggered verification camera runtime; no R5 firmware changes required"
   },
-  "removed_from_deliverable": [
-    "SafeSeat_Runtime_Piezo"
-  ],
-  "active_camera_protocol_version": 2,
-  "camera_wifi": {
-    "ssid": "SafeSeat",
-    "channel": 6,
-    "transport": "ESP-NOW broadcast on same Wi-Fi channel"
+  "uat": {
+    "page": "/uat",
+    "tabs": [
+      "Live Monitor",
+      "Inject Values",
+      "Simulation Monitor"
+    ],
+    "api": {
+      "status": "GET /api/v1/uat/injection",
+      "start": "POST /api/v1/uat/injection/start",
+      "update": "POST /api/v1/uat/injection/update",
+      "stop": "POST /api/v1/uat/injection/stop"
+    },
+    "direct_warning_write": false,
+    "fusion_authoritative": true,
+    "camera_verification_only": true,
+    "camera_event_triggered": true,
+    "record_session_csv": true,
+    "mlx_object_ta_fusion_gate": false,
+    "mlx_rapid_transition_bypass": "active only while UAT session is active and MLX injection is enabled",
+    "live_mlx_geometry_guard_preserved": true
   },
-  "validation_report": "CAMERA_V5_INTEGRATION_TEST_REPORT.json"
+  "c1001_uat_protocol": {
+    "magic": "0x5554",
+    "version": 1,
+    "packet_size_bytes": 24,
+    "command_refresh_ms": 500,
+    "remote_timeout_ms": 2500
+  },
+  "documentation": "UAT_SENSOR_VALUE_INJECTION_R5_README.txt",
+  "validation_report": "UAT_R5_1_STATIC_CHECKS.json",
+  "changelog": "UAT_R5_1_CHANGELOG.txt"
 }

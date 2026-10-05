@@ -71,3 +71,53 @@ inline uint16_t safeSeatHubBeaconChecksum(
         offsetof(SafeSeatHubBeacon, checksum)
     );
 }
+
+
+// ============================================================
+// C1001 UAT SENSOR-VALUE COMMAND
+//
+// Research/validation command sent by the Main Hub to the dedicated C1001
+// node. The command supplies synthetic raw HR/RR values; the remote node still
+// runs its real C1001 ML window + IF + OCSVM. Commands expire on the C1001
+// node if the hub stops refreshing them.
+// ============================================================
+
+constexpr uint16_t C1001_UAT_COMMAND_MAGIC = 0x5554u; // "UT"
+constexpr uint8_t C1001_UAT_COMMAND_VERSION = 1u;
+constexpr uint8_t C1001_UAT_COMMAND_SIZE = 24u;
+
+enum C1001UatCommandFlags : uint16_t
+{
+    C1001_UAT_FLAG_ENABLED = 1u << 0,
+    C1001_UAT_FLAG_PRESENT = 1u << 1
+};
+
+struct __attribute__((packed)) C1001UatCommandPacket
+{
+    uint16_t magic = C1001_UAT_COMMAND_MAGIC;
+    uint8_t version = C1001_UAT_COMMAND_VERSION;
+    uint8_t packetSize = C1001_UAT_COMMAND_SIZE;
+    uint32_t sessionId = 0;
+    uint32_t sequence = 0;
+    uint16_t flags = 0;
+    int16_t heartRate = 0;
+    int16_t respiration = 0;
+    int16_t motion = 0;
+    int16_t moveRange = 0;
+    uint16_t checksum = 0;
+};
+
+static_assert(
+    sizeof(C1001UatCommandPacket) == C1001_UAT_COMMAND_SIZE,
+    "Unexpected C1001UatCommandPacket size"
+);
+
+inline uint16_t c1001UatCommandChecksum(
+    const C1001UatCommandPacket &packet
+)
+{
+    return safeSeatCRC16(
+        reinterpret_cast<const uint8_t *>(&packet),
+        offsetof(C1001UatCommandPacket, checksum)
+    );
+}

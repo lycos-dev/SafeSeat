@@ -9,6 +9,20 @@
 #include "C1001Protocol.h"
 #include "SafeSeatNowProtocol.h"
 
+
+struct C1001UatInjectionState
+{
+    bool enabled = false;
+    bool present = false;
+    uint32_t sessionId = 0;
+    uint32_t sequence = 0;
+    int heartRate = 0;
+    int respiration = 0;
+    int motion = 0;
+    int moveRange = 0;
+    unsigned long lastCommandMillis = 0;
+};
+
 class C1001Comm
 {
 public:
@@ -28,6 +42,10 @@ public:
     uint8_t getChannel() const { return currentChannel; }
     unsigned long getBeaconAgeMillis() const;
 
+    bool applyUatInjection(C1001Reading &reading);
+    bool isUatInjectionActive() const;
+    uint32_t getUatSessionId() const { return uat.sessionId; }
+
 private:
     static C1001Comm *activeInstance;
     static const uint8_t BROADCAST_MAC[6];
@@ -45,6 +63,10 @@ private:
     uint8_t currentChannel = 0;
     uint8_t nextScanChannel = 0;
     unsigned long lastChannelHopMillis = 0;
+
+    C1001UatInjectionState uat{};
+    unsigned long lastUatSyntheticSampleMillis = 0;
+    uint32_t uatSyntheticSampleSequence = 0;
 
     bool ensureBroadcastPeer();
     void maintainHubChannel();

@@ -19,6 +19,8 @@ struct SafeSeatNowStatus
     uint32_t cameraResultPacketsQueued = 0;
     uint32_t cameraCommandsSent = 0;
     uint32_t cameraCommandSendErrors = 0;
+    uint32_t c1001UatCommandsSent = 0;
+    uint32_t c1001UatCommandSendErrors = 0;
     uint32_t unknownPacketsIgnored = 0;
 };
 
@@ -48,6 +50,10 @@ public:
 
     bool sendCameraCommand(
         const CameraCommandPacket &packet
+    );
+
+    bool sendC1001UatCommand(
+        const C1001UatCommandPacket &packet
     );
 
     const SafeSeatNowStatus& getStatus() const { return status; }
