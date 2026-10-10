@@ -18,12 +18,13 @@ constexpr float UAT_FSR_ACTIVE_THRESHOLD = 0.025f;
 // Controlled physical/injected FSR validation thresholds.
 // These reflect the observed installed seat behavior: loaded contact points
 // are commonly ~20k-26k, while a hard side slump can unload multiple
-// opposite-side sensors toward zero.
+// opposite-side sensors toward zero. A severe pattern must remain continuous
+// for 10 s before it is allowed to become the UAT strong FSR vote.
 constexpr float UAT_FSR_UNLOADED_MAX = 5000.0f;
 constexpr float UAT_FSR_DOMINANT_BACKREST_MIN = 35000.0f;
 constexpr float UAT_FSR_SIDE_BALANCE_MIN = 0.40f;
 constexpr uint8_t UAT_FSR_OPPOSITE_UNLOADED_MIN = 2U;
-constexpr unsigned long UAT_FSR_CONTROLLED_PERSIST_MS = 2000UL;
+constexpr unsigned long UAT_FSR_CONTROLLED_PERSIST_MS = 10000UL;
 constexpr unsigned long UAT_FSR_DYNAMIC_SIDE_MS = 1800UL;
 
 float safeBalanceUat(float left, float right)

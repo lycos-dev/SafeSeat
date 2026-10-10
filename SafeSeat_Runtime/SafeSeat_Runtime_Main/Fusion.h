@@ -203,14 +203,17 @@ enum class FusionRespirationState
 // no meaningful abnormal evidence.
 //
 // WATCH:
-// incomplete data or weak isolated evidence.
+// incomplete data or any isolated/weak anomaly evidence.
 //
 // WARNING:
-// multiple concerning signals or persistent anomaly.
+// at least two independent STRONG anomaly modalities agree after the
+// configured warning persistence. C1001, FSR and MLX are the three anomaly
+// modalities; MPU is context only and camera is corroboration only.
 //
 // EMERGENCY:
-// strong multi-sensor emergency candidate.
-// Camera verification is requested from here.
+// the same strong multi-sensor agreement remains continuously abnormal for
+// the configured emergency persistence period.
+// Camera verification is corroborative only and never decides severity.
 // ============================================================
 
 enum class FusionLevel
@@ -346,8 +349,8 @@ struct MPUFusionInput
 //
 // Local Main Hub sensors: MLX90614, FSR array, MPU6050.
 // Remote ESP-NOW nodes: C1001 and ESP32-S3 camera.
-// Camera is verification-only and never creates the underlying
-// strong emergency candidate by itself.
+// Camera is event-triggered corroborative evidence only. It never
+// creates, cancels, downgrades, or blocks a Fusion severity decision.
 // ============================================================
 
 struct FusionInput
@@ -379,6 +382,16 @@ struct FusionEvidenceSummary
     uint8_t anomalyEvidenceCount = 0;
 
     uint8_t strongAnomalyEvidenceCount = 0;
+
+    // Explicit effective anomaly votes used by Fusion. These are exposed
+    // for validation/diagnostic telemetry so the console can show exactly
+    // which independent modalities are contributing to agreement.
+    bool c1001StrongAnomaly = false;
+    bool fsrStrongAnomaly = false;
+    bool mlxStrongAnomaly = false;
+    bool c1001WeakAnomaly = false;
+    bool fsrWeakAnomaly = false;
+    bool mlxWeakAnomaly = false;
 
     uint8_t normalEvidenceCount = 0;
 
@@ -461,8 +474,23 @@ struct FusionReading
 
 
     // --------------------------------------------------------
-    // Timing
+    // Timing / escalation diagnostics
     // --------------------------------------------------------
+
+    // Continuous time spent with warning-level (>=2 strong sensor) agreement.
+    uint32_t warningCandidateMs = 0;
+
+    // Continuous time with >=2 independent strong anomaly votes (Emergency timer).
+    uint32_t strongCandidateMs = 0;
+
+    // Fixed threshold used for strong multisensor -> EMERGENCY escalation.
+    uint32_t emergencyThresholdMs = 0;
+
+    // True while the strong multisensor condition is currently present.
+    bool strongMultisensorCandidate = false;
+
+    // Camera is retained as event-triggered corroboration only.
+    bool cameraCorroborationOnly = true;
 
     unsigned long lastUpdateMillis = 0;
 };
@@ -540,7 +568,7 @@ private:
         WARNING_PERSIST_MS = 4000UL;
 
     static constexpr unsigned long
-        EMERGENCY_PERSIST_MS = 2500UL;
+        EMERGENCY_PERSIST_MS = 30000UL;
 
     static constexpr unsigned long
         CLEAR_STABLE_MS = 3000UL;
@@ -575,10 +603,11 @@ private:
     FusionLevel previousLevel =
         FusionLevel::WATCH;
 
-    // Camera transaction state - Step 5.9.4.
-    uint32_t lastCameraRequestId = 0;
-    uint32_t lastCameraResultId = 0;
-    bool cameraAbnormalLatched = false;
+    // Camera corroboration bookkeeping only. This state controls whether the
+    // current strong multisensor event still needs one visual-confirmation
+    // request; it has no authority over Fusion severity.
+    uint32_t lastCameraCorroborationResultId = 0;
+    bool cameraCorroborationReceivedForCandidate = false;
 
     // MPU motion-persistence state.
     unsigned long lastMpuMotionSampleCount = 0UL;

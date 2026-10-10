@@ -12,8 +12,9 @@
 // It substitutes selected sensor-domain values before their normal model
 // wrappers run, then lets the production Fusion engine decide the result.
 //
-// Camera remains verification-only and event-triggered. A synthetic camera
-// result is released ONLY after Fusion has requested camera verification.
+// Camera remains event-triggered corroborative evidence only. A synthetic
+// result is released ONLY after Fusion requests visual confirmation, and the
+// posture result never changes Fusion severity by itself.
 // ============================================================
 
 enum class SafeSeatUatCameraMode : uint8_t

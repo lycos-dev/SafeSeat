@@ -7,7 +7,7 @@
 #include "SafeSeatUatInjection.h"
 
 // ============================================================
-// SAFESEAT LOCAL TELEMETRY API + RESEARCHER UAT CONTROL — R5
+// SAFESEAT LOCAL TELEMETRY API + SYSTEM VALIDATION CONTROL - R5.6
 //
 // Main Hub address: http://192.168.4.1
 //
@@ -19,24 +19,26 @@
 //   GET /api/v1/network
 //   GET /health
 //
-// Research / validation console:
-//   GET  /uat
-//   GET  /api/v1/uat/injection
-//   POST /api/v1/uat/injection/start
-//   POST /api/v1/uat/injection/update
-//   POST /api/v1/uat/injection/stop
+// System validation console:
+//   GET  /validation
+//   GET  /uat  (legacy alias)
+//   GET  /api/v1/validation/input
+//   POST /api/v1/validation/input/start
+//   POST /api/v1/validation/input/update
+//   POST /api/v1/validation/input/stop
+// Legacy app-compatible aliases remain under /api/v1/uat/injection.
 //
 // Legacy direct-Warning simulation endpoints remain disabled (HTTP 410).
 //
 // IMPORTANT:
 // - Fusion remains authoritative; no API endpoint writes WARNING/EMERGENCY.
-// - Injected FSR/MLX/MPU values enter their deployed processing/model path.
+// - Optional FSR/MLX/MPU test inputs enter their deployed processing/model path.
 // - C1001 injected HR/RR are sent to the remote C1001 node, whose deployed
 //   30-second IF + OCSVM model still produces the evidence returned to Main.
 // - Camera remains verification-only and event-triggered. A configured
 //   synthetic UPRIGHT/NON_UPRIGHT result is held until Fusion itself requests
 //   camera verification; it cannot create the original emergency candidate.
-// - Stopping a test restores live sensor acquisition; reboot starts live.
+// - Restoring live readings disables test inputs; reboot starts live.
 // ============================================================
 
 class SafeSeatApi

@@ -1,0 +1,20 @@
+{
+  "revision": "R5.4 Final Defense Fusion/UAT",
+  "controlled_fsr_persistence_ms": 10000,
+  "controlled_fsr_warning_ready_after_own_persistence": true,
+  "strong_multisensor_emergency_persistence_ms": 30000,
+  "camera_fusion_role": "corroboration_only",
+  "camera_can_change_severity": false,
+  "mpu_motion_blocks_clean_safe_recovery": false,
+  "clean_recovery_ms": 3000,
+  "camera_baseline_visible_in_uat": true,
+  "controlled_camera_modes": [
+    "REAL_CAMERA",
+    "INJECT_UPRIGHT",
+    "INJECT_NON_UPRIGHT"
+  ],
+  "uat_js_syntax_check": "PASS",
+  "static_delimiter_checks": "PASS",
+  "full_board_compile_performed": false,
+  "note": "Full ESP32 Arduino board compile is not available in this environment; compile in the normal project toolchain before flashing."
+}

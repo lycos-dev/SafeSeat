@@ -1,0 +1,33 @@
+{
+  "revision": "R5.5 Two-Sensor Warning / Final Defense",
+  "warning_policy": "two_independent_strong_sensors",
+  "decision_modalities": [
+    "C1001",
+    "FSR",
+    "MLX90614"
+  ],
+  "warning_required_strong_sensor_count": 2,
+  "single_sensor_anomaly_level": "WATCH",
+  "weak_only_anomalies_level": "WATCH",
+  "controlled_fsr_persistence_ms": 10000,
+  "emergency_persistence_ms": 30000,
+  "emergency_timer_resets_when_two_strong_agreement_breaks": true,
+  "elevated_deescalation_hysteresis_ms": 3000,
+  "camera_fusion_role": "corroboration_only",
+  "mpu_fusion_role": "motion_artifact_context_only",
+  "uat_camera_registered_mode_visible": true,
+  "hidden_app_camera_modes_supported": [
+    "real",
+    "upright",
+    "non_upright"
+  ],
+  "full_board_compile_performed": false,
+  "note": "Static/source and JavaScript checks are performed in this environment; run the normal ESP32 board compile before flashing.",
+  "fusion_host_syntax_compile": "PASS",
+  "safeseat_api_host_syntax_compile": "PASS",
+  "fusion_policy_behavior_tests": "PASS",
+  "uat_javascript_syntax_check": "PASS",
+  "uat_dom_id_reference_check": "PASS",
+  "updated_app_hidden_camera_compatibility_check": "PASS",
+  "board_compile_note": "Arduino/ESP32 board toolchain is not installed in this environment; host syntax/behavior checks passed. Compile once in the normal ESP32 toolchain before flashing."
+}

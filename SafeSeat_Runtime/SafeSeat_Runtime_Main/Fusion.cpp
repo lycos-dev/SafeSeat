@@ -177,9 +177,8 @@ void FusionEngine::begin()
     previousLevel =
         FusionLevel::WATCH;
 
-    lastCameraRequestId = 0;
-    lastCameraResultId = 0;
-    cameraAbnormalLatched = false;
+    lastCameraCorroborationResultId = 0;
+    cameraCorroborationReceivedForCandidate = false;
 
     lastMpuMotionSampleCount = 0UL;
     mpuActivePersistenceSamples = 0U;
@@ -719,6 +718,9 @@ void FusionEngine::update(
         reading.evidence.anomalyEvidenceCount++;
     }
 
+    reading.evidence.c1001StrongAnomaly = c1001StrongAnomaly;
+    reading.evidence.c1001WeakAnomaly = c1001WeakAnomaly;
+
 
     // --------------------------------------------------------
     // FSR / pressure - Step 5.5 embedded anomaly evidence
@@ -793,8 +795,20 @@ void FusionEngine::update(
         // never active in normal monitoring.
         if (input.fsr.controlledUatStrongVote)
         {
+            // In an armed controlled hard-slump test, the dedicated UAT
+            // persistence path is authoritative for the FSR contribution.
+            // This prevents the raw IF/OCSVM output from creating an earlier
+            // FSR-only Warning before the intentional ~10 s posture hold has
+            // completed. The raw model output remains visible in telemetry.
             fsrStrongAnomaly =
                 true;
+        }
+        else if (input.fsr.controlledUatPatternActive)
+        {
+            // Pattern recognized but still inside the controlled persistence
+            // window: observe only; do not cast an FSR Fusion anomaly vote yet.
+            fsrStrongAnomaly = false;
+            fsrWeakAnomaly = false;
         }
         else if (
             hasStrongModelAnomaly(
@@ -878,6 +892,9 @@ void FusionEngine::update(
     {
         reading.evidence.anomalyEvidenceCount++;
     }
+
+    reading.evidence.fsrStrongAnomaly = fsrStrongAnomaly;
+    reading.evidence.fsrWeakAnomaly = fsrWeakAnomaly;
 
 
     // --------------------------------------------------------
@@ -992,6 +1009,9 @@ void FusionEngine::update(
         reading.evidence.normalEvidenceCount++;
     }
 
+    reading.evidence.mlxStrongAnomaly = mlxStrongAnomaly;
+    reading.evidence.mlxWeakAnomaly = mlxWeakAnomaly;
+
     // Same MLX signal family: context-change is supporting context
     // only and never becomes a second independent anomaly vote.
     if (
@@ -1090,11 +1110,10 @@ void FusionEngine::update(
     reading.evidence.motionArtifactPossible =
         motionArtifactPossible;
 
+    // Final defense policy: agreement means TWO independent STRONG
+    // anomaly sensors. Weak/isolated anomalies remain visible and place
+    // the system in WATCH, but cannot create WARNING by themselves.
     reading.evidence.multiSensorAgreement =
-        reading.evidence.anomalyEvidenceCount
-        >=
-        2
-        ||
         reading.evidence.strongAnomalyEvidenceCount
         >=
         2;
@@ -1117,25 +1136,29 @@ void FusionEngine::update(
         !motionArtifactPossible
         || controlledFsrUatCandidate;
 
-    const bool warningCandidate =
-        (
-            reading.evidence.anomalyEvidenceCount
-            >=
-            1
-            &&
-            warningMotionGateClear
-        )
-        ||
-        reading.occupancy
-        ==
-        FusionOccupancyState::CONFLICT;
-
+    // WARNING is now a corroborated 2-of-3 decision across the three
+    // occupant anomaly modalities: C1001, FSR and MLX. A single strong
+    // sensor (or any weak-only anomaly) remains WATCH. MPU is contextual
+    // only and camera is corroboration only, so neither can satisfy this
+    // agreement requirement.
     const bool strongCandidate =
         reading.evidence.strongAnomalyEvidenceCount
         >=
         2
         &&
         warningMotionGateClear;
+
+    const bool warningCandidate =
+        strongCandidate;
+
+    const bool isolatedAnomalyPresent =
+        reading.evidence.anomalyEvidenceCount
+        >=
+        1
+        ||
+        reading.occupancy
+        ==
+        FusionOccupancyState::CONFLICT;
 
     if (
         warningCandidate
@@ -1177,18 +1200,22 @@ void FusionEngine::update(
             0UL;
     }
 
+    // The controlled UAT FSR vote has already completed its own 10-second
+    // continuous posture-persistence requirement. Once a SECOND independent
+    // strong sensor agrees, do not add another 4 s on top of that controlled
+    // FSR persistence. All other two-strong-sensor pairs retain the normal
+    // Fusion warning persistence requirement.
     const bool persistentWarning =
-        warningCandidate
-        &&
-        warningCandidateStartMillis
-        !=
-        0UL
-        &&
-        now
-        -
-        warningCandidateStartMillis
-        >=
-        WARNING_PERSIST_MS;
+        (
+            warningCandidate
+            && input.fsr.controlledUatStrongVote
+        )
+        ||
+        (
+            warningCandidate
+            && warningCandidateStartMillis != 0UL
+            && now - warningCandidateStartMillis >= WARNING_PERSIST_MS
+        );
 
     const bool persistentEmergencyCandidate =
         strongCandidate
@@ -1203,16 +1230,49 @@ void FusionEngine::update(
         >=
         EMERGENCY_PERSIST_MS;
 
-    // concernActive represents "something is flagging right now",
-    // independent of whether it has persisted long enough yet.
-    // This is used (rather than the raw persistence flags) so
-    // that a single flickered-off update, or a persistence timer
-    // restart, does not look identical to a genuinely clean
-    // reading for de-escalation purposes.
-    const bool concernActive =
-        warningCandidate
-        ||
+    reading.warningCandidateMs =
+        warningCandidate && warningCandidateStartMillis != 0UL
+            ? static_cast<uint32_t>(now - warningCandidateStartMillis)
+            : 0U;
+
+    reading.strongCandidateMs =
+        strongCandidate && emergencyCandidateStartMillis != 0UL
+            ? static_cast<uint32_t>(now - emergencyCandidateStartMillis)
+            : 0U;
+
+    reading.emergencyThresholdMs =
+        static_cast<uint32_t>(EMERGENCY_PERSIST_MS);
+
+    reading.strongMultisensorCandidate =
         strongCandidate;
+
+    reading.cameraCorroborationOnly =
+        true;
+
+    // Camera result handling is transaction bookkeeping ONLY. One fresh
+    // result (UPRIGHT or NON_UPRIGHT) completes corroboration for the current
+    // strong multisensor candidate, preventing repeated camera requests. It
+    // never changes the candidate timers or final severity.
+    if (!strongCandidate)
+    {
+        cameraCorroborationReceivedForCandidate = false;
+    }
+    else if (
+        input.camera.resultValid
+        && input.camera.resultId != 0U
+        && input.camera.resultId != lastCameraCorroborationResultId
+    )
+    {
+        lastCameraCorroborationResultId = input.camera.resultId;
+        cameraCorroborationReceivedForCandidate = true;
+    }
+
+    // concernActive is specifically a WARNING-level corroborated concern.
+    // If the pair breaks and only one anomaly remains, the elevated state is
+    // held for the normal 3 s recovery hysteresis, then drops to WATCH rather
+    // than remaining latched in WARNING forever.
+    const bool concernActive =
+        warningCandidate;
 
     const bool previousLevelElevated =
         previousLevel
@@ -1254,9 +1314,9 @@ void FusionEngine::update(
             0UL;
     }
 
-    // True only once the system has been continuously clean
-    // (concernActive == false, uninterrupted) for at least
-    // CLEAR_STABLE_MS, measured with millis().
+    // True only once WARNING-level agreement has remained absent
+    // (concernActive == false, uninterrupted) for at least CLEAR_STABLE_MS.
+    // An isolated anomaly may still remain and will then resolve to WATCH.
     const bool clearPeriodComplete =
         clearStateStartMillis
         !=
@@ -1289,73 +1349,17 @@ void FusionEngine::update(
         FusionLevel::WATCH;
 
     // --------------------------------------------------------
-    // Camera transaction semantics - Step 5.9.4
+    // Final severity authority
     //
-    // A normal camera result must be consumed only once; holding
-    // the same UPRIGHT packet across many Fusion updates would
-    // otherwise keep resetting the emergency persistence timer.
-    // An abnormal result is latched only while the underlying
-    // strong multisensor candidate remains active, so EMERGENCY
-    // does not disappear merely because the one result packet is
-    // no longer marked fresh.
+    // Camera is deliberately NOT part of this decision. It is requested
+    // in parallel for event/report corroboration only. UPRIGHT cannot clear
+    // a real sensor concern; NON_UPRIGHT cannot create an Emergency.
     // --------------------------------------------------------
 
-    const bool cameraResultUsable =
-        input.camera.available
-        && input.camera.connected
-        && input.camera.resultValid
-        && input.camera.requestId != 0
-        && input.camera.resultId != 0;
-
-    const bool newCameraResult =
-        cameraResultUsable
-        && (
-            input.camera.requestId != lastCameraRequestId
-            || input.camera.resultId != lastCameraResultId
-        );
-
-    bool cameraConfirmedNormal = false;
-
-    if (newCameraResult)
+    if (persistentEmergencyCandidate)
     {
-        lastCameraRequestId = input.camera.requestId;
-        lastCameraResultId = input.camera.resultId;
-
-        if (input.camera.postureAbnormal)
-        {
-            cameraAbnormalLatched = true;
-        }
-        else if (input.camera.postureNormal)
-        {
-            cameraAbnormalLatched = false;
-            cameraConfirmedNormal = persistentEmergencyCandidate;
-
-            // Restart strong-candidate persistence after one
-            // authoritative UPRIGHT verification. If the sensor
-            // concern remains, it must persist again before a new
-            // camera request can be issued.
-            emergencyCandidateStartMillis = 0UL;
-        }
-    }
-
-    if (!strongCandidate)
-    {
-        cameraAbnormalLatched = false;
-    }
-
-    const bool cameraConfirmedAbnormal =
-        cameraAbnormalLatched
-        && persistentEmergencyCandidate;
-
-    if (
-        cameraConfirmedAbnormal
-        &&
-        persistentEmergencyCandidate
-    )
-    {
-        // camera abnormal + persistent candidate -> EMERGENCY.
-        // Verification is already complete, so no further
-        // camera trigger is needed.
+        // >=2 independent strong anomaly votes remained continuously active
+        // for the full 30-second emergency persistence window.
         effectiveLevel =
             FusionLevel::EMERGENCY;
         reading.triggerAlert =
@@ -1363,45 +1367,16 @@ void FusionEngine::update(
         reading.triggerCamera =
             false;
     }
-    else if (
-        cameraConfirmedNormal
-        &&
-        persistentEmergencyCandidate
-    )
+    else if (persistentWarning)
     {
-        // Camera normal with a valid result: do NOT escalate to
-        // EMERGENCY. Reject/clear this emergency candidate and
-        // transition conservatively to WATCH while sensor
-        // evidence is re-evaluated on subsequent updates.
-        effectiveLevel =
-            FusionLevel::WATCH;
-
-        emergencyCandidateStartMillis =
-            0UL;
-    }
-    else if (
-        persistentEmergencyCandidate
-    )
-    {
-        // Persistent strong multisensor candidate, no camera
-        // verification result yet -> WARNING and request camera.
-        // This is the ONLY case that triggers the camera.
+        // WARNING requires >=2 independent strong anomaly votes. Request the
+        // camera once in parallel as corroborative evidence while the 30 s
+        // sensor escalation timer continues independently.
         effectiveLevel =
             FusionLevel::WARNING;
         reading.triggerCamera =
-            true;
-    }
-    else if (
-        persistentWarning
-    )
-    {
-        // Persistent but weaker (non-strong) concern -> WARNING.
-        // Not a persistent strong multi-sensor candidate, so no
-        // camera verification is requested.
-        effectiveLevel =
-            FusionLevel::WARNING;
-        reading.triggerCamera =
-            false;
+            strongCandidate
+            && !cameraCorroborationReceivedForCandidate;
     }
     else if (
         concernActive
@@ -1422,11 +1397,19 @@ void FusionEngine::update(
         inClearHold
     )
     {
-        // Continuously clean so far, but the clear period has
-        // not yet run for CLEAR_STABLE_MS - keep holding the
-        // previous elevated state.
+        // WARNING-level agreement has remained absent so far, but the
+        // de-escalation period has not yet run for CLEAR_STABLE_MS - keep
+        // holding the previous elevated state.
         effectiveLevel =
             previousLevel;
+    }
+    else if (isolatedAnomalyPresent)
+    {
+        // One anomalous modality is intentionally not enough for WARNING.
+        // Keep it visible as WATCH so the system is never falsely reported
+        // SAFE while an isolated sensor concern is still present.
+        effectiveLevel =
+            FusionLevel::WATCH;
     }
     else if (
         reading.occupancy
@@ -1465,8 +1448,6 @@ void FusionEngine::update(
         reading.respiration
         !=
         FusionRespirationState::UNKNOWN
-        &&
-        !motionArtifactPossible
     )
     {
         effectiveLevel =
@@ -1518,7 +1499,7 @@ void FusionEngine::update(
         +
         (
             hasModelEvidence(
-                input.mpu.model
+                input.mlx.model
             )
                 ? 1U
                 : 0U

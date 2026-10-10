@@ -1,0 +1,22 @@
+{
+  "revision": "R5.6",
+  "base": "R5.5 Two-Sensor Final Defense",
+  "checks": {
+    "fusion_host_compile": true,
+    "api_host_compile": true,
+    "telemetry_host_compile": true,
+    "fusion_r55_behavior_regression": true,
+    "explicit_vote_telemetry_test": true,
+    "validation_console_javascript_syntax": true,
+    "validation_console_dom_id_references": true,
+    "validation_console_ascii_only": true,
+    "validation_console_visible_source_has_no_controlled_inject_uat_terms": true,
+    "nine_fsr_channels_preserved": true,
+    "validation_route_alias_present": true,
+    "legacy_uat_route_preserved": true
+  },
+  "notes": [
+    "No ESP32 Arduino board toolchain was available in this environment, so a real board compile/flash must still be run on the project machine.",
+    "Runtime exposes external_escalation_allowed=false during validation, but the current app must consume that field before SMS suppression is end-to-end enforced."
+  ]
+}

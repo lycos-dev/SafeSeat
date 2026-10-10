@@ -1367,10 +1367,9 @@ void loop()
             : 0.0f;
 
 
-    // Step 5.9.4 ESP32-CAM evidence. Camera output is verification
-    // only: UPRIGHT can reject one persistent strong candidate;
-    // any leaning class can confirm it. Transaction IDs prevent
-    // stale camera results from affecting later candidates.
+    // ESP32-CAM evidence is event-triggered corroboration only.
+    // UPRIGHT/NON_UPRIGHT results are preserved for telemetry/reports but
+    // never create, cancel, downgrade, or block a Fusion severity decision.
     fusionInput.camera =
         uatInjection.cameraEvidence(
             cameraComm.getFusionEvidence()
@@ -1391,10 +1390,9 @@ void loop()
     const FusionReading &fusionReading =
         fusion.getReading();
 
-    // Camera injection is verification-only and strictly event-triggered:
-    // note the authoritative Fusion request first, then a synthetic posture
-    // result may be released on a later loop. It can never create the strong
-    // candidate that caused the request.
+    // Controlled camera evidence is strictly event-triggered and corroborative:
+    // note the Fusion request first, then a synthetic posture result may be
+    // released on a later loop. It never changes Fusion severity directly.
     uatInjection.noteFusionReading(fusionReading);
 
     // Trigger/cancel the physical camera transaction AFTER Fusion computes

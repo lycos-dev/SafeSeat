@@ -41,8 +41,8 @@ bool SafeSeatApi::begin(
     Serial.println("[API] Camera   : /api/v1/camera");
     Serial.println("[API] Network  : /api/v1/network");
     Serial.println("[API] Health   : /health");
-    Serial.println("[API] UAT      : /uat (live monitor + sensor-value injection)");
-    Serial.println("[API] UAT API  : /api/v1/uat/injection");
+    Serial.println("[API] Validate : /validation (system validation console)");
+    Serial.println("[API] Legacy   : /uat (same console)");
 
     return true;
 }
@@ -61,6 +61,7 @@ void SafeSeatApi::registerRoutes()
 {
     server.on("/", HTTP_GET, [this]() { handleRoot(); });
     server.on("/health", HTTP_GET, [this]() { handleHealth(); });
+    server.on("/validation", HTTP_GET, [this]() { handleUat(); });
     server.on("/uat", HTTP_GET, [this]() { handleUat(); });
     server.on("/maintenance", HTTP_GET, [this]() { handleUat(); });
 
@@ -69,6 +70,13 @@ void SafeSeatApi::registerRoutes()
     server.on("/api/v1/uat/stimulus", HTTP_GET, [this]() { handleUatStimulusStatus(); });
     server.on("/api/v1/uat/simulate-warning", HTTP_POST, [this]() { handleUatSimulateWarning(); });
     server.on("/api/v1/uat/clear-simulation", HTTP_POST, [this]() { handleUatClearSimulation(); });
+
+    // Public validation aliases use neutral engineering terminology.
+    // Legacy /api/v1/uat/* routes remain for compatibility with the app.
+    server.on("/api/v1/validation/input", HTTP_GET, [this]() { handleUatInjectionStatus(); });
+    server.on("/api/v1/validation/input/start", HTTP_POST, [this]() { handleUatInjectionStart(); });
+    server.on("/api/v1/validation/input/update", HTTP_POST, [this]() { handleUatInjectionUpdate(); });
+    server.on("/api/v1/validation/input/stop", HTTP_POST, [this]() { handleUatInjectionStop(); });
 
     server.on("/api/v1/uat/injection", HTTP_GET, [this]() { handleUatInjectionStatus(); });
     server.on("/api/v1/uat/injection/start", HTTP_POST, [this]() { handleUatInjectionStart(); });
@@ -109,14 +117,14 @@ a{display:block;margin:8px 0}
 <body>
 <h1>SafeSeat Main Hub</h1>
 <p>Local telemetry API is running.</p>
-<p>The Main Hub Fusion state is authoritative. Telemetry is read-only; /uat additionally provides an explicit research sensor-value injection console.</p>
+<p>The Main Hub Fusion state is authoritative. The validation console provides live diagnostics and optional repeatable sensor test inputs.</p>
 <a href="/api/v1/status">/api/v1/status</a>
 <a href="/api/v1/fusion">/api/v1/fusion</a>
 <a href="/api/v1/sensors">/api/v1/sensors</a>
 <a href="/api/v1/camera">/api/v1/camera</a>
 <a href="/api/v1/network">/api/v1/network</a>
 <a href="/health">/health</a>
-<a href="/uat">/uat — research & validation console</a>
+<a href="/validation">/validation - system validation console</a>
 </body>
 </html>
 )rawliteral";
@@ -150,7 +158,7 @@ void SafeSeatApi::handleUatSimulateWarning()
 {
     sendJson(
         410,
-        F("{\"ok\":false,\"error\":\"direct_warning_simulation_disabled\",\"hint\":\"Direct Warning forcing is disabled. Use /uat sensor-value injection so the real model and Fusion path decides the state.\"}")
+        F("{\"ok\":false,\"error\":\"direct_warning_simulation_disabled\",\"hint\":\"Direct Warning forcing is disabled. Use the validation console so the real sensor-model and Fusion path decides the state.\"}")
     );
 }
 
@@ -158,7 +166,7 @@ void SafeSeatApi::handleUatClearSimulation()
 {
     sendJson(
         410,
-        F("{\"ok\":false,\"error\":\"direct_warning_simulation_disabled\",\"hint\":\"Direct Warning forcing is disabled. Stop a value-injection test with POST /api/v1/uat/injection/stop.\"}")
+        F("{\"ok\":false,\"error\":\"direct_warning_simulation_disabled\",\"hint\":\"Direct Warning forcing is disabled. Restore live readings through the validation console.\"}")
     );
 }
 
@@ -257,6 +265,8 @@ void SafeSeatApi::handleUatInjectionStatus()
     out += F(",\"revision\":"); out += String(s.revision);
     out += F(",\"elapsed_ms\":"); out += String(s.active ? millis() - s.startedMillis : 0UL);
     out += F(",\"fusion_authoritative\":true,\"direct_warning_write\":false");
+    out += F(",\"warning_policy\":\"two_independent_strong_sensors\"");
+    out += F(",\"warning_required_strong_sensor_count\":2");
     out += F(",\"demo_policy\":{\"mlx_rapid_transition_bypass\":");
     appendJsonBool(out, s.active && s.mlxRapidTransitionBypass);
     out += F(",\"object_ta_fusion_gate\":false,\"baseline_and_ml_still_active\":true");
@@ -437,6 +447,22 @@ String SafeSeatApi::buildFusionJson() const
     appendJsonBool(out, f.triggerCamera);
     out += F(",\"alert_requested\":");
     appendJsonBool(out, f.triggerAlert);
+    out += F(",\"warning_candidate_ms\":");
+    out += String(f.warningCandidateMs);
+    out += F(",\"strong_multisensor_candidate\":");
+    appendJsonBool(out, f.strongMultisensorCandidate);
+    out += F(",\"strong_multisensor_elapsed_ms\":");
+    out += String(f.strongCandidateMs);
+    out += F(",\"emergency_persistence_required_ms\":");
+    out += String(f.emergencyThresholdMs);
+    out += F(",\"camera_fusion_role\":\"corroboration_only\"");
+    out += F(",\"warning_policy\":\"two_independent_strong_sensors\"");
+    out += F(",\"warning_required_strong_sensor_count\":2");
+    out += F(",\"decision_modalities\":[\"c1001\",\"fsr\",\"mlx90614\"]");
+    out += F(",\"validation_session_active\":");
+    appendJsonBool(out, SafeSeatUatInjection::instance().getState().active);
+    out += F(",\"external_escalation_allowed\":");
+    appendJsonBool(out, !SafeSeatUatInjection::instance().getState().active);
     out += F(",\"occupancy\":");
     appendJsonString(out, FusionEngine::getOccupancyText(f.occupancy));
     out += F(",\"motion_context\":");
@@ -458,6 +484,20 @@ String SafeSeatApi::buildFusionJson() const
     out += String(f.evidence.anomalyEvidenceCount);
     out += F(",\"strong_anomaly_evidence_count\":");
     out += String(f.evidence.strongAnomalyEvidenceCount);
+    out += F(",\"strong_votes\":{\"c1001\":");
+    appendJsonBool(out, f.evidence.c1001StrongAnomaly);
+    out += F(",\"fsr\":");
+    appendJsonBool(out, f.evidence.fsrStrongAnomaly);
+    out += F(",\"mlx90614\":");
+    appendJsonBool(out, f.evidence.mlxStrongAnomaly);
+    out += F("}");
+    out += F(",\"weak_votes\":{\"c1001\":");
+    appendJsonBool(out, f.evidence.c1001WeakAnomaly);
+    out += F(",\"fsr\":");
+    appendJsonBool(out, f.evidence.fsrWeakAnomaly);
+    out += F(",\"mlx90614\":");
+    appendJsonBool(out, f.evidence.mlxWeakAnomaly);
+    out += F("}");
     out += F(",\"normal_evidence_count\":");
     out += String(f.evidence.normalEvidenceCount);
     out += F(",\"supporting_context_count\":");
@@ -513,6 +553,22 @@ String SafeSeatApi::buildStatusJson() const
     appendJsonBool(out, f.triggerCamera);
     out += F(",\"alert_requested\":");
     appendJsonBool(out, f.triggerAlert);
+    out += F(",\"warning_candidate_ms\":");
+    out += String(f.warningCandidateMs);
+    out += F(",\"strong_multisensor_candidate\":");
+    appendJsonBool(out, f.strongMultisensorCandidate);
+    out += F(",\"strong_multisensor_elapsed_ms\":");
+    out += String(f.strongCandidateMs);
+    out += F(",\"emergency_persistence_required_ms\":");
+    out += String(f.emergencyThresholdMs);
+    out += F(",\"camera_fusion_role\":\"corroboration_only\"");
+    out += F(",\"warning_policy\":\"two_independent_strong_sensors\"");
+    out += F(",\"warning_required_strong_sensor_count\":2");
+    out += F(",\"decision_modalities\":[\"c1001\",\"fsr\",\"mlx90614\"]");
+    out += F(",\"validation_session_active\":");
+    appendJsonBool(out, SafeSeatUatInjection::instance().getState().active);
+    out += F(",\"external_escalation_allowed\":");
+    appendJsonBool(out, !SafeSeatUatInjection::instance().getState().active);
 
     out += F(",\"occupancy\":");
     appendJsonString(out, FusionEngine::getOccupancyText(f.occupancy));
@@ -536,6 +592,20 @@ String SafeSeatApi::buildStatusJson() const
     out += String(f.evidence.anomalyEvidenceCount);
     out += F(",\"strong_anomaly_evidence_count\":");
     out += String(f.evidence.strongAnomalyEvidenceCount);
+    out += F(",\"strong_votes\":{\"c1001\":");
+    appendJsonBool(out, f.evidence.c1001StrongAnomaly);
+    out += F(",\"fsr\":");
+    appendJsonBool(out, f.evidence.fsrStrongAnomaly);
+    out += F(",\"mlx90614\":");
+    appendJsonBool(out, f.evidence.mlxStrongAnomaly);
+    out += F("}");
+    out += F(",\"weak_votes\":{\"c1001\":");
+    appendJsonBool(out, f.evidence.c1001WeakAnomaly);
+    out += F(",\"fsr\":");
+    appendJsonBool(out, f.evidence.fsrWeakAnomaly);
+    out += F(",\"mlx90614\":");
+    appendJsonBool(out, f.evidence.mlxWeakAnomaly);
+    out += F("}");
     out += F(",\"normal_evidence_count\":");
     out += String(f.evidence.normalEvidenceCount);
     out += F(",\"supporting_context_count\":");
@@ -760,6 +830,22 @@ String SafeSeatApi::buildSensorsJson() const
                 : "NONE"
     );
     out += F("}");
+    out += F(",\"validation_posture\":{\"pattern_active\":");
+    appendJsonBool(out, in.fsr.controlledUatPatternActive);
+    out += F(",\"strong_vote\":");
+    appendJsonBool(out, in.fsr.controlledUatStrongVote);
+    out += F(",\"candidate_ms\":");
+    out += String(in.fsr.controlledUatCandidateMs);
+    out += F(",\"side\":");
+    appendJsonString(
+        out,
+        in.fsr.controlledUatSide < 0
+            ? "LEFT"
+            : in.fsr.controlledUatSide > 0
+                ? "RIGHT"
+                : "NONE"
+    );
+    out += F("}");
     out += F(",\"model_runtime\":{\"window_samples_collected\":"); out += String(s.fsrMl.windowSamplesCollected);
     out += F(",\"window_samples_required\":"); out += String(s.fsrMl.windowSamplesRequired);
     out += F(",\"samples_until_next_inference\":"); out += String(s.fsrMl.samplesUntilNextInference);
@@ -856,6 +942,25 @@ String SafeSeatApi::buildCameraJson() const
     out += String(r.resultPacketsReceived);
     out += F(",\"verification_requested\":");
     appendJsonBool(out, s.fusion.triggerCamera);
+    out += F(",\"user_verification_state\":");
+    appendJsonString(
+        out,
+        (s.fusion.triggerCamera || r.requestActive)
+            ? "IN_PROGRESS"
+            : e.resultValid
+                ? "COMPLETED"
+                : "IDLE"
+    );
+    out += F(",\"user_verification_message\":");
+    appendJsonString(
+        out,
+        (s.fusion.triggerCamera || r.requestActive)
+            ? "Visual confirmation in progress"
+            : e.resultValid
+                ? "Visual confirmation completed"
+                : "Camera ready"
+    );
+    out += F(",\"fusion_role\":\"corroboration_only\"");
     out += F(",\"request_active\":");
     appendJsonBool(out, r.requestActive);
     out += F(",\"active_request_id\":");
