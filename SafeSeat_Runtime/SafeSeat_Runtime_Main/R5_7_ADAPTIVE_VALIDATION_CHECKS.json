@@ -1,0 +1,25 @@
+{
+  "revision": "R5.7",
+  "base": "R5.6 System Validation Final",
+  "checks": {
+    "fusion_cpp_host_syntax": "PASS",
+    "validation_injection_cpp_host_syntax": "PASS",
+    "api_cpp_host_syntax_with_stubs": "PASS",
+    "validation_page_javascript_syntax": "PASS",
+    "validation_page_dom_references": "PASS",
+    "validation_page_duplicate_ids": "PASS",
+    "validation_page_visible_controlled_inject_uat_terms": "PASS_NONE_FOUND",
+    "validation_page_non_ascii_symbol_check": "PASS_NONE_FOUND",
+    "mlx_standalone_warning_emergency_behavior": "PASS",
+    "c1001_standalone_warning_emergency_behavior": "PASS",
+    "c1001_motion_artifact_standalone_escalation_blocked": "PASS",
+    "fsr_alone_watch_only": "PASS",
+    "fsr_reference_build": "PASS",
+    "fsr_forward_strong_vote_after_persistence": "PASS",
+    "brief_forward_movement_ignored_as_strong_vote": "PASS",
+    "forward_monitoring_limited_30s": "PASS",
+    "forward_monitoring_limited_persistent_60s": "PASS",
+    "forward_before_reference_monitoring_limited": "PASS",
+    "full_esp32_board_compile": "NOT_RUN_TOOLCHAIN_UNAVAILABLE"
+  }
+}

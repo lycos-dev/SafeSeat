@@ -184,6 +184,22 @@ void FusionEngine::begin()
     mpuActivePersistenceSamples = 0U;
     mpuStrongPersistenceSamples = 0U;
 
+    fsrPostureReferenceReady = false;
+    fsrPostureReferenceStartMillis = 0UL;
+    fsrPostureCandidateStartMillis = 0UL;
+    fsrForwardStartMillis = 0UL;
+    lastFsrPostureSampleCount = 0UL;
+    fsrPostureReferenceSamples = 0U;
+    fsrReferenceBackrestTotal = 0.0f;
+    fsrReferenceCushionTotal = 0.0f;
+    fsrReferenceBackrestBalance = 0.0f;
+    fsrReferenceBackrestRatio = 0.0f;
+    fsrReferenceBackrestAccum = 0.0f;
+    fsrReferenceCushionAccum = 0.0f;
+    fsrReferenceBalanceAccum = 0.0f;
+    fsrReferenceRatioAccum = 0.0f;
+    fsrPostureCandidateCode = 0;
+
 
     Serial.println();
     Serial.println(
@@ -262,6 +278,17 @@ void FusionEngine::update(
 
     reading.evidence =
         FusionEvidenceSummary{};
+
+    reading.criticalStrongCandidate = false;
+    reading.fsrPostureReferenceReady = fsrPostureReferenceReady;
+    reading.fsrPostureSettlingMs = 0U;
+    reading.fsrPosturePatternActive = false;
+    reading.fsrPostureStrongVote = false;
+    reading.fsrPostureCode = 0;
+    reading.fsrPostureCandidateMs = 0U;
+    reading.monitoringLimited = false;
+    reading.monitoringLimitedPersistent = false;
+    reading.monitoringLimitedMs = 0U;
 
 
     const bool c1001Available =
@@ -443,6 +470,279 @@ void FusionEngine::update(
         reading.occupancy =
             FusionOccupancyState::UNKNOWN;
     }
+
+
+    // --------------------------------------------------------
+    // FSR posture reference + sustained posture context - R5.7
+    //
+    // Learn a passenger-specific seated reference only after the passenger
+    // has both cushion and backrest contact for a stable settling period.
+    // This avoids judging the first few seconds while someone is entering,
+    // reaching, adjusting a bag, or sitting forward.
+    //
+    // Sustained left/right shifts and sustained forward loss of backrest
+    // contact can become ONE strong FSR vote after 8 s. FSR remains
+    // WATCH-only by itself; it never creates WARNING/EMERGENCY alone.
+    //
+    // Forward posture also exposes a separate Monitoring Limited state after
+    // 30 s because MLX/C1001 may become less reliable when the passenger is
+    // far away from their intended sensing geometry.
+    // --------------------------------------------------------
+    if (!fsrUsable
+        || reading.occupancy != FusionOccupancyState::OCCUPIED)
+    {
+        fsrPostureReferenceReady = false;
+        fsrPostureReferenceStartMillis = 0UL;
+        fsrPostureCandidateStartMillis = 0UL;
+        fsrForwardStartMillis = 0UL;
+        lastFsrPostureSampleCount = 0UL;
+        fsrPostureReferenceSamples = 0U;
+        fsrReferenceBackrestTotal = 0.0f;
+        fsrReferenceCushionTotal = 0.0f;
+        fsrReferenceBackrestBalance = 0.0f;
+        fsrReferenceBackrestRatio = 0.0f;
+        fsrReferenceBackrestAccum = 0.0f;
+        fsrReferenceCushionAccum = 0.0f;
+        fsrReferenceBalanceAccum = 0.0f;
+        fsrReferenceRatioAccum = 0.0f;
+        fsrPostureCandidateCode = 0;
+    }
+    else
+    {
+        const bool freshFsrPostureSample =
+            input.fsr.reading.sampleCount != lastFsrPostureSampleCount;
+
+        if (freshFsrPostureSample)
+        {
+            lastFsrPostureSampleCount = input.fsr.reading.sampleCount;
+        }
+
+        const float currentBackrest =
+            input.fsr.reading.backrestTotal;
+
+        const float currentCushion =
+            input.fsr.reading.cushionTotal;
+
+        const float currentBalance =
+            input.fsr.reading.backrestLRBalance;
+
+        const float currentRatio =
+            input.fsr.reading.backrestToCushionRatio;
+
+        if (!fsrPostureReferenceReady)
+        {
+            const bool referencePostureUsable =
+                currentBackrest >= FSR_REFERENCE_MIN_BACKREST
+                && currentCushion >= FSR_REFERENCE_MIN_CUSHION
+                && isfinite(currentRatio)
+                && currentRatio >= FSR_REFERENCE_MIN_RATIO;
+
+            if (referencePostureUsable)
+            {
+                if (fsrPostureReferenceStartMillis == 0UL)
+                {
+                    fsrPostureReferenceStartMillis = now;
+                    fsrPostureReferenceSamples = 0U;
+                    fsrReferenceBackrestAccum = 0.0f;
+                    fsrReferenceCushionAccum = 0.0f;
+                    fsrReferenceBalanceAccum = 0.0f;
+                    fsrReferenceRatioAccum = 0.0f;
+                }
+
+                reading.fsrPostureSettlingMs =
+                    static_cast<uint32_t>(
+                        now - fsrPostureReferenceStartMillis
+                    );
+
+                if (freshFsrPostureSample)
+                {
+                    fsrPostureReferenceSamples++;
+                    fsrReferenceBackrestAccum += currentBackrest;
+                    fsrReferenceCushionAccum += currentCushion;
+                    fsrReferenceBalanceAccum += currentBalance;
+                    fsrReferenceRatioAccum += currentRatio;
+                }
+
+                if (
+                    reading.fsrPostureSettlingMs >= FSR_POSTURE_SETTLE_MS
+                    && fsrPostureReferenceSamples >= 8U
+                )
+                {
+                    const float denom =
+                        static_cast<float>(fsrPostureReferenceSamples);
+
+                    fsrReferenceBackrestTotal =
+                        fsrReferenceBackrestAccum / denom;
+
+                    fsrReferenceCushionTotal =
+                        fsrReferenceCushionAccum / denom;
+
+                    fsrReferenceBackrestBalance =
+                        fsrReferenceBalanceAccum / denom;
+
+                    fsrReferenceBackrestRatio =
+                        fsrReferenceRatioAccum / denom;
+
+                    fsrPostureReferenceReady = true;
+                    fsrPostureCandidateStartMillis = 0UL;
+                    fsrPostureCandidateCode = 0;
+                }
+            }
+            else
+            {
+                // Do not learn a forward/unstable entry posture as normal.
+                fsrPostureReferenceStartMillis = 0UL;
+                fsrPostureReferenceSamples = 0U;
+                fsrReferenceBackrestAccum = 0.0f;
+                fsrReferenceCushionAccum = 0.0f;
+                fsrReferenceBalanceAccum = 0.0f;
+                fsrReferenceRatioAccum = 0.0f;
+                reading.fsrPostureSettlingMs = 0U;
+            }
+
+            // If the passenger never establishes backrest contact, avoid
+            // calling it an emergency. After 30 s simply expose that sensor
+            // monitoring is limited by the sustained forward posture.
+            const bool forwardBeforeReference =
+                currentCushion >= FSR_REFERENCE_MIN_CUSHION
+                &&
+                (
+                    currentBackrest < FSR_REFERENCE_MIN_BACKREST
+                    ||
+                    (
+                        isfinite(currentRatio)
+                        && currentRatio < 0.35f
+                    )
+                );
+
+            if (forwardBeforeReference)
+            {
+                if (fsrForwardStartMillis == 0UL)
+                {
+                    fsrForwardStartMillis = now;
+                }
+            }
+            else
+            {
+                fsrForwardStartMillis = 0UL;
+            }
+        }
+        else
+        {
+            const float sideShift =
+                currentBalance - fsrReferenceBackrestBalance;
+
+            const bool forwardPattern =
+                currentBackrest
+                    <=
+                    fsrReferenceBackrestTotal
+                    *
+                    FSR_FORWARD_BACKREST_FRACTION
+                &&
+                currentCushion
+                    >=
+                    fsrReferenceCushionTotal
+                    *
+                    FSR_FORWARD_CUSHION_FRACTION
+                &&
+                isfinite(currentRatio)
+                &&
+                currentRatio
+                    <=
+                    fsrReferenceBackrestRatio
+                    *
+                    FSR_FORWARD_RATIO_FRACTION;
+
+            const bool leftPattern =
+                !forwardPattern
+                &&
+                sideShift >= FSR_SIDE_SHIFT_THRESHOLD
+                &&
+                currentBackrest
+                    >=
+                    fsrReferenceBackrestTotal * 0.35f;
+
+            const bool rightPattern =
+                !forwardPattern
+                &&
+                sideShift <= -FSR_SIDE_SHIFT_THRESHOLD
+                &&
+                currentBackrest
+                    >=
+                    fsrReferenceBackrestTotal * 0.35f;
+
+            const int8_t postureCode =
+                forwardPattern
+                    ? 2
+                    : leftPattern
+                        ? -1
+                        : rightPattern
+                            ? 1
+                            : 0;
+
+            if (postureCode == 0)
+            {
+                fsrPostureCandidateStartMillis = 0UL;
+                fsrPostureCandidateCode = 0;
+            }
+            else
+            {
+                if (
+                    fsrPostureCandidateStartMillis == 0UL
+                    ||
+                    fsrPostureCandidateCode != postureCode
+                )
+                {
+                    fsrPostureCandidateStartMillis = now;
+                    fsrPostureCandidateCode = postureCode;
+                }
+
+                reading.fsrPosturePatternActive = true;
+                reading.fsrPostureCode = postureCode;
+                reading.fsrPostureCandidateMs =
+                    static_cast<uint32_t>(
+                        now - fsrPostureCandidateStartMillis
+                    );
+                reading.fsrPostureStrongVote =
+                    reading.fsrPostureCandidateMs
+                    >=
+                    FSR_POSTURE_PERSIST_MS;
+            }
+
+            if (forwardPattern)
+            {
+                if (fsrForwardStartMillis == 0UL)
+                {
+                    fsrForwardStartMillis = now;
+                }
+            }
+            else
+            {
+                fsrForwardStartMillis = 0UL;
+            }
+        }
+
+        if (fsrForwardStartMillis != 0UL)
+        {
+            reading.monitoringLimitedMs =
+                static_cast<uint32_t>(
+                    now - fsrForwardStartMillis
+                );
+
+            reading.monitoringLimited =
+                reading.monitoringLimitedMs
+                >=
+                FORWARD_LIMITED_NOTICE_MS;
+
+            reading.monitoringLimitedPersistent =
+                reading.monitoringLimitedMs
+                >=
+                FORWARD_LIMITED_PERSIST_MS;
+        }
+    }
+
+    reading.fsrPostureReferenceReady =
+        fsrPostureReferenceReady;
 
 
     // --------------------------------------------------------
@@ -789,26 +1089,19 @@ void FusionEngine::update(
             >
             0.28f;
 
-        // During an explicitly armed controlled UAT session, a sustained
-        // extreme side-unload/contact-loss pattern can supply ONE strong FSR
-        // vote. This is separate from the deployed IF/OCSVM result and is
-        // never active in normal monitoring.
-        if (input.fsr.controlledUatStrongVote)
+        // R5.7 posture evidence can supply ONE strong FSR vote after a
+        // sustained baseline-relative left/right/forward posture change.
+        // The legacy validation pattern vote remains accepted for backwards
+        // compatibility with existing presets. FSR remains WATCH-only by
+        // itself regardless of which FSR path produced the vote.
+        if (
+            reading.fsrPostureStrongVote
+            ||
+            input.fsr.controlledUatStrongVote
+        )
         {
-            // In an armed controlled hard-slump test, the dedicated UAT
-            // persistence path is authoritative for the FSR contribution.
-            // This prevents the raw IF/OCSVM output from creating an earlier
-            // FSR-only Warning before the intentional ~10 s posture hold has
-            // completed. The raw model output remains visible in telemetry.
             fsrStrongAnomaly =
                 true;
-        }
-        else if (input.fsr.controlledUatPatternActive)
-        {
-            // Pattern recognized but still inside the controlled persistence
-            // window: observe only; do not cast an FSR Fusion anomaly vote yet.
-            fsrStrongAnomaly = false;
-            fsrWeakAnomaly = false;
         }
         else if (
             hasStrongModelAnomaly(
@@ -1110,9 +1403,10 @@ void FusionEngine::update(
     reading.evidence.motionArtifactPossible =
         motionArtifactPossible;
 
-    // Final defense policy: agreement means TWO independent STRONG
-    // anomaly sensors. Weak/isolated anomalies remain visible and place
-    // the system in WATCH, but cannot create WARNING by themselves.
+    // R5.7 keeps the agreement diagnostic, but WARNING no longer requires
+    // agreement in every case. A trusted STRONG MLX or C1001 anomaly is a
+    // critical sensor condition and may escalate by itself after persistence.
+    // FSR remains posture/pressure evidence and cannot create WARNING alone.
     reading.evidence.multiSensorAgreement =
         reading.evidence.strongAnomalyEvidenceCount
         >=
@@ -1120,33 +1414,26 @@ void FusionEngine::update(
 
 
     // --------------------------------------------------------
-    // Persistence / hysteresis
+    // Persistence / hysteresis - R5.7
     // --------------------------------------------------------
 
-    // In normal/live operation, strong vehicle/radar motion remains an
-    // artifact gate. During an explicitly armed controlled UAT hard-slump,
-    // however, the body movement itself is the intended stimulus. Do not let
-    // that same movement erase the UAT FSR candidate we are demonstrating.
-    // This exception can only exist when the UAT-only FSR pattern detector
-    // has already persisted long enough to produce its strong vote.
-    const bool controlledFsrUatCandidate =
-        input.fsr.controlledUatStrongVote;
-
-    const bool warningMotionGateClear =
-        !motionArtifactPossible
-        || controlledFsrUatCandidate;
-
-    // WARNING is now a corroborated 2-of-3 decision across the three
-    // occupant anomaly modalities: C1001, FSR and MLX. A single strong
-    // sensor (or any weak-only anomaly) remains WATCH. MPU is contextual
-    // only and camera is corroboration only, so neither can satisfy this
-    // agreement requirement.
-    const bool strongCandidate =
-        reading.evidence.strongAnomalyEvidenceCount
-        >=
-        2
+    // C1001 is suppressed from standalone critical escalation while its own
+    // motion-artifact detector says vitals are unreliable. The anomaly remains
+    // visible diagnostically, but must first become trusted again.
+    const bool c1001CriticalStrong =
+        c1001StrongAnomaly
         &&
-        warningMotionGateClear;
+        !input.c1001.reading.motionArtifactActive;
+
+    // MLX is already target/baseline/model gated before mlxStrongAnomaly can
+    // become true, so a STRONG MLX anomaly is eligible by itself.
+    const bool mlxCriticalStrong =
+        mlxStrongAnomaly;
+
+    const bool strongCandidate =
+        c1001CriticalStrong
+        ||
+        mlxCriticalStrong;
 
     const bool warningCandidate =
         strongCandidate;
@@ -1156,79 +1443,53 @@ void FusionEngine::update(
         >=
         1
         ||
+        reading.monitoringLimited
+        ||
         reading.occupancy
         ==
         FusionOccupancyState::CONFLICT;
 
-    if (
-        warningCandidate
-    )
+    if (warningCandidate)
     {
-        if (
-            warningCandidateStartMillis
-            ==
-            0UL
-        )
+        if (warningCandidateStartMillis == 0UL)
         {
-            warningCandidateStartMillis =
-                now;
+            warningCandidateStartMillis = now;
         }
     }
     else
     {
-        warningCandidateStartMillis =
-            0UL;
+        warningCandidateStartMillis = 0UL;
     }
 
-    if (
-        strongCandidate
-    )
-    {
-        if (
-            emergencyCandidateStartMillis
-            ==
-            0UL
-        )
-        {
-            emergencyCandidateStartMillis =
-                now;
-        }
-    }
-    else
-    {
-        emergencyCandidateStartMillis =
-            0UL;
-    }
-
-    // The controlled UAT FSR vote has already completed its own 10-second
-    // continuous posture-persistence requirement. Once a SECOND independent
-    // strong sensor agrees, do not add another 4 s on top of that controlled
-    // FSR persistence. All other two-strong-sensor pairs retain the normal
-    // Fusion warning persistence requirement.
     const bool persistentWarning =
-        (
-            warningCandidate
-            && input.fsr.controlledUatStrongVote
-        )
-        ||
-        (
-            warningCandidate
-            && warningCandidateStartMillis != 0UL
-            && now - warningCandidateStartMillis >= WARNING_PERSIST_MS
-        );
+        warningCandidate
+        &&
+        warningCandidateStartMillis != 0UL
+        &&
+        now - warningCandidateStartMillis >= WARNING_PERSIST_MS;
+
+    // The 30-second Emergency timer begins only after WARNING is actually
+    // confirmed. If the critical condition clears, the timer resets.
+    if (persistentWarning)
+    {
+        if (emergencyCandidateStartMillis == 0UL)
+        {
+            emergencyCandidateStartMillis = now;
+        }
+    }
+    else
+    {
+        emergencyCandidateStartMillis = 0UL;
+    }
 
     const bool persistentEmergencyCandidate =
-        strongCandidate
+        persistentWarning
         &&
         emergencyCandidateStartMillis
         !=
         0UL
         &&
-        now
-        -
-        emergencyCandidateStartMillis
-        >=
-        EMERGENCY_PERSIST_MS;
+        now - emergencyCandidateStartMillis >= EMERGENCY_PERSIST_MS;
 
     reading.warningCandidateMs =
         warningCandidate && warningCandidateStartMillis != 0UL
@@ -1236,14 +1497,19 @@ void FusionEngine::update(
             : 0U;
 
     reading.strongCandidateMs =
-        strongCandidate && emergencyCandidateStartMillis != 0UL
+        persistentWarning && emergencyCandidateStartMillis != 0UL
             ? static_cast<uint32_t>(now - emergencyCandidateStartMillis)
             : 0U;
 
     reading.emergencyThresholdMs =
         static_cast<uint32_t>(EMERGENCY_PERSIST_MS);
 
+    // Legacy app field retained. It now means "critical strong candidate",
+    // not strictly "two-sensor candidate".
     reading.strongMultisensorCandidate =
+        strongCandidate;
+
+    reading.criticalStrongCandidate =
         strongCandidate;
 
     reading.cameraCorroborationOnly =
@@ -1251,7 +1517,7 @@ void FusionEngine::update(
 
     // Camera result handling is transaction bookkeeping ONLY. One fresh
     // result (UPRIGHT or NON_UPRIGHT) completes corroboration for the current
-    // strong multisensor candidate, preventing repeated camera requests. It
+    // critical strong candidate, preventing repeated camera requests. It
     // never changes the candidate timers or final severity.
     if (!strongCandidate)
     {
@@ -1267,10 +1533,9 @@ void FusionEngine::update(
         cameraCorroborationReceivedForCandidate = true;
     }
 
-    // concernActive is specifically a WARNING-level corroborated concern.
-    // If the pair breaks and only one anomaly remains, the elevated state is
-    // held for the normal 3 s recovery hysteresis, then drops to WATCH rather
-    // than remaining latched in WARNING forever.
+    // concernActive is the current WARNING-eligible critical condition.
+    // When it clears, the elevated state is held for the normal 3 s recovery
+    // hysteresis, then falls to WATCH if some non-critical evidence remains.
     const bool concernActive =
         warningCandidate;
 
@@ -1358,8 +1623,8 @@ void FusionEngine::update(
 
     if (persistentEmergencyCandidate)
     {
-        // >=2 independent strong anomaly votes remained continuously active
-        // for the full 30-second emergency persistence window.
+        // A qualifying critical MLX/C1001 condition remained active for
+        // the full 30-second post-WARNING emergency persistence window.
         effectiveLevel =
             FusionLevel::EMERGENCY;
         reading.triggerAlert =
@@ -1369,9 +1634,9 @@ void FusionEngine::update(
     }
     else if (persistentWarning)
     {
-        // WARNING requires >=2 independent strong anomaly votes. Request the
-        // camera once in parallel as corroborative evidence while the 30 s
-        // sensor escalation timer continues independently.
+        // WARNING is confirmed after persistence of a trusted STRONG MLX or
+        // C1001 condition. Request the camera once in parallel as corroborative
+        // evidence while the 30 s emergency escalation timer continues.
         effectiveLevel =
             FusionLevel::WARNING;
         reading.triggerCamera =
@@ -1405,9 +1670,9 @@ void FusionEngine::update(
     }
     else if (isolatedAnomalyPresent)
     {
-        // One anomalous modality is intentionally not enough for WARNING.
-        // Keep it visible as WATCH so the system is never falsely reported
-        // SAFE while an isolated sensor concern is still present.
+        // FSR-only posture/model concerns, weak anomalies, Monitoring Limited,
+        // and other non-critical isolated evidence remain WATCH. A trusted
+        // STRONG MLX/C1001 condition has already been handled above.
         effectiveLevel =
             FusionLevel::WATCH;
     }

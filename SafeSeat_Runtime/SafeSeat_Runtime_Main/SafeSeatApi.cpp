@@ -10,6 +10,28 @@ namespace
 {
 constexpr char API_SCHEMA_VERSION[] = "1.0.0";
 constexpr char API_DEVICE_NAME[] = "SafeSeat Main Hub";
+
+const char* mlxMlStatusText(MLXMLStatus status)
+{
+    switch (status)
+    {
+        case MLXMLStatus::WAITING_FOR_SAMPLE: return "WAITING FOR SAMPLE";
+        case MLXMLStatus::SENSOR_UNAVAILABLE: return "SENSOR UNAVAILABLE";
+        case MLXMLStatus::WAITING_FOR_WARM_TARGET: return "WAITING FOR OCCUPIED THERMAL SESSION";
+        case MLXMLStatus::TARGET_CONTRAST_DEGRADED: return "LOW THERMAL CONTRAST";
+        case MLXMLStatus::UNSTABLE_TARGET: return "STABILIZING TARGET";
+        case MLXMLStatus::BUILDING_BASELINE: return "BUILDING BASELINE";
+        case MLXMLStatus::BASELINE_READY: return "BASELINE READY";
+        case MLXMLStatus::READY_NORMAL: return "READY - NORMAL";
+        case MLXMLStatus::READY_WEAK_ANOMALY: return "READY - WEAK ANOMALY";
+        case MLXMLStatus::READY_STRONG_ANOMALY: return "READY - STRONG ANOMALY";
+        case MLXMLStatus::TARGET_GEOMETRY_DEGRADED: return "TARGET GEOMETRY DEGRADED";
+        case MLXMLStatus::REACQUIRING_TARGET: return "STABILIZING TARGET";
+        case MLXMLStatus::ANOMALY_CANDIDATE: return "ANOMALY CANDIDATE";
+        case MLXMLStatus::INFERENCE_ERROR: return "INFERENCE ERROR";
+        default: return "UNKNOWN";
+    }
+}
 }
 
 SafeSeatApi::SafeSeatApi()
@@ -76,6 +98,7 @@ void SafeSeatApi::registerRoutes()
     server.on("/api/v1/validation/input", HTTP_GET, [this]() { handleUatInjectionStatus(); });
     server.on("/api/v1/validation/input/start", HTTP_POST, [this]() { handleUatInjectionStart(); });
     server.on("/api/v1/validation/input/update", HTTP_POST, [this]() { handleUatInjectionUpdate(); });
+    server.on("/api/v1/validation/input/live", HTTP_POST, [this]() { handleUatInjectionLive(); });
     server.on("/api/v1/validation/input/stop", HTTP_POST, [this]() { handleUatInjectionStop(); });
 
     server.on("/api/v1/uat/injection", HTTP_GET, [this]() { handleUatInjectionStatus(); });
@@ -140,8 +163,15 @@ void SafeSeatApi::handleHealth()
 
 void SafeSeatApi::handleUat()
 {
-    // Research & validation console. Sensor-value injection is explicitly
-    // labeled TEST MODE and never writes a Fusion result directly.
+    // R5.7: opening the validation console automatically prepares the
+    // validation session in LIVE READINGS mode. This does not replace any
+    // physical sensor and does not rebuild completed baselines/model windows.
+    SafeSeatUatInjection &uat = SafeSeatUatInjection::instance();
+    if (!uat.getState().active)
+    {
+        uat.startLive();
+    }
+
     server.sendHeader("Cache-Control", "no-store");
     server.send_P(200, "text/html", SAFESEAT_UAT_PAGE);
 }
@@ -265,12 +295,14 @@ void SafeSeatApi::handleUatInjectionStatus()
     out += F(",\"revision\":"); out += String(s.revision);
     out += F(",\"elapsed_ms\":"); out += String(s.active ? millis() - s.startedMillis : 0UL);
     out += F(",\"fusion_authoritative\":true,\"direct_warning_write\":false");
-    out += F(",\"warning_policy\":\"two_independent_strong_sensors\"");
-    out += F(",\"warning_required_strong_sensor_count\":2");
+    out += F(",\"warning_policy\":\"strong_mlx_or_c1001_can_escalate_fsr_alone_watch\"");
+    out += F(",\"warning_required_strong_sensor_count\":1");
+    out += F(",\"standalone_warning_modalities\":[\"c1001\",\"mlx90614\"]");
+    out += F(",\"fsr_alone_policy\":\"watch_only\"");
     out += F(",\"demo_policy\":{\"mlx_rapid_transition_bypass\":");
     appendJsonBool(out, s.active && s.mlxRapidTransitionBypass);
     out += F(",\"object_ta_fusion_gate\":false,\"baseline_and_ml_still_active\":true");
-    out += F(",\"start_preserves_windows\":true}");
+    out += F(",\"start_preserves_windows\":true,\"auto_ready_live\":true,\"live_button_keeps_validation_active\":true}");
     out += F(",\"sources\":{");
     out += F("\"fsr\":"); appendJsonBool(out, s.injectFsr);
     out += F(",\"fsr_dynamic\":"); appendJsonBool(out, s.fsrDynamicPattern);
@@ -331,6 +363,12 @@ void SafeSeatApi::handleUatInjectionUpdate()
         SafeSeatUatInjection::instance().start();
     }
 
+    handleUatInjectionStatus();
+}
+
+void SafeSeatApi::handleUatInjectionLive()
+{
+    SafeSeatUatInjection::instance().restoreLiveReadings();
     handleUatInjectionStatus();
 }
 
@@ -451,13 +489,25 @@ String SafeSeatApi::buildFusionJson() const
     out += String(f.warningCandidateMs);
     out += F(",\"strong_multisensor_candidate\":");
     appendJsonBool(out, f.strongMultisensorCandidate);
+    out += F(",\"critical_strong_candidate\":");
+    appendJsonBool(out, f.criticalStrongCandidate);
     out += F(",\"strong_multisensor_elapsed_ms\":");
+    out += String(f.strongCandidateMs);
+    out += F(",\"emergency_elapsed_ms\":");
     out += String(f.strongCandidateMs);
     out += F(",\"emergency_persistence_required_ms\":");
     out += String(f.emergencyThresholdMs);
+    out += F(",\"monitoring_limited\":");
+    appendJsonBool(out, f.monitoringLimited);
+    out += F(",\"monitoring_limited_persistent\":");
+    appendJsonBool(out, f.monitoringLimitedPersistent);
+    out += F(",\"monitoring_limited_ms\":");
+    out += String(f.monitoringLimitedMs);
     out += F(",\"camera_fusion_role\":\"corroboration_only\"");
-    out += F(",\"warning_policy\":\"two_independent_strong_sensors\"");
-    out += F(",\"warning_required_strong_sensor_count\":2");
+    out += F(",\"warning_policy\":\"strong_mlx_or_c1001_can_escalate_fsr_alone_watch\"");
+    out += F(",\"warning_required_strong_sensor_count\":1");
+    out += F(",\"standalone_warning_modalities\":[\"c1001\",\"mlx90614\"]");
+    out += F(",\"fsr_alone_policy\":\"watch_only\"");
     out += F(",\"decision_modalities\":[\"c1001\",\"fsr\",\"mlx90614\"]");
     out += F(",\"validation_session_active\":");
     appendJsonBool(out, SafeSeatUatInjection::instance().getState().active);
@@ -557,13 +607,25 @@ String SafeSeatApi::buildStatusJson() const
     out += String(f.warningCandidateMs);
     out += F(",\"strong_multisensor_candidate\":");
     appendJsonBool(out, f.strongMultisensorCandidate);
+    out += F(",\"critical_strong_candidate\":");
+    appendJsonBool(out, f.criticalStrongCandidate);
     out += F(",\"strong_multisensor_elapsed_ms\":");
+    out += String(f.strongCandidateMs);
+    out += F(",\"emergency_elapsed_ms\":");
     out += String(f.strongCandidateMs);
     out += F(",\"emergency_persistence_required_ms\":");
     out += String(f.emergencyThresholdMs);
+    out += F(",\"monitoring_limited\":");
+    appendJsonBool(out, f.monitoringLimited);
+    out += F(",\"monitoring_limited_persistent\":");
+    appendJsonBool(out, f.monitoringLimitedPersistent);
+    out += F(",\"monitoring_limited_ms\":");
+    out += String(f.monitoringLimitedMs);
     out += F(",\"camera_fusion_role\":\"corroboration_only\"");
-    out += F(",\"warning_policy\":\"two_independent_strong_sensors\"");
-    out += F(",\"warning_required_strong_sensor_count\":2");
+    out += F(",\"warning_policy\":\"strong_mlx_or_c1001_can_escalate_fsr_alone_watch\"");
+    out += F(",\"warning_required_strong_sensor_count\":1");
+    out += F(",\"standalone_warning_modalities\":[\"c1001\",\"mlx90614\"]");
+    out += F(",\"fsr_alone_policy\":\"watch_only\"");
     out += F(",\"decision_modalities\":[\"c1001\",\"fsr\",\"mlx90614\"]");
     out += F(",\"validation_session_active\":");
     appendJsonBool(out, SafeSeatUatInjection::instance().getState().active);
@@ -683,6 +745,7 @@ String SafeSeatApi::buildSensorsJson() const
 
     const SafeSeatTelemetrySnapshot &s = telemetry->getSnapshot();
     const FusionInput &in = s.input;
+    const FusionReading &fusion = s.fusion;
 
     // --------------------------------------------------------
     // C1001
@@ -770,7 +833,7 @@ String SafeSeatApi::buildSensorsJson() const
     out += F("}");
     out += F(",\"native_mlx_model\":");
     appendModelEvidence(out, in.mlx.model);
-    out += F(",\"model_runtime\":{\"baseline_blocks_collected\":"); out += String(s.mlxMl.baselineBlocksCollected);
+    out += F(",\"model_runtime\":{\"status\":"); appendJsonString(out, mlxMlStatusText(s.mlxMl.status)); out += F(",\"baseline_ready\":"); appendJsonBool(out, s.mlxMl.baselineReady); out += F(",\"baseline_blocks_collected\":"); out += String(s.mlxMl.baselineBlocksCollected);
     out += F(",\"baseline_blocks_required\":"); out += String(s.mlxMl.baselineBlocksRequired);
     out += F(",\"evaluated_blocks\":"); out += String(s.mlxMl.evaluatedBlocks);
     out += F(",\"anomaly_candidate_blocks\":"); out += String(s.mlxMl.anomalyCandidateBlocks);
@@ -830,21 +893,33 @@ String SafeSeatApi::buildSensorsJson() const
                 : "NONE"
     );
     out += F("}");
-    out += F(",\"validation_posture\":{\"pattern_active\":");
-    appendJsonBool(out, in.fsr.controlledUatPatternActive);
+    out += F(",\"validation_posture\":{\"reference_ready\":");
+    appendJsonBool(out, fusion.fsrPostureReferenceReady);
+    out += F(",\"settling_ms\":");
+    out += String(fusion.fsrPostureSettlingMs);
+    out += F(",\"pattern_active\":");
+    appendJsonBool(out, fusion.fsrPosturePatternActive);
     out += F(",\"strong_vote\":");
-    appendJsonBool(out, in.fsr.controlledUatStrongVote);
+    appendJsonBool(out, fusion.fsrPostureStrongVote);
     out += F(",\"candidate_ms\":");
-    out += String(in.fsr.controlledUatCandidateMs);
-    out += F(",\"side\":");
+    out += String(fusion.fsrPostureCandidateMs);
+    out += F(",\"posture\":");
     appendJsonString(
         out,
-        in.fsr.controlledUatSide < 0
+        fusion.fsrPostureCode == -1
             ? "LEFT"
-            : in.fsr.controlledUatSide > 0
+            : fusion.fsrPostureCode == 1
                 ? "RIGHT"
-                : "NONE"
+                : fusion.fsrPostureCode == 2
+                    ? "FORWARD"
+                    : "NONE"
     );
+    out += F(",\"monitoring_limited\":");
+    appendJsonBool(out, fusion.monitoringLimited);
+    out += F(",\"monitoring_limited_persistent\":");
+    appendJsonBool(out, fusion.monitoringLimitedPersistent);
+    out += F(",\"monitoring_limited_ms\":");
+    out += String(fusion.monitoringLimitedMs);
     out += F("}");
     out += F(",\"model_runtime\":{\"window_samples_collected\":"); out += String(s.fsrMl.windowSamplesCollected);
     out += F(",\"window_samples_required\":"); out += String(s.fsrMl.windowSamplesRequired);

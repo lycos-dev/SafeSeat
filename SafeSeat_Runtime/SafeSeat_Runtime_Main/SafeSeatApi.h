@@ -7,7 +7,7 @@
 #include "SafeSeatUatInjection.h"
 
 // ============================================================
-// SAFESEAT LOCAL TELEMETRY API + SYSTEM VALIDATION CONTROL - R5.6
+// SAFESEAT LOCAL TELEMETRY API + SYSTEM VALIDATION CONTROL - R5.7
 //
 // Main Hub address: http://192.168.4.1
 //
@@ -25,6 +25,7 @@
 //   GET  /api/v1/validation/input
 //   POST /api/v1/validation/input/start
 //   POST /api/v1/validation/input/update
+//   POST /api/v1/validation/input/live
 //   POST /api/v1/validation/input/stop
 // Legacy app-compatible aliases remain under /api/v1/uat/injection.
 //
@@ -73,6 +74,7 @@ private:
     void handleUatInjectionStatus();
     void handleUatInjectionStart();
     void handleUatInjectionUpdate();
+    void handleUatInjectionLive();
     void handleUatInjectionStop();
     void applyUatRequestArgs();
     void handleStatus();

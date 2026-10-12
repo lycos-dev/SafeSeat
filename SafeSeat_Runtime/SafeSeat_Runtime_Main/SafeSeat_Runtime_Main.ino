@@ -1004,6 +1004,18 @@ void loop()
     // absolute gate was rejecting valid in-vehicle/headrest observations in
     // the high-20s and then reporting TARGET DEGRADED even though the sensor
     // and baseline were otherwise valid. Keep only a broad sanity range.
+    // Live monitoring keeps the conservative passenger-target sanity range.
+    // While the validation console is active, allow a wider physical range so
+    // a deliberately hot reference object can be evaluated by the existing
+    // baseline-relative MLX model instead of being mislabeled as target loss.
+    // Backrest contact is still required; a deeply forward passenger remains
+    // a genuine monitoring-geometry limitation.
+    const float mlxTargetMinC =
+        uatState.active ? 10.0f : 20.0f;
+
+    const float mlxTargetMaxC =
+        uatState.active ? 90.0f : 50.0f;
+
     const bool mlxTargetVisible =
         thermalOccupancy
         &&
@@ -1015,9 +1027,9 @@ void loop()
         &&
         isfinite(t.filteredObjectC)
         &&
-        t.filteredObjectC >= 20.0f
+        t.filteredObjectC >= mlxTargetMinC
         &&
-        t.filteredObjectC <= 50.0f
+        t.filteredObjectC <= mlxTargetMaxC
         &&
         f.backrestTotal >= 1500.0f;
 
@@ -1091,10 +1103,9 @@ void loop()
         mlxTargetVisibleSinceMillis = 0UL;
     }
 
-    // UAT-only deterministic thermal transition policy. While a controlled
-    // test is armed, the evaluator may intentionally create a sudden and then
-    // sustained MLX change using EITHER the physical sensor (hot-water demo)
-    // or value injection. Bypass only the rapid FOV quarantine in that mode.
+    // Validation thermal transition policy. While the validation console is
+    // active, a deliberate sudden-and-sustained MLX change (physical hot-water
+    // reference or test input) bypasses only the rapid FOV quarantine.
     // The 1-s stability gate, personal baseline, IF+OCSVM, 3-block anomaly
     // persistence and 4-s Fusion warning persistence still remain active.
     mlxML.setUatRapidTransitionBypass(

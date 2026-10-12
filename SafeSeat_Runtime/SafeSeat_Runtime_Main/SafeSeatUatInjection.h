@@ -105,6 +105,12 @@ public:
     void start();
     void stop();
 
+    // R5.7 validation convenience:
+    // - auto-start in live mode when the validation console is opened;
+    // - return all sources to live acquisition without leaving validation.
+    void startLive();
+    void restoreLiveReadings();
+
     // Called by the Main Hub loop before ML/model wrappers consume readings.
     void applyFsr(FSRReading &reading);
     void applyMlx(MLXReading &reading);

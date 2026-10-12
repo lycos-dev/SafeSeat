@@ -206,14 +206,14 @@ enum class FusionRespirationState
 // incomplete data or any isolated/weak anomaly evidence.
 //
 // WARNING:
-// at least two independent STRONG anomaly modalities agree after the
-// configured warning persistence. C1001, FSR and MLX are the three anomaly
-// modalities; MPU is context only and camera is corroboration only.
+// a trusted STRONG MLX or C1001 anomaly may escalate by itself after the
+// configured warning persistence. FSR posture/model evidence alone remains
+// WATCH-only. Two independent strong modalities also qualify.
 //
 // EMERGENCY:
-// the same strong multi-sensor agreement remains continuously abnormal for
-// the configured emergency persistence period.
-// Camera verification is corroborative only and never decides severity.
+// the same qualifying critical anomaly condition remains continuously active
+// for the configured emergency persistence period. Camera verification is
+// corroborative only and never decides severity.
 // ============================================================
 
 enum class FusionLevel
@@ -477,17 +477,37 @@ struct FusionReading
     // Timing / escalation diagnostics
     // --------------------------------------------------------
 
-    // Continuous time spent with warning-level (>=2 strong sensor) agreement.
+    // Continuous time spent with a WARNING-eligible critical condition.
     uint32_t warningCandidateMs = 0;
 
-    // Continuous time with >=2 independent strong anomaly votes (Emergency timer).
+    // Continuous time with a WARNING-eligible critical condition (Emergency timer).
     uint32_t strongCandidateMs = 0;
 
-    // Fixed threshold used for strong multisensor -> EMERGENCY escalation.
+    // Fixed threshold used for WARNING-eligible condition -> EMERGENCY escalation.
     uint32_t emergencyThresholdMs = 0;
 
-    // True while the strong multisensor condition is currently present.
+    // Legacy field retained for app compatibility. In R5.7 this means a
+    // WARNING-eligible critical condition is active; it no longer requires
+    // two sensors when the strong source is MLX or C1001.
     bool strongMultisensorCandidate = false;
+
+    // Explicit critical-candidate flag for new telemetry/console code.
+    bool criticalStrongCandidate = false;
+
+    // Baseline-relative FSR posture tracking. These are context/evidence only:
+    // FSR never creates WARNING/EMERGENCY by itself.
+    bool fsrPostureReferenceReady = false;
+    uint32_t fsrPostureSettlingMs = 0;
+    bool fsrPosturePatternActive = false;
+    bool fsrPostureStrongVote = false;
+    int8_t fsrPostureCode = 0; // -1 LEFT, +1 RIGHT, +2 FORWARD
+    uint32_t fsrPostureCandidateMs = 0;
+
+    // A sustained forward posture can make MLX/C1001 monitoring unreliable.
+    // This is a driver-information state, not a medical emergency state.
+    bool monitoringLimited = false;
+    bool monitoringLimitedPersistent = false;
+    uint32_t monitoringLimitedMs = 0;
 
     // Camera is retained as event-triggered corroboration only.
     bool cameraCorroborationOnly = true;
@@ -573,6 +593,40 @@ private:
     static constexpr unsigned long
         CLEAR_STABLE_MS = 3000UL;
 
+    // Passenger posture reference and persistence timing.
+    static constexpr unsigned long
+        FSR_POSTURE_SETTLE_MS = 12000UL;
+
+    static constexpr unsigned long
+        FSR_POSTURE_PERSIST_MS = 8000UL;
+
+    static constexpr unsigned long
+        FORWARD_LIMITED_NOTICE_MS = 30000UL;
+
+    static constexpr unsigned long
+        FORWARD_LIMITED_PERSIST_MS = 60000UL;
+
+    static constexpr float
+        FSR_REFERENCE_MIN_BACKREST = 3000.0f;
+
+    static constexpr float
+        FSR_REFERENCE_MIN_CUSHION = 3000.0f;
+
+    static constexpr float
+        FSR_REFERENCE_MIN_RATIO = 0.45f;
+
+    static constexpr float
+        FSR_SIDE_SHIFT_THRESHOLD = 0.22f;
+
+    static constexpr float
+        FSR_FORWARD_BACKREST_FRACTION = 0.45f;
+
+    static constexpr float
+        FSR_FORWARD_CUSHION_FRACTION = 0.50f;
+
+    static constexpr float
+        FSR_FORWARD_RATIO_FRACTION = 0.55f;
+
     // MPU physical-motion qualification validated on 2026-08-23.
     // Three consecutive fresh samples at ~80 Hz = ~37.5 ms.
     // Physical motion must exist before IF/OCSVM road-domain
@@ -613,4 +667,21 @@ private:
     unsigned long lastMpuMotionSampleCount = 0UL;
     uint8_t mpuActivePersistenceSamples = 0U;
     uint8_t mpuStrongPersistenceSamples = 0U;
+
+    // FSR passenger posture reference + persistence state.
+    bool fsrPostureReferenceReady = false;
+    unsigned long fsrPostureReferenceStartMillis = 0UL;
+    unsigned long fsrPostureCandidateStartMillis = 0UL;
+    unsigned long fsrForwardStartMillis = 0UL;
+    unsigned long lastFsrPostureSampleCount = 0UL;
+    uint32_t fsrPostureReferenceSamples = 0U;
+    float fsrReferenceBackrestTotal = 0.0f;
+    float fsrReferenceCushionTotal = 0.0f;
+    float fsrReferenceBackrestBalance = 0.0f;
+    float fsrReferenceBackrestRatio = 0.0f;
+    float fsrReferenceBackrestAccum = 0.0f;
+    float fsrReferenceCushionAccum = 0.0f;
+    float fsrReferenceBalanceAccum = 0.0f;
+    float fsrReferenceRatioAccum = 0.0f;
+    int8_t fsrPostureCandidateCode = 0;
 };

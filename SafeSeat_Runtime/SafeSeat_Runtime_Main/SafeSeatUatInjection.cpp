@@ -180,6 +180,54 @@ void SafeSeatUatInjection::stop()
     Serial.println(state.sessionId);
 }
 
+
+void SafeSeatUatInjection::startLive()
+{
+    if (state.active) return;
+
+    state.injectFsr = false;
+    state.injectMlx = false;
+    state.injectMpu = false;
+    state.injectC1001 = false;
+    state.fsrDynamicPattern = false;
+    state.cameraMode = SafeSeatUatCameraMode::REAL_CAMERA;
+    state.mlxRapidTransitionBypass = true;
+
+    start();
+
+    // Tell the remote C1001 node explicitly that validation input is disabled.
+    c1001DisableRepeatsRemaining = 3;
+    lastC1001CommandMillis = 0;
+
+    Serial.println("[VALIDATION] Auto-ready in LIVE READINGS mode.");
+}
+
+void SafeSeatUatInjection::restoreLiveReadings()
+{
+    // Keep the validation session active so MLX physical validation keeps the
+    // transition-safe profile. Only optional test sources are disabled.
+    if (!state.active)
+    {
+        startLive();
+        return;
+    }
+
+    state.injectFsr = false;
+    state.injectMlx = false;
+    state.injectMpu = false;
+    state.injectC1001 = false;
+    state.fsrDynamicPattern = false;
+    state.cameraMode = SafeSeatUatCameraMode::REAL_CAMERA;
+    state.mlxRapidTransitionBypass = true;
+    state.revision++;
+
+    c1001DisableRepeatsRemaining = 3;
+    lastC1001CommandMillis = 0;
+    resetSyntheticClocks();
+
+    Serial.println("[VALIDATION] LIVE READINGS restored; validation remains active.");
+}
+
 void SafeSeatUatInjection::recomputeFsrDerived(FSRReading &reading) const
 {
     reading.backrestLeftTotal = reading.pressure[0] + reading.pressure[1] + reading.pressure[2];
