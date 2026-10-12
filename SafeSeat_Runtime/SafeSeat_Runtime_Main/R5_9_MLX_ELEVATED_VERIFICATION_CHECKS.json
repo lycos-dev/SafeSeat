@@ -1,0 +1,49 @@
+{
+  "revision": "R5.9",
+  "base": "R5.8 Centered Reference + Practical Timing Final",
+  "scope": "MLX wrapper and MLX validation diagnostics only",
+  "mlx_policy": {
+    "positive_elevated_surface_floor_c": 37.5,
+    "elevated_verification_seconds": 10,
+    "elevated_verification_blocks": 10,
+    "block_duration_seconds": 1,
+    "small_positive_baseline_relative_anomaly_below_floor": "suppressed from Fusion",
+    "rapid_upward_elevated_transition": "10-second verification instead of geometry hold",
+    "rapid_non_elevated_transition": "R5.8 geometry guard unchanged",
+    "note": "37.5 C is an engineering filtered surface-temperature floor, not a fever/core-temperature diagnostic threshold."
+  },
+  "unchanged_timing": {
+    "fusion_warning_persistence_ms": 10000,
+    "emergency_after_warning_ms": 30000,
+    "fsr_posture_persistence_ms": 12000
+  },
+  "behavior_harness": {
+    "baseline_case": "30.0 C for 30 seconds",
+    "small_warming_case": "32.6 C sustained for 25 seconds",
+    "small_warming_result": "PASS - READY_NORMAL, no valid anomaly evidence",
+    "high_temperature_case": "38.5 C sustained after baseline",
+    "seconds_1_to_9": "PASS - VERIFYING ELEVATED TEMPERATURE, model evidence invalid to Fusion",
+    "second_10": "PASS - verification complete, trusted model anomaly becomes valid",
+    "rapid_guard_enabled_high_temperature_case": "PASS - high rapid transition enters verification, not TARGET GEOMETRY DEGRADED"
+  },
+  "source_static_checks": {
+    "MLXML_cpp_host_syntax": "PASS",
+    "validation_javascript_syntax": "PASS",
+    "Fusion_cpp_unchanged_from_R5_8": true,
+    "Fusion_h_unchanged_from_R5_8": true,
+    "FSR_cpp_unchanged_from_R5_8": true,
+    "FSRML_cpp_unchanged_from_R5_8": true,
+    "MPU_cpp_unchanged_from_R5_8": true,
+    "MPUML_cpp_unchanged_from_R5_8": true,
+    "C1001Comm_cpp_unchanged_from_R5_8": true,
+    "CameraComm_cpp_unchanged_from_R5_8": true,
+    "SafeSeat_Runtime_Main_ino_unchanged_from_R5_8": true
+  },
+  "supplied_csv_observation": {
+    "source": "SafeSeat_VALIDATION-TEST_2026-10-12T04-51-26-242Z.csv",
+    "observed_false_warning_example": "WARNING began while filtered MLX object temperature was approximately 32.54 C",
+    "expected_R5_9_effect": "positive MLX model anomaly below 37.5 C cannot create Fusion temperature anomaly evidence",
+    "longest_late_physical_high_segment_approx_seconds": 4.33,
+    "note": "A future physical test must keep the elevated condition stable for about 10 continuous seconds to pass the new MLX verification."
+  }
+}

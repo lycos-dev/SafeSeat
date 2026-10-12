@@ -7,7 +7,7 @@
 #include "SafeSeatUatInjection.h"
 
 // ============================================================
-// SAFESEAT LOCAL TELEMETRY API + SYSTEM VALIDATION CONTROL - R5.7
+// SAFESEAT LOCAL TELEMETRY API + SYSTEM VALIDATION CONTROL - R5.8
 //
 // Main Hub address: http://192.168.4.1
 //

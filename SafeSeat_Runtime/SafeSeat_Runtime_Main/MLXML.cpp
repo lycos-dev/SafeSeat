@@ -9,6 +9,8 @@ void MLXML::begin()
     reading.modelAvailable = true;
     reading.baselineBlocksRequired = BASELINE_BLOCK_COUNT;
     reading.targetLossGraceBlocks = 0U;
+    reading.elevatedVerificationRequiredBlocks = ELEVATED_VERIFY_BLOCKS;
+    reading.elevatedTemperatureFloorC = ELEVATED_TEMPERATURE_FLOOR_C;
     resetSessionBaseline(MLXMLStatus::WAITING_FOR_SAMPLE);
 
     Serial.println();
@@ -22,10 +24,12 @@ void MLXML::begin()
     Serial.println("[MLX-ML] OCCUPANCY establishes the thermal session; Object-Ta is NOT a hard gate.");
     Serial.println("[MLX-ML] Low thermal contrast is reported but does NOT reset/block baseline or ML.");
     Serial.println("[MLX-ML] Filtered 1-s transition guard: std <= 1.00 C.");
-    Serial.println("[MLX-ML] FOV guard: rapid 1-2 s shifts -> TARGET GEOMETRY DEGRADED.");
-    Serial.println("[MLX-ML] Controlled UAT can bypass ONLY that rapid-transition guard (physical or injected MLX).");
+    Serial.println("[MLX-ML] FOV guard: rapid 1-2 s non-elevated shifts -> TARGET GEOMETRY DEGRADED.");
+    Serial.println("[MLX-ML] Elevated warming candidate: >=37.5 C + model anomaly -> VERIFY 10 s.");
+    Serial.println("[MLX-ML] Positive anomaly below 37.5 C is suppressed from Fusion.");
+    Serial.println("[MLX-ML] Controlled UAT can bypass ONLY the rapid-transition/FOV guard.");
     Serial.println("[MLX-ML] Geometry hold preserves baseline; 3 stable near-baseline sec reacquire.");
-    Serial.println("[MLX-ML] Anomaly vote requires 3 consecutive trusted anomalous blocks.");
+    Serial.println("[MLX-ML] Existing model anomaly persistence and Fusion timing remain unchanged.");
     Serial.println("[MLX-ML] IF + tuned OCSVM active and available to Fusion.");
 }
 
@@ -80,9 +84,15 @@ void MLXML::resetSessionBaseline(MLXMLStatus status)
     reading.reacquiring = false;
     reading.geometryReacquireStableBlocks = 0;
     reading.anomalyCandidateBlocks = 0;
+    reading.elevatedTemperatureQualified = false;
+    reading.elevatedTemperatureVerifying = false;
+    reading.elevatedVerificationBlocks = 0;
+    reading.elevatedVerificationRequiredBlocks = ELEVATED_VERIFY_BLOCKS;
+    reading.elevatedTemperatureFloorC = ELEVATED_TEMPERATURE_FLOOR_C;
     geometryHold = false;
     geometryReacquireCount = 0;
     consecutiveAnomalyBlocks = 0;
+    elevatedVerificationCount = 0;
     previousStableObjectC = NAN;
     twoBlocksAgoStableObjectC = NAN;
     clearDecision();
@@ -153,6 +163,9 @@ void MLXML::processOneSecondBlock()
     reading.oneSecondAmbientMeanC = ambientMean;
     reading.oneSecondObjectStdC = objectStd;
     reading.targetDeltaC = thermalDelta;
+    reading.elevatedTemperatureQualified =
+        isfinite(objectMean)
+        && objectMean >= ELEVATED_TEMPERATURE_FLOOR_C;
 
     reading.stabilityQualified =
         isfinite(objectStd)
@@ -207,6 +220,9 @@ void MLXML::processOneSecondBlock()
         clearDecision();
         consecutiveAnomalyBlocks = 0;
         reading.anomalyCandidateBlocks = 0;
+        elevatedVerificationCount = 0;
+        reading.elevatedTemperatureVerifying = false;
+        reading.elevatedVerificationBlocks = 0;
         reading.status =
             MLXMLStatus::UNSTABLE_TARGET;
         return;
@@ -268,14 +284,29 @@ void MLXML::processOneSecondBlock()
                 )
             );
 
-        if (!geometryHold && rapidGeometryShift)
+        const bool elevatedUpwardCandidate =
+            rapidGeometryShift
+            &&
+            deviationFromBaseline > 0.0f
+            &&
+            objectMean >= ELEVATED_TEMPERATURE_FLOOR_C;
+
+        if (!geometryHold && rapidGeometryShift && !elevatedUpwardCandidate)
         {
             geometryHold = true;
             geometryReacquireCount = 0;
             consecutiveAnomalyBlocks = 0;
+            elevatedVerificationCount = 0;
             reading.anomalyCandidateBlocks = 0;
+            reading.elevatedTemperatureVerifying = false;
+            reading.elevatedVerificationBlocks = 0;
             reading.geometryEvents++;
         }
+
+        // A genuinely elevated upward transition is no longer trapped in
+        // TARGET GEOMETRY DEGRADED. It is allowed to reach the model, where
+        // R5.9 requires a continuous 10-second elevated/anomalous verification
+        // before any positive anomaly becomes valid Fusion evidence.
 
         if (geometryHold)
         {
@@ -347,7 +378,10 @@ void MLXML::processOneSecondBlock()
                 previousStableObjectC = reading.baselineObjectC;
                 twoBlocksAgoStableObjectC = reading.baselineObjectC;
                 consecutiveAnomalyBlocks = 0;
+                elevatedVerificationCount = 0;
                 reading.anomalyCandidateBlocks = 0;
+                reading.elevatedTemperatureVerifying = false;
+                reading.elevatedVerificationBlocks = 0;
             }
 
             reading.status = reading.baselineReady
@@ -389,9 +423,92 @@ void MLXML::processOneSecondBlock()
     twoBlocksAgoStableObjectC = previousStableObjectC;
     previousStableObjectC = objectMean;
 
+    // --------------------------------------------------------
+    // R5.9 POSITIVE / ELEVATED TEMPERATURE VERIFICATION
+    // --------------------------------------------------------
+    // The trained IF/OCSVM is baseline-relative and can flag a small
+    // upward change (for example ~30 -> ~32 C) even though the absolute
+    // filtered surface temperature is not high. Do not allow that kind
+    // of positive model anomaly to become Fusion evidence.
+    //
+    // For warming anomalies:
+    //   - below 37.5 C: suppress the anomaly from Fusion;
+    //   - at/above 37.5 C: require about 10 continuous stable anomalous
+    //     one-second blocks before the existing model/Fusion path is
+    //     allowed to see valid anomaly evidence.
+    //
+    // Negative/cooling anomalies retain the previous R5.8 behavior.
+    // --------------------------------------------------------
+    const bool positiveModelAnomaly =
+        result.eitherAnomaly
+        && delta > 0.0f;
+
+    if (positiveModelAnomaly)
+    {
+        if (objectMean < ELEVATED_TEMPERATURE_FLOOR_C)
+        {
+            consecutiveAnomalyBlocks = 0;
+            elevatedVerificationCount = 0;
+            reading.anomalyCandidateBlocks = 0;
+            reading.elevatedTemperatureVerifying = false;
+            reading.elevatedVerificationBlocks = 0;
+
+            // Keep scores/deviation available diagnostically, but publish
+            // deployed anomaly flags as NORMAL so Fusion cannot escalate.
+            reading.isolationForestAnomaly = false;
+            reading.oneClassSVMAnomaly = false;
+            reading.bothModelsAnomaly = false;
+            reading.eitherModelAnomaly = false;
+            reading.valid = true;
+            reading.status = MLXMLStatus::READY_NORMAL;
+            return;
+        }
+
+        if (elevatedVerificationCount < 255U)
+            elevatedVerificationCount++;
+
+        // The existing 3-block model persistence remains intact; the 10-s
+        // verification is stricter and includes those same anomalous blocks.
+        if (consecutiveAnomalyBlocks < 255U)
+            consecutiveAnomalyBlocks++;
+
+        reading.elevatedTemperatureVerifying =
+            elevatedVerificationCount < ELEVATED_VERIFY_BLOCKS;
+
+        reading.elevatedVerificationBlocks =
+            elevatedVerificationCount;
+
+        reading.anomalyCandidateBlocks =
+            consecutiveAnomalyBlocks;
+
+        if (elevatedVerificationCount < ELEVATED_VERIFY_BLOCKS)
+        {
+            reading.valid = false;
+            reading.status =
+                MLXMLStatus::VERIFYING_ELEVATED_TEMPERATURE;
+            return;
+        }
+
+        reading.elevatedTemperatureVerifying = false;
+        reading.elevatedVerificationBlocks =
+            ELEVATED_VERIFY_BLOCKS;
+
+        // Verification passed. Fall through to the existing anomaly
+        // publication path. consecutiveAnomalyBlocks is already >= 3,
+        // so no additional model-delay is introduced beyond the requested
+        // 10-second MLX verification. Fusion's own 10-second WARNING
+        // persistence remains unchanged.
+    }
+    else
+    {
+        elevatedVerificationCount = 0;
+        reading.elevatedTemperatureVerifying = false;
+        reading.elevatedVerificationBlocks = 0;
+    }
+
     if (result.eitherAnomaly)
     {
-        if (consecutiveAnomalyBlocks < 255U)
+        if (!positiveModelAnomaly && consecutiveAnomalyBlocks < 255U)
             consecutiveAnomalyBlocks++;
 
         reading.anomalyCandidateBlocks =
@@ -416,7 +533,10 @@ void MLXML::processOneSecondBlock()
     // Any trusted NORMAL block immediately clears a transient
     // anomaly candidate.
     consecutiveAnomalyBlocks = 0;
+    elevatedVerificationCount = 0;
     reading.anomalyCandidateBlocks = 0;
+    reading.elevatedTemperatureVerifying = false;
+    reading.elevatedVerificationBlocks = 0;
     reading.valid = true;
     reading.status = MLXMLStatus::READY_NORMAL;
 }
@@ -521,6 +641,8 @@ const char* MLXML::getStatusText() const
             return "TARGET GEOMETRY DEGRADED - ML HELD";
         case MLXMLStatus::REACQUIRING_TARGET:
             return "REACQUIRING TARGET - ML HELD";
+        case MLXMLStatus::VERIFYING_ELEVATED_TEMPERATURE:
+            return "VERIFYING ELEVATED TEMPERATURE - 10 s";
         case MLXMLStatus::ANOMALY_CANDIDATE:
             return "ANOMALY CANDIDATE - PERSISTENCE CHECK";
         case MLXMLStatus::INFERENCE_ERROR:

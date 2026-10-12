@@ -486,7 +486,7 @@ struct FusionReading
     // Fixed threshold used for WARNING-eligible condition -> EMERGENCY escalation.
     uint32_t emergencyThresholdMs = 0;
 
-    // Legacy field retained for app compatibility. In R5.7 this means a
+    // Legacy field retained for app compatibility. In R5.8 this means a
     // WARNING-eligible critical condition is active; it no longer requires
     // two sensors when the strong source is MLX or C1001.
     bool strongMultisensorCandidate = false;
@@ -497,7 +497,16 @@ struct FusionReading
     // Baseline-relative FSR posture tracking. These are context/evidence only:
     // FSR never creates WARNING/EMERGENCY by itself.
     bool fsrPostureReferenceReady = false;
+
+    // R5.8 reference acquisition is two-stage:
+    // 1) entry grace, so a sideways vehicle-entry posture is never learned;
+    // 2) continuously centered stable posture before the reference locks.
+    uint32_t fsrPostureEntryMs = 0;
     uint32_t fsrPostureSettlingMs = 0;
+    bool fsrPostureCenteredNow = false;
+    float fsrPostureCurrentBalance = 0.0f;
+    float fsrPostureReferenceBalance = 0.0f;
+
     bool fsrPosturePatternActive = false;
     bool fsrPostureStrongVote = false;
     int8_t fsrPostureCode = 0; // -1 LEFT, +1 RIGHT, +2 FORWARD
@@ -584,8 +593,11 @@ public:
 
 
 private:
+    // A trusted strong MLX or C1001 anomaly must remain continuously
+    // present for 10 seconds before WARNING. This is a system persistence
+    // / false-positive rejection interval, not a medical threshold.
     static constexpr unsigned long
-        WARNING_PERSIST_MS = 4000UL;
+        WARNING_PERSIST_MS = 10000UL;
 
     static constexpr unsigned long
         EMERGENCY_PERSIST_MS = 30000UL;
@@ -594,11 +606,20 @@ private:
         CLEAR_STABLE_MS = 3000UL;
 
     // Passenger posture reference and persistence timing.
+    // Entry grace absorbs normal door-side entry, seat-belt adjustment,
+    // bag movement, and the first repositioning after sitting down.
     static constexpr unsigned long
-        FSR_POSTURE_SETTLE_MS = 12000UL;
+        FSR_ENTRY_GRACE_MS = 10000UL;
 
+    // After the entry grace, the passenger must remain in a reasonably
+    // centered backrest posture continuously before the reference locks.
     static constexpr unsigned long
-        FSR_POSTURE_PERSIST_MS = 8000UL;
+        FSR_REFERENCE_CENTERED_MS = 6000UL;
+
+    // A real left/right/forward posture change must then remain sustained
+    // for 12 seconds before it becomes a strong FSR posture vote.
+    static constexpr unsigned long
+        FSR_POSTURE_PERSIST_MS = 12000UL;
 
     static constexpr unsigned long
         FORWARD_LIMITED_NOTICE_MS = 30000UL;
@@ -615,8 +636,28 @@ private:
     static constexpr float
         FSR_REFERENCE_MIN_RATIO = 0.45f;
 
+    // The reference itself may only be learned while backrest loading is
+    // reasonably centered. This specifically prevents a sideways entry
+    // posture from becoming the passenger's normal reference.
+    static constexpr float
+        FSR_REFERENCE_CENTER_BAND = 0.20f;
+
+    // A side posture must be both a meaningful shift from the passenger's
+    // centered reference and physically biased to that same side.
     static constexpr float
         FSR_SIDE_SHIFT_THRESHOLD = 0.22f;
+
+    static constexpr float
+        FSR_SIDE_ABSOLUTE_THRESHOLD = 0.22f;
+
+    // Only very centered, normal samples are allowed to slowly maintain the
+    // learned reference. This keeps long-term comfort drift from looking like
+    // a posture anomaly without ever adapting toward an active slump.
+    static constexpr float
+        FSR_REFERENCE_ADAPT_CENTER_BAND = 0.14f;
+
+    static constexpr float
+        FSR_REFERENCE_ADAPT_ALPHA = 0.005f;
 
     static constexpr float
         FSR_FORWARD_BACKREST_FRACTION = 0.45f;
@@ -670,6 +711,7 @@ private:
 
     // FSR passenger posture reference + persistence state.
     bool fsrPostureReferenceReady = false;
+    unsigned long fsrPostureOccupancyStartMillis = 0UL;
     unsigned long fsrPostureReferenceStartMillis = 0UL;
     unsigned long fsrPostureCandidateStartMillis = 0UL;
     unsigned long fsrForwardStartMillis = 0UL;

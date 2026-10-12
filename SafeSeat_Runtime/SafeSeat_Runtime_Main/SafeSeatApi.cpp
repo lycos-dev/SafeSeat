@@ -27,6 +27,7 @@ const char* mlxMlStatusText(MLXMLStatus status)
         case MLXMLStatus::READY_STRONG_ANOMALY: return "READY - STRONG ANOMALY";
         case MLXMLStatus::TARGET_GEOMETRY_DEGRADED: return "TARGET GEOMETRY DEGRADED";
         case MLXMLStatus::REACQUIRING_TARGET: return "STABILIZING TARGET";
+        case MLXMLStatus::VERIFYING_ELEVATED_TEMPERATURE: return "VERIFYING ELEVATED TEMPERATURE";
         case MLXMLStatus::ANOMALY_CANDIDATE: return "ANOMALY CANDIDATE";
         case MLXMLStatus::INFERENCE_ERROR: return "INFERENCE ERROR";
         default: return "UNKNOWN";
@@ -163,7 +164,7 @@ void SafeSeatApi::handleHealth()
 
 void SafeSeatApi::handleUat()
 {
-    // R5.7: opening the validation console automatically prepares the
+    // R5.8: opening the validation console automatically prepares the
     // validation session in LIVE READINGS mode. This does not replace any
     // physical sensor and does not rebuild completed baselines/model windows.
     SafeSeatUatInjection &uat = SafeSeatUatInjection::instance();
@@ -487,6 +488,7 @@ String SafeSeatApi::buildFusionJson() const
     appendJsonBool(out, f.triggerAlert);
     out += F(",\"warning_candidate_ms\":");
     out += String(f.warningCandidateMs);
+    out += F(",\"warning_persistence_required_ms\":10000");
     out += F(",\"strong_multisensor_candidate\":");
     appendJsonBool(out, f.strongMultisensorCandidate);
     out += F(",\"critical_strong_candidate\":");
@@ -605,6 +607,7 @@ String SafeSeatApi::buildStatusJson() const
     appendJsonBool(out, f.triggerAlert);
     out += F(",\"warning_candidate_ms\":");
     out += String(f.warningCandidateMs);
+    out += F(",\"warning_persistence_required_ms\":10000");
     out += F(",\"strong_multisensor_candidate\":");
     appendJsonBool(out, f.strongMultisensorCandidate);
     out += F(",\"critical_strong_candidate\":");
@@ -837,6 +840,11 @@ String SafeSeatApi::buildSensorsJson() const
     out += F(",\"baseline_blocks_required\":"); out += String(s.mlxMl.baselineBlocksRequired);
     out += F(",\"evaluated_blocks\":"); out += String(s.mlxMl.evaluatedBlocks);
     out += F(",\"anomaly_candidate_blocks\":"); out += String(s.mlxMl.anomalyCandidateBlocks);
+    out += F(",\"elevated_temperature_qualified\":"); appendJsonBool(out, s.mlxMl.elevatedTemperatureQualified);
+    out += F(",\"elevated_temperature_verifying\":"); appendJsonBool(out, s.mlxMl.elevatedTemperatureVerifying);
+    out += F(",\"elevated_verification_blocks\":"); out += String(s.mlxMl.elevatedVerificationBlocks);
+    out += F(",\"elevated_verification_required_blocks\":"); out += String(s.mlxMl.elevatedVerificationRequiredBlocks);
+    out += F(",\"elevated_temperature_floor_c\":"); appendJsonFloat(out, s.mlxMl.elevatedTemperatureFloorC, 1);
     out += F(",\"geometry_degraded\":"); appendJsonBool(out, s.mlxMl.geometryDegraded);
     out += F(",\"reacquiring\":"); appendJsonBool(out, s.mlxMl.reacquiring);
     out += F("}");
@@ -895,8 +903,19 @@ String SafeSeatApi::buildSensorsJson() const
     out += F("}");
     out += F(",\"validation_posture\":{\"reference_ready\":");
     appendJsonBool(out, fusion.fsrPostureReferenceReady);
+    out += F(",\"entry_ms\":");
+    out += String(fusion.fsrPostureEntryMs);
     out += F(",\"settling_ms\":");
     out += String(fusion.fsrPostureSettlingMs);
+    out += F(",\"centered_now\":");
+    appendJsonBool(out, fusion.fsrPostureCenteredNow);
+    out += F(",\"current_balance\":");
+    appendJsonFloat(out, fusion.fsrPostureCurrentBalance, 4);
+    out += F(",\"reference_balance\":");
+    appendJsonFloat(out, fusion.fsrPostureReferenceBalance, 4);
+    out += F(",\"entry_grace_required_ms\":10000");
+    out += F(",\"centered_required_ms\":6000");
+    out += F(",\"candidate_required_ms\":12000");
     out += F(",\"pattern_active\":");
     appendJsonBool(out, fusion.fsrPosturePatternActive);
     out += F(",\"strong_vote\":");

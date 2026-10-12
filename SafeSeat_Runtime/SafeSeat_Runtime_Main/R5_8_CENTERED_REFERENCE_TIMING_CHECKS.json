@@ -1,0 +1,58 @@
+{
+  "revision": "R5.8",
+  "base": "R5.7 Adaptive Validation Final",
+  "fsr_reference_policy": {
+    "entry_grace_ms": 10000,
+    "center_band_abs_lr_balance": 0.2,
+    "centered_reference_ms": 6000,
+    "side_shift_threshold": 0.22,
+    "side_absolute_threshold": 0.22,
+    "reference_adapt_center_band": 0.14,
+    "reference_adapt_alpha_per_fresh_sample": 0.005,
+    "posture_persistence_ms": 12000,
+    "fsr_alone_policy": "WATCH only"
+  },
+  "critical_sensor_policy": {
+    "mlx_warning_persistence_ms": 10000,
+    "c1001_warning_persistence_ms": 10000,
+    "emergency_after_warning_ms": 30000,
+    "note": "Persistence thresholds are system false-positive rejection intervals, not medical diagnostic thresholds."
+  },
+  "forward_monitoring_limited": {
+    "notice_ms": 30000,
+    "persistent_ms": 60000,
+    "severity_authority": "none"
+  },
+  "vehicle_csv_replay": {
+    "source": "SafeSeat_VALIDATION-01_2026-10-12T02-36-05-198Z.csv (test input only; not packaged)",
+    "observed_side_entry_balance_approx": -0.37,
+    "side_entry_accepted_as_reference": false,
+    "reference_lock_time_s_approx_from_export": 39.437,
+    "reference_balance_approx": -0.00599,
+    "false_left_classifications_after_reference_in_export": 0
+  },
+  "compatibility": {
+    "validation_auto_ready": true,
+    "live_readings_button_preserved": true,
+    "mlx_validation_transition_profile_preserved": true,
+    "camera_role": "corroboration_only",
+    "mpu_role": "context_only",
+    "legacy_uat_alias_preserved": true
+  },
+  "host_checks": {
+    "fusion_cpp_syntax": "PASS",
+    "safeseat_api_cpp_syntax": "PASS",
+    "validation_page_cpp_header_syntax": "PASS",
+    "validation_javascript_syntax": "PASS",
+    "fusion_behavior_harness": "PASS",
+    "behavior_cases": [
+      "side-entry posture is not learned as reference",
+      "centered posture locks reference after grace + centered hold",
+      "centered/mild bias is not misclassified as LEFT/RIGHT",
+      "FSR posture needs 12 s before strong vote and remains WATCH alone",
+      "MLX standalone needs 10 s before WARNING",
+      "C1001 standalone needs 10 s before WARNING",
+      "Emergency occurs after additional 30 s sustained WARNING condition"
+    ]
+  }
+}

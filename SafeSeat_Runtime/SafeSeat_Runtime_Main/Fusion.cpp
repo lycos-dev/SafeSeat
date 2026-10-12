@@ -185,6 +185,7 @@ void FusionEngine::begin()
     mpuStrongPersistenceSamples = 0U;
 
     fsrPostureReferenceReady = false;
+    fsrPostureOccupancyStartMillis = 0UL;
     fsrPostureReferenceStartMillis = 0UL;
     fsrPostureCandidateStartMillis = 0UL;
     fsrForwardStartMillis = 0UL;
@@ -281,7 +282,11 @@ void FusionEngine::update(
 
     reading.criticalStrongCandidate = false;
     reading.fsrPostureReferenceReady = fsrPostureReferenceReady;
+    reading.fsrPostureEntryMs = 0U;
     reading.fsrPostureSettlingMs = 0U;
+    reading.fsrPostureCenteredNow = false;
+    reading.fsrPostureCurrentBalance = 0.0f;
+    reading.fsrPostureReferenceBalance = 0.0f;
     reading.fsrPosturePatternActive = false;
     reading.fsrPostureStrongVote = false;
     reading.fsrPostureCode = 0;
@@ -473,25 +478,33 @@ void FusionEngine::update(
 
 
     // --------------------------------------------------------
-    // FSR posture reference + sustained posture context - R5.7
+    // FSR centered-reference + sustained posture context - R5.8
     //
-    // Learn a passenger-specific seated reference only after the passenger
-    // has both cushion and backrest contact for a stable settling period.
-    // This avoids judging the first few seconds while someone is entering,
-    // reaching, adjusting a bag, or sitting forward.
+    // Real passengers commonly enter a vehicle sideways and only become
+    // upright after they have settled, reached for the door, adjusted a bag,
+    // or fastened a seat belt. R5.7 could accidentally learn that temporary
+    // side-entry posture as "normal", causing the later upright posture to be
+    // mislabeled as the opposite side.
     //
-    // Sustained left/right shifts and sustained forward loss of backrest
-    // contact can become ONE strong FSR vote after 8 s. FSR remains
-    // WATCH-only by itself; it never creates WARNING/EMERGENCY alone.
+    // R5.8 therefore uses a two-stage reference acquisition:
+    //   1) 10 s entry grace after occupied FSR evidence becomes usable;
+    //   2) 6 s of continuously centered, stable backrest + cushion contact.
     //
-    // Forward posture also exposes a separate Monitoring Limited state after
-    // 30 s because MLX/C1001 may become less reliable when the passenger is
-    // far away from their intended sensing geometry.
+    // Once the reference is ready, left/right classification must satisfy
+    // BOTH a reference-relative shift and an absolute physical side bias.
+    // This prevents an upright/centered posture from being called LEFT merely
+    // because an earlier reference happened to be right-heavy.
+    //
+    // Sustained left/right/forward posture must persist for 12 s before it
+    // becomes one strong FSR vote. FSR remains WATCH-only by itself.
+    // Forward posture retains the separate 30 s / 60 s Monitoring Limited
+    // driver-information behavior.
     // --------------------------------------------------------
     if (!fsrUsable
         || reading.occupancy != FusionOccupancyState::OCCUPIED)
     {
         fsrPostureReferenceReady = false;
+        fsrPostureOccupancyStartMillis = 0UL;
         fsrPostureReferenceStartMillis = 0UL;
         fsrPostureCandidateStartMillis = 0UL;
         fsrForwardStartMillis = 0UL;
@@ -509,6 +522,16 @@ void FusionEngine::update(
     }
     else
     {
+        if (fsrPostureOccupancyStartMillis == 0UL)
+        {
+            fsrPostureOccupancyStartMillis = now;
+        }
+
+        reading.fsrPostureEntryMs =
+            static_cast<uint32_t>(
+                now - fsrPostureOccupancyStartMillis
+            );
+
         const bool freshFsrPostureSample =
             input.fsr.reading.sampleCount != lastFsrPostureSampleCount;
 
@@ -529,15 +552,27 @@ void FusionEngine::update(
         const float currentRatio =
             input.fsr.reading.backrestToCushionRatio;
 
+        reading.fsrPostureCurrentBalance = currentBalance;
+
+        const bool referencePostureUsable =
+            currentBackrest >= FSR_REFERENCE_MIN_BACKREST
+            && currentCushion >= FSR_REFERENCE_MIN_CUSHION
+            && isfinite(currentRatio)
+            && currentRatio >= FSR_REFERENCE_MIN_RATIO;
+
+        const bool centeredForReference =
+            referencePostureUsable
+            && isfinite(currentBalance)
+            && fabsf(currentBalance) <= FSR_REFERENCE_CENTER_BAND;
+
+        reading.fsrPostureCenteredNow = centeredForReference;
+
         if (!fsrPostureReferenceReady)
         {
-            const bool referencePostureUsable =
-                currentBackrest >= FSR_REFERENCE_MIN_BACKREST
-                && currentCushion >= FSR_REFERENCE_MIN_CUSHION
-                && isfinite(currentRatio)
-                && currentRatio >= FSR_REFERENCE_MIN_RATIO;
+            const bool entryGraceComplete =
+                reading.fsrPostureEntryMs >= FSR_ENTRY_GRACE_MS;
 
-            if (referencePostureUsable)
+            if (entryGraceComplete && centeredForReference)
             {
                 if (fsrPostureReferenceStartMillis == 0UL)
                 {
@@ -564,8 +599,9 @@ void FusionEngine::update(
                 }
 
                 if (
-                    reading.fsrPostureSettlingMs >= FSR_POSTURE_SETTLE_MS
-                    && fsrPostureReferenceSamples >= 8U
+                    reading.fsrPostureSettlingMs
+                        >= FSR_REFERENCE_CENTERED_MS
+                    && fsrPostureReferenceSamples >= 6U
                 )
                 {
                     const float denom =
@@ -590,7 +626,8 @@ void FusionEngine::update(
             }
             else
             {
-                // Do not learn a forward/unstable entry posture as normal.
+                // Do not learn a side-entry, forward, or unstable posture as
+                // normal. Centered acquisition must be continuous.
                 fsrPostureReferenceStartMillis = 0UL;
                 fsrPostureReferenceSamples = 0U;
                 fsrReferenceBackrestAccum = 0.0f;
@@ -600,9 +637,9 @@ void FusionEngine::update(
                 reading.fsrPostureSettlingMs = 0U;
             }
 
-            // If the passenger never establishes backrest contact, avoid
-            // calling it an emergency. After 30 s simply expose that sensor
-            // monitoring is limited by the sustained forward posture.
+            // If the passenger never establishes usable backrest contact,
+            // avoid calling it an emergency. After 30 s expose only the
+            // separate Monitoring Limited condition.
             const bool forwardBeforeReference =
                 currentCushion >= FSR_REFERENCE_MIN_CUSHION
                 &&
@@ -629,6 +666,9 @@ void FusionEngine::update(
         }
         else
         {
+            reading.fsrPostureReferenceBalance =
+                fsrReferenceBackrestBalance;
+
             const float sideShift =
                 currentBalance - fsrReferenceBackrestBalance;
 
@@ -658,6 +698,8 @@ void FusionEngine::update(
                 &&
                 sideShift >= FSR_SIDE_SHIFT_THRESHOLD
                 &&
+                currentBalance >= FSR_SIDE_ABSOLUTE_THRESHOLD
+                &&
                 currentBackrest
                     >=
                     fsrReferenceBackrestTotal * 0.35f;
@@ -666,6 +708,8 @@ void FusionEngine::update(
                 !forwardPattern
                 &&
                 sideShift <= -FSR_SIDE_SHIFT_THRESHOLD
+                &&
+                currentBalance <= -FSR_SIDE_ABSOLUTE_THRESHOLD
                 &&
                 currentBackrest
                     >=
@@ -684,6 +728,40 @@ void FusionEngine::update(
             {
                 fsrPostureCandidateStartMillis = 0UL;
                 fsrPostureCandidateCode = 0;
+
+                // Slowly maintain the normal reference only while the current
+                // posture is clearly centered. Never adapt toward a side or
+                // forward posture, and never adapt during a posture candidate.
+                const bool referenceAdaptEligible =
+                    freshFsrPostureSample
+                    && referencePostureUsable
+                    && isfinite(currentBalance)
+                    && fabsf(currentBalance)
+                        <= FSR_REFERENCE_ADAPT_CENTER_BAND
+                    && currentBackrest
+                        >= fsrReferenceBackrestTotal * 0.55f;
+
+                if (referenceAdaptEligible)
+                {
+                    const float a = FSR_REFERENCE_ADAPT_ALPHA;
+                    const float keep = 1.0f - a;
+
+                    fsrReferenceBackrestTotal =
+                        keep * fsrReferenceBackrestTotal
+                        + a * currentBackrest;
+
+                    fsrReferenceCushionTotal =
+                        keep * fsrReferenceCushionTotal
+                        + a * currentCushion;
+
+                    fsrReferenceBackrestBalance =
+                        keep * fsrReferenceBackrestBalance
+                        + a * currentBalance;
+
+                    fsrReferenceBackrestRatio =
+                        keep * fsrReferenceBackrestRatio
+                        + a * currentRatio;
+                }
             }
             else
             {
@@ -743,6 +821,12 @@ void FusionEngine::update(
 
     reading.fsrPostureReferenceReady =
         fsrPostureReferenceReady;
+
+    if (fsrPostureReferenceReady)
+    {
+        reading.fsrPostureReferenceBalance =
+            fsrReferenceBackrestBalance;
+    }
 
 
     // --------------------------------------------------------
@@ -1089,7 +1173,7 @@ void FusionEngine::update(
             >
             0.28f;
 
-        // R5.7 posture evidence can supply ONE strong FSR vote after a
+        // R5.8 posture evidence can supply ONE strong FSR vote after a
         // sustained baseline-relative left/right/forward posture change.
         // The legacy validation pattern vote remains accepted for backwards
         // compatibility with existing presets. FSR remains WATCH-only by
@@ -1403,7 +1487,7 @@ void FusionEngine::update(
     reading.evidence.motionArtifactPossible =
         motionArtifactPossible;
 
-    // R5.7 keeps the agreement diagnostic, but WARNING no longer requires
+    // R5.8 keeps the agreement diagnostic, but WARNING no longer requires
     // agreement in every case. A trusted STRONG MLX or C1001 anomaly is a
     // critical sensor condition and may escalate by itself after persistence.
     // FSR remains posture/pressure evidence and cannot create WARNING alone.
@@ -1414,7 +1498,7 @@ void FusionEngine::update(
 
 
     // --------------------------------------------------------
-    // Persistence / hysteresis - R5.7
+    // Persistence / hysteresis - R5.8
     // --------------------------------------------------------
 
     // C1001 is suppressed from standalone critical escalation while its own

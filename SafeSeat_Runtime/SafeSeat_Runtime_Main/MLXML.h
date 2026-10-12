@@ -47,6 +47,7 @@ enum class MLXMLStatus
     READY_STRONG_ANOMALY,
     TARGET_GEOMETRY_DEGRADED,
     REACQUIRING_TARGET,
+    VERIFYING_ELEVATED_TEMPERATURE,
     ANOMALY_CANDIDATE,
     INFERENCE_ERROR
 };
@@ -73,6 +74,15 @@ struct MLXMLReading
     bool geometryDegraded = false;
     bool reacquiring = false;
 
+    // R5.9 MLX-only safety gate:
+    // Positive baseline-relative model anomalies are not allowed to
+    // contribute to Fusion unless the filtered object temperature is
+    // genuinely elevated and remains anomalous for about 10 seconds.
+    // This is a deployment surface-temperature gate, not a fever/core
+    // temperature threshold.
+    bool elevatedTemperatureQualified = false;
+    bool elevatedTemperatureVerifying = false;
+
     float targetDeltaC = NAN;
     float oneSecondObjectMeanC = NAN;
     float oneSecondAmbientMeanC = NAN;
@@ -96,6 +106,10 @@ struct MLXMLReading
 
     uint8_t anomalyCandidateBlocks = 0;
     uint8_t anomalyPersistenceRequiredBlocks = 3;
+
+    uint8_t elevatedVerificationBlocks = 0;
+    uint8_t elevatedVerificationRequiredBlocks = 10;
+    float elevatedTemperatureFloorC = 37.5f;
 
     uint8_t lowContrastBlocks = 0;
     uint8_t targetLossGraceBlocks = 3;
@@ -156,6 +170,16 @@ private:
     static constexpr float GEOMETRY_REACQUIRE_BAND_C = 1.00f;
     static constexpr uint8_t GEOMETRY_REACQUIRE_BLOCKS = 3;
 
+    // R5.9 MLX-only elevated-temperature verification policy.
+    // Positive (warming) model anomalies below this filtered
+    // surface-temperature floor are treated as non-critical and are
+    // not exposed to Fusion. At/above the floor, the anomaly must
+    // remain continuous for about 10 one-second blocks before model
+    // evidence becomes valid. These are engineering false-positive
+    // controls, not medical diagnostic thresholds.
+    static constexpr float ELEVATED_TEMPERATURE_FLOOR_C = 37.5f;
+    static constexpr uint8_t ELEVATED_VERIFY_BLOCKS = 10;
+
     // MLX is supporting evidence. A single anomalous 1-s block
     // must never become a Fusion vote.
     static constexpr uint8_t ANOMALY_PERSISTENCE_BLOCKS = 3;
@@ -177,6 +201,7 @@ private:
     bool uatRapidTransitionBypass = false;
     uint8_t geometryReacquireCount = 0;
     uint8_t consecutiveAnomalyBlocks = 0;
+    uint8_t elevatedVerificationCount = 0;
 
     float previousStableObjectC = NAN;
     float twoBlocksAgoStableObjectC = NAN;
